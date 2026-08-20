@@ -30,6 +30,25 @@
                         <div class="fieldDescription">Hide releases below this community rating. Set to 0 to show everything.</div>
                     </div>
                     <div class="verticalSection">
+                        <h2>Languages</h2>
+                        <div class="fieldDescription" style="margin-bottom:1em;">
+                            Releases are sorted by audio language: the primary language first, then your accepted
+                            secondary languages. Use ISO codes (<code>de</code>, <code>en</code>, <code>es</code>) or names (<code>German</code>).
+                        </div>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="text" id="primaryLanguage" label="Primary language" />
+                            <div class="fieldDescription">Most preferred audio language, e.g. <code>de</code>.</div>
+                        </div>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="text" id="secondaryLanguages" label="Secondary languages (comma-separated)" />
+                            <div class="fieldDescription">Accepted fallbacks in order of preference, e.g. <code>en, es</code>.</div>
+                        </div>
+                        <label class="checkboxContainer">
+                            <input is="emby-checkbox" type="checkbox" id="filterByLanguage" />
+                            <span>Only show releases in these languages (releases without language info are kept).</span>
+                        </label>
+                    </div>
+                    <div class="verticalSection">
                         <h2>Download (SABnzbd)</h2>
                         <div class="fieldDescription" style="margin-bottom:1em;">
                             When SABnzbd is configured, "Grab" sends releases straight into the SABnzbd download queue.
@@ -74,6 +93,10 @@
                 config.ApiKey = document.querySelector('#apiKey').value;
                 config.ResultLimit = parseInt(document.querySelector('#resultLimit').value, 10) || 60;
                 config.MinRating = parseFloat(document.querySelector('#minRating').value) || 0;
+                config.PrimaryLanguage = document.querySelector('#primaryLanguage').value.trim();
+                config.SecondaryLanguages = document.querySelector('#secondaryLanguages').value
+                    .split(',').map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 0; });
+                config.FilterByLanguage = document.querySelector('#filterByLanguage').checked;
                 config.NzbDropFolder = document.querySelector('#nzbDropFolder').value;
                 config.SabnzbdUrl = document.querySelector('#sabnzbdUrl').value;
                 config.SabnzbdApiKey = document.querySelector('#sabnzbdApiKey').value;
@@ -89,6 +112,9 @@
                         document.querySelector('#apiKey').value = config.ApiKey || '';
                         document.querySelector('#resultLimit').value = config.ResultLimit || 60;
                         document.querySelector('#minRating').value = config.MinRating || 0;
+                        document.querySelector('#primaryLanguage').value = config.PrimaryLanguage || '';
+                        document.querySelector('#secondaryLanguages').value = (config.SecondaryLanguages || []).join(', ');
+                        document.querySelector('#filterByLanguage').checked = !!config.FilterByLanguage;
                         document.querySelector('#nzbDropFolder').value = config.NzbDropFolder || '';
                         document.querySelector('#sabnzbdUrl').value = config.SabnzbdUrl || '';
                         document.querySelector('#sabnzbdApiKey').value = config.SabnzbdApiKey || '';

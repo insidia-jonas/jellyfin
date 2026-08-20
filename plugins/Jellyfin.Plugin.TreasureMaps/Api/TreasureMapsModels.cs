@@ -52,6 +52,14 @@ public class Release
     [JsonPropertyName("grabs")]
     public int Grabs { get; set; }
 
+    /// <summary>Gets or sets the audio languages present in the release.</summary>
+    [JsonPropertyName("audio_languages")]
+    public IReadOnlyList<string>? AudioLanguages { get; set; }
+
+    /// <summary>Gets or sets the subtitle languages available in the release.</summary>
+    [JsonPropertyName("subtitles")]
+    public IReadOnlyList<string>? Subtitles { get; set; }
+
     /// <summary>Gets or sets the external identifiers.</summary>
     [JsonPropertyName("ids")]
     public ReleaseIds? Ids { get; set; }

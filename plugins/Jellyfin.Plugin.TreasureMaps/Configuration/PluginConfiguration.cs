@@ -29,6 +29,24 @@ public class PluginConfiguration : BasePluginConfiguration
     public double MinRating { get; set; }
 
     /// <summary>
+    /// Gets or sets the preferred (primary) language. Releases in this language are shown first.
+    /// Accepts an ISO code (<c>de</c>, <c>en</c>, <c>es</c>) or a language name (<c>German</c>).
+    /// </summary>
+    public string PrimaryLanguage { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the accepted secondary languages, in order of preference. Same format as
+    /// <see cref="PrimaryLanguage"/>.
+    /// </summary>
+    public string[] SecondaryLanguages { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets a value indicating whether releases that do not match the primary or any
+    /// secondary language are hidden. Releases without language information are always kept.
+    /// </summary>
+    public bool FilterByLanguage { get; set; }
+
+    /// <summary>
     /// Gets or sets an optional local folder into which grabbed NZB files are written.
     /// Used as a fallback when SABnzbd is not configured. Point a Usenet download client
     /// (SABnzbd / NZBGet "watched folder") at this path to actually download the movie.

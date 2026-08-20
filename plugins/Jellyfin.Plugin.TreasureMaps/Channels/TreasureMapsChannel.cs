@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.TreasureMaps.Api;
 using Jellyfin.Plugin.TreasureMaps.Configuration;
+using Jellyfin.Plugin.TreasureMaps.Languages;
 using MediaBrowser.Controller.Channels;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Channels;
@@ -42,7 +43,23 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia
     public string Description => "Browse movie releases from your Treasure-Maps indexer.";
 
     /// <inheritdoc />
-    public string DataVersion => "7";
+    public string DataVersion
+    {
+        get
+        {
+            // Include the settings that affect the produced items so that changing them in the
+            // config page invalidates Jellyfin's channel cache and triggers a re-fetch.
+            var c = Config;
+            return string.Join(
+                '|',
+                "8",
+                c.PrimaryLanguage,
+                string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
+                c.FilterByLanguage ? "1" : "0",
+                c.MinRating.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                c.ResultLimit.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+    }
 
     /// <inheritdoc />
     public string HomePageUrl => Plugin.Instance?.Configuration.BaseUrl ?? string.Empty;
@@ -188,22 +205,40 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia
 
     private ChannelItemResult MapReleases(ReleaseListResponse? response, string scope)
     {
-        var items = new List<ChannelItemInfo>();
+        var prefs = GetLanguagePreferences();
+        var ranked = new List<(ChannelItemInfo Item, int Rank, int Order)>();
         if (response?.Items is not null)
         {
+            var order = 0;
             foreach (var release in response.Items)
             {
-                var item = ReleaseMapper.ToChannelItem(release, Config.MinRating);
+                var item = ReleaseMapper.ToChannelItem(release, Config.MinRating, prefs, out var rank);
                 if (item is not null)
                 {
                     // Scope the item id per folder so the same release appearing in multiple
                     // folders (Trending/Movies/Latest) does not get reparented and emptied by Jellyfin.
                     item.Id = scope + "|" + item.Id;
-                    items.Add(item);
+                    ranked.Add((item, rank, order++));
                 }
             }
         }
 
+        // Preferred languages first (stable within the same rank).
+        var items = ranked
+            .OrderBy(x => x.Rank)
+            .ThenBy(x => x.Order)
+            .Select(x => x.Item)
+            .ToList();
+
         return new ChannelItemResult { Items = items, TotalRecordCount = items.Count };
+    }
+
+    private static LanguagePreferences GetLanguagePreferences()
+    {
+        var config = Config;
+        return new LanguagePreferences(
+            config.PrimaryLanguage,
+            config.SecondaryLanguages ?? Array.Empty<string>(),
+            config.FilterByLanguage);
     }
 }

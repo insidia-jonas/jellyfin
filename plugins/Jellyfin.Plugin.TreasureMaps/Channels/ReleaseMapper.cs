@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using Jellyfin.Plugin.TreasureMaps.Api;
+using Jellyfin.Plugin.TreasureMaps.Languages;
 using MediaBrowser.Controller.Channels;
 using MediaBrowser.Model.Channels;
 
@@ -21,12 +22,31 @@ public static class ReleaseMapper
     /// <param name="minRating">The minimum community rating (0 disables the filter).</param>
     /// <returns>The mapped channel item, or <c>null</c> if the release is invalid or filtered out.</returns>
     public static ChannelItemInfo? ToChannelItem(Release release, double minRating)
+        => ToChannelItem(release, minRating, default, out _);
+
+    /// <summary>
+    /// Converts a release into a rich channel item, applying rating and language filters.
+    /// </summary>
+    /// <param name="release">The release to map.</param>
+    /// <param name="minRating">The minimum community rating (0 disables the filter).</param>
+    /// <param name="languages">The language preferences.</param>
+    /// <param name="languageRank">Outputs the language sort rank (lower is better).</param>
+    /// <returns>The mapped channel item, or <c>null</c> if the release is invalid or filtered out.</returns>
+    public static ChannelItemInfo? ToChannelItem(Release release, double minRating, LanguagePreferences languages, out int languageRank)
     {
+        languageRank = 0;
         if (release is null || string.IsNullOrWhiteSpace(release.Guid))
         {
             return null;
         }
 
+        var languageMatch = LanguageMatcher.Match(languages, release.AudioLanguages);
+        if (!languageMatch.Keep)
+        {
+            return null;
+        }
+
+        languageRank = languageMatch.Rank;
         var movie = release.Movie;
         var tv = release.Tv;
         var isTv = movie is null && tv is not null;
@@ -77,6 +97,11 @@ public static class ReleaseMapper
         }
 
         item.Tags.Add(FormatSize(release.Size));
+
+        if (!string.IsNullOrEmpty(languageMatch.Label))
+        {
+            item.Tags.Add(languageMatch.Label);
+        }
 
         var imdb = release.Ids?.Imdb ?? tv?.Imdb;
         if (!string.IsNullOrWhiteSpace(imdb))

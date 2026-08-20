@@ -76,6 +76,34 @@ public class ReleaseMapperTests
     }
 
     [Fact]
+    public void ToChannelItem_AppliesLanguagePreferences()
+    {
+        var response = JsonSerializer.Deserialize<ReleaseListResponse>(MovieResponseJson, _options)!;
+        var release = response.Items.First();
+        release.AudioLanguages = new[] { "English" };
+        var prefs = new Languages.LanguagePreferences("de", new[] { "en" }, false);
+
+        var item = ReleaseMapper.ToChannelItem(release, minRating: 0, prefs, out var rank);
+
+        Assert.NotNull(item);
+        Assert.Equal(1, rank); // English is the first secondary language
+        Assert.Contains("EN", item!.Tags);
+    }
+
+    [Fact]
+    public void ToChannelItem_FiltersOutUnacceptedLanguage()
+    {
+        var response = JsonSerializer.Deserialize<ReleaseListResponse>(MovieResponseJson, _options)!;
+        var release = response.Items.First();
+        release.AudioLanguages = new[] { "Spanish" };
+        var prefs = new Languages.LanguagePreferences("de", new[] { "en" }, FilterOut: true);
+
+        var item = ReleaseMapper.ToChannelItem(release, minRating: 0, prefs, out _);
+
+        Assert.Null(item);
+    }
+
+    [Fact]
     public void ToChannelItem_BelowMinRating_IsFilteredOut()
     {
         var response = JsonSerializer.Deserialize<ReleaseListResponse>(MovieResponseJson, _options)!;
