@@ -78,6 +78,11 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   **same** id, Jellyfin reparents the shared item and the other folders appear empty after you
   open one of them. The plugin therefore prefixes item ids with a per-folder scope
   (`"movies|<guid>"`, `"latest|<guid>"`, …). Keep leaf item ids unique per folder.
+- SABnzbd self-configuration: the config page's "Set up SABnzbd categories" button
+  (`POST TreasureMaps/Sabnzbd/Setup`) creates/updates the `movies` and `tv` categories with their
+  download folders in SABnzbd via `mode=set_config&section=categories` (`SabnzbdMovieFolder` /
+  `SabnzbdTvFolder`). This needs the SABnzbd **full** API key (the NZB-only key can submit downloads
+  but not change config).
 - Browse & Grab: the plugin ships a **second** dashboard page (`browse.html`, registered in
   `Plugin.GetPages()` as `TreasureMapsBrowse`, linked from the config page). It calls
   `GET TreasureMaps/Search?type=movie|tv&q=` and each result's `Grab` button calls
