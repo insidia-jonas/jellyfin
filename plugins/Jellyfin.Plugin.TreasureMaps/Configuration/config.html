@@ -8,10 +8,16 @@
         <div data-role="content">
             <div class="content-primary">
                 <h1>Treasure-Maps</h1>
-                <p class="fieldDescription" style="margin-bottom:1.5em;">
+                <p class="fieldDescription" style="margin-bottom:1em;">
                     Connect Jellyfin to your Treasure-Maps indexer. Enter the server address and your API key,
                     then browse movie releases from the <strong>Treasure-Maps</strong> channel on the home screen.
                 </p>
+                <div style="margin-bottom:1.5em;">
+                    <a href="#/configurationpage?name=TreasureMapsBrowse" is="emby-linkbutton" class="raised button-submit" style="text-decoration:none;">
+                        <span>&#128269; Open Browse &amp; Grab</span>
+                    </a>
+                    <div class="fieldDescription" style="margin-top:.35em;">Search the indexer and grab movies/series with one click — the plugin routes each to the right SABnzbd category automatically.</div>
+                </div>
                 <form class="treasureMapsConfigForm">
                     <div class="inputContainer inputContainer-withDescription">
                         <input is="emby-input" type="text" id="baseUrl" label="Base URL" />
@@ -89,7 +95,17 @@
                             <input is="emby-input" type="text" id="sabnzbdCategory" label="SABnzbd category — fallback (optional)" />
                             <div class="fieldDescription">Used when a per-type category above is empty.</div>
                         </div>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="text" id="sabnzbdMovieFolder" label="Movie download folder" />
+                            <div class="fieldDescription">Folder for the movies category. Relative (e.g. <code>movies</code>) resolves under SABnzbd's completed folder; absolute paths (e.g. <code>/srv/.../downloads/movies</code>) are used as-is.</div>
+                        </div>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="text" id="sabnzbdTvFolder" label="TV download folder" />
+                            <div class="fieldDescription">Folder for the tv category.</div>
+                        </div>
                         <button is="emby-button" type="button" id="testSabnzbd" class="raised block"><span>Save &amp; test SABnzbd</span></button>
+                        <button is="emby-button" type="button" id="setupSabnzbd" class="raised block"><span>Set up SABnzbd categories</span></button>
+                        <div class="fieldDescription" style="margin-top:.35em;">Creates/updates the <code>movies</code> and <code>tv</code> categories with the folders above directly in SABnzbd (needs the SABnzbd <strong>full</strong> API key).</div>
                         <div id="sabResult" class="fieldDescription" style="margin-top:0.5em;"></div>
                     </div>
                     <div class="inputContainer inputContainer-withDescription">
@@ -128,6 +144,8 @@
                 config.SabnzbdCategory = document.querySelector('#sabnzbdCategory').value;
                 config.SabnzbdMovieCategory = document.querySelector('#sabnzbdMovieCategory').value.trim();
                 config.SabnzbdTvCategory = document.querySelector('#sabnzbdTvCategory').value.trim();
+                config.SabnzbdMovieFolder = document.querySelector('#sabnzbdMovieFolder').value.trim();
+                config.SabnzbdTvFolder = document.querySelector('#sabnzbdTvFolder').value.trim();
                 return config;
             }
 
@@ -150,6 +168,8 @@
                         document.querySelector('#sabnzbdCategory').value = config.SabnzbdCategory || '';
                         document.querySelector('#sabnzbdMovieCategory').value = config.SabnzbdMovieCategory || 'movies';
                         document.querySelector('#sabnzbdTvCategory').value = config.SabnzbdTvCategory || 'tv';
+                        document.querySelector('#sabnzbdMovieFolder').value = config.SabnzbdMovieFolder || 'movies';
+                        document.querySelector('#sabnzbdTvFolder').value = config.SabnzbdTvFolder || 'tv';
                         Dashboard.hideLoadingMsg();
                     });
                 });
@@ -190,6 +210,37 @@
                                 Dashboard.hideLoadingMsg();
                                 resultEl.style.color = 'red';
                                 resultEl.textContent = 'Connection test request failed.';
+                            });
+                        });
+                    });
+                });
+
+            document.querySelector('#setupSabnzbd')
+                .addEventListener('click', function () {
+                    var resultEl = document.querySelector('#sabResult');
+                    resultEl.textContent = 'Saving and configuring SABnzbd...';
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(TreasureMapsConfig.pluginId).then(function (config) {
+                        ApiClient.updatePluginConfiguration(TreasureMapsConfig.pluginId, readFormInto(config)).then(function () {
+                            ApiClient.fetch({
+                                url: ApiClient.getUrl('TreasureMaps/Sabnzbd/Setup'),
+                                type: 'POST',
+                                dataType: 'json',
+                                headers: { accept: 'application/json' }
+                            }).then(function (res) {
+                                Dashboard.hideLoadingMsg();
+                                if (res && res.ok) {
+                                    var cats = (res.applied || []).map(function (a) { return a.category + ' → ' + a.dir; }).join(', ');
+                                    resultEl.style.color = 'green';
+                                    resultEl.textContent = 'SABnzbd categories set: ' + cats;
+                                } else {
+                                    resultEl.style.color = 'red';
+                                    resultEl.textContent = 'SABnzbd setup failed: ' + ((res && res.message) || 'unknown error');
+                                }
+                            }, function () {
+                                Dashboard.hideLoadingMsg();
+                                resultEl.style.color = 'red';
+                                resultEl.textContent = 'SABnzbd setup request failed.';
                             });
                         });
                     });

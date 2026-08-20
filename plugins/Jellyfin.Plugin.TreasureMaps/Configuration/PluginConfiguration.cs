@@ -83,6 +83,19 @@ public class PluginConfiguration : BasePluginConfiguration
     public string SabnzbdTvCategory { get; set; } = "tv";
 
     /// <summary>
+    /// Gets or sets the download folder for the movie category, applied to SABnzbd by the
+    /// "Set up SABnzbd" action. Relative paths are resolved under SABnzbd's completed-downloads
+    /// folder; absolute paths are used as-is.
+    /// </summary>
+    public string SabnzbdMovieFolder { get; set; } = "movies";
+
+    /// <summary>
+    /// Gets or sets the download folder for the TV category, applied to SABnzbd by the
+    /// "Set up SABnzbd" action.
+    /// </summary>
+    public string SabnzbdTvFolder { get; set; } = "tv";
+
+    /// <summary>
     /// Gets or sets a value indicating whether releases are enriched with xREL ratings
     /// (looked up by release/scene name).
     /// </summary>

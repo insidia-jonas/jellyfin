@@ -101,6 +101,58 @@ public class SabnzbdClient
         return string.IsNullOrWhiteSpace(body) ? default : JsonSerializer.Deserialize<T>(body, _jsonOptions);
     }
 
+    /// <summary>
+    /// Creates or updates a SABnzbd category (name + download folder) via
+    /// <c>mode=set_config&amp;section=categories</c>. Requires the SABnzbd <b>full</b> API key.
+    /// </summary>
+    /// <param name="name">The category name (e.g. <c>movies</c>).</param>
+    /// <param name="dir">The category download folder (relative or absolute).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task that completes when the category is applied.</returns>
+    public async Task SetCategoryAsync(string name, string? dir, CancellationToken cancellationToken)
+    {
+        using var client = _httpClientFactory.CreateClient();
+        var url = BuildApiUrl(new Dictionary<string, string?>
+        {
+            ["mode"] = "set_config",
+            ["section"] = "categories",
+            ["name"] = name,
+            ["dir"] = dir
+        });
+
+        using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (body.Contains("\"error\"", StringComparison.OrdinalIgnoreCase) || body.Contains("API Key Incorrect", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("SABnzbd rejected the category update (needs the full API key). Response: " + body);
+        }
+
+        _logger.LogInformation("Configured SABnzbd category '{Name}' -> '{Dir}'", name, dir);
+    }
+
+    /// <summary>
+    /// Gets the currently configured SABnzbd category names.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The category names.</returns>
+    public async Task<IReadOnlyList<string>> GetCategoryNamesAsync(CancellationToken cancellationToken)
+    {
+        using var client = _httpClientFactory.CreateClient();
+        var url = BuildApiUrl(new Dictionary<string, string?>
+        {
+            ["mode"] = "get_config",
+            ["section"] = "categories"
+        });
+
+        using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        var result = string.IsNullOrWhiteSpace(body) ? null : JsonSerializer.Deserialize<SabConfigResponse>(body, _jsonOptions);
+        return result?.Config?.Categories?.Select(c => c.Name ?? string.Empty).Where(n => n.Length > 0).ToList()
+            ?? new List<string>();
+    }
+
     private static string BuildApiUrl(Dictionary<string, string?> parameters)
     {
         var baseUrl = Config.SabnzbdUrl.TrimEnd('/') + "/api";
@@ -134,5 +186,26 @@ public class SabnzbdClient
 
         [JsonPropertyName("nzo_ids")]
         public List<string>? NzoIds { get; set; }
+    }
+
+    private sealed class SabConfigResponse
+    {
+        [JsonPropertyName("config")]
+        public SabConfig? Config { get; set; }
+    }
+
+    private sealed class SabConfig
+    {
+        [JsonPropertyName("categories")]
+        public List<SabCategory>? Categories { get; set; }
+    }
+
+    private sealed class SabCategory
+    {
+        [JsonPropertyName("name")]
+        public string? Name { get; set; }
+
+        [JsonPropertyName("dir")]
+        public string? Dir { get; set; }
     }
 }

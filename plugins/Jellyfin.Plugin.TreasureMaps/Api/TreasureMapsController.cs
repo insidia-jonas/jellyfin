@@ -93,6 +93,47 @@ public class TreasureMapsController : ControllerBase
     }
 
     /// <summary>
+    /// Creates/updates the movie and TV categories (with their folders) in SABnzbd, so the plugin
+    /// manages the SABnzbd configuration for the user.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The result of the setup.</returns>
+    [HttpPost("Sabnzbd/Setup")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> SetupSabnzbd(CancellationToken cancellationToken)
+    {
+        if (!SabnzbdClient.IsConfigured)
+        {
+            return Ok(new { ok = false, message = "Configure the SABnzbd URL and API key first." });
+        }
+
+        var config = Plugin.Instance?.Configuration ?? new Configuration.PluginConfiguration();
+        var applied = new List<object>();
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(config.SabnzbdMovieCategory))
+            {
+                await _sabnzbd.SetCategoryAsync(config.SabnzbdMovieCategory, config.SabnzbdMovieFolder, cancellationToken).ConfigureAwait(false);
+                applied.Add(new { category = config.SabnzbdMovieCategory, dir = config.SabnzbdMovieFolder });
+            }
+
+            if (!string.IsNullOrWhiteSpace(config.SabnzbdTvCategory))
+            {
+                await _sabnzbd.SetCategoryAsync(config.SabnzbdTvCategory, config.SabnzbdTvFolder, cancellationToken).ConfigureAwait(false);
+                applied.Add(new { category = config.SabnzbdTvCategory, dir = config.SabnzbdTvFolder });
+            }
+
+            var categories = await _sabnzbd.GetCategoryNamesAsync(cancellationToken).ConfigureAwait(false);
+            return Ok(new { ok = true, applied, categories });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SABnzbd setup failed");
+            return Ok(new { ok = false, message = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Searches Treasure-Maps for the Browse &amp; Grab page.
     /// </summary>
     /// <param name="type">The media type to search: <c>movie</c> or <c>tv</c>.</param>
