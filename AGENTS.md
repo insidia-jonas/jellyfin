@@ -78,6 +78,12 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   **same** id, Jellyfin reparents the shared item and the other folders appear empty after you
   open one of them. The plugin therefore prefixes item ids with a per-folder scope
   (`"movies|<guid>"`, `"latest|<guid>"`, …). Keep leaf item ids unique per folder.
+- Release-name parsing: `ReleaseNameParser` extracts scene attributes from the release/dirname
+  (resolution, source BluRay/WEB/CAM/TELESYNC/…, codec, HDR, `DL` dual-language, detected
+  languages, group) and — for theatrical rips — the audio source `MIC` (microphone, worse) vs
+  `LINE`/`LD` (line/direct audio, better) vs `MD` (mic dubbed). These become item tags; MIC/LINE
+  also add an overview note. Parsed languages feed the language matcher, so name-based language
+  (e.g. `GERMAN DL`) works even when the API omits `audio_languages`.
 - xREL ratings: the config page has an "enable xREL" toggle + base URL (public API, no key). When
   enabled, each release is looked up on xREL by its scene/release name (`/release/info.json?dirname=`)
   and the scene video/audio rating (+ title rating) is added as a tag/overview line and, when the
