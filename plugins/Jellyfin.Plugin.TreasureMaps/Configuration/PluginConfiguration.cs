@@ -66,6 +66,12 @@ public class PluginConfiguration : BasePluginConfiguration
     public string SabnzbdApiKey { get; set; } = string.Empty;
 
     /// <summary>
+    /// Gets or sets a value indicating whether marking a Treasure-Maps item as a favorite (the heart)
+    /// in the normal Jellyfin UI triggers a grab (download to SABnzbd).
+    /// </summary>
+    public bool GrabOnFavorite { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets the default/fallback SABnzbd category (used when a per-type category is not set).
     /// </summary>
     public string SabnzbdCategory { get; set; } = string.Empty;

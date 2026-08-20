@@ -97,6 +97,10 @@
                     </div>
                     <div class="verticalSection">
                         <h2>Download (SABnzbd)</h2>
+                        <label class="checkboxContainer">
+                            <input is="emby-checkbox" type="checkbox" id="grabOnFavorite" />
+                            <span>Grab from the normal UI: marking a Treasure-Maps item as a <strong>favorite (❤)</strong> downloads it to SABnzbd.</span>
+                        </label>
                         <div class="fieldDescription" style="margin-bottom:1em;">
                             When SABnzbd is configured, "Grab" sends releases straight into the SABnzbd download queue.
                             Otherwise, grabbed NZBs are written to the drop folder below. Jellyfin itself does not download or unpack NZBs.
@@ -176,6 +180,7 @@
                 config.SabnzbdTvCategory = document.querySelector('#sabnzbdTvCategory').value.trim();
                 config.SabnzbdMovieFolder = document.querySelector('#sabnzbdMovieFolder').value.trim();
                 config.SabnzbdTvFolder = document.querySelector('#sabnzbdTvFolder').value.trim();
+                config.GrabOnFavorite = document.querySelector('#grabOnFavorite').checked;
                 return config;
             }
 
@@ -204,6 +209,7 @@
                         document.querySelector('#sabnzbdTvCategory').value = config.SabnzbdTvCategory || 'tv';
                         document.querySelector('#sabnzbdMovieFolder').value = config.SabnzbdMovieFolder || 'movies';
                         document.querySelector('#sabnzbdTvFolder').value = config.SabnzbdTvFolder || 'tv';
+                        document.querySelector('#grabOnFavorite').checked = config.GrabOnFavorite !== false;
                         Dashboard.hideLoadingMsg();
                     });
                 });

@@ -113,6 +113,10 @@ public static class ReleaseMapper
         ApplyXrel(item, xrel);
         ApplyParsedName(item, parsed);
 
+        // Tag with the release id + kind so favouriting the item in the normal UI can trigger a grab.
+        item.ProviderIds["TreasureMaps"] = release.Guid;
+        item.ProviderIds["TreasureMapsKind"] = isTv ? "tv" : "movie";
+
         var imdb = release.Ids?.Imdb ?? tv?.Imdb;
         if (!string.IsNullOrWhiteSpace(imdb))
         {
