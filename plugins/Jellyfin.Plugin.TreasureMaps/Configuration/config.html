@@ -70,6 +70,32 @@
                         </div>
                     </div>
                     <div class="verticalSection">
+                        <h2>Subtitles (OpenSubtitles)</h2>
+                        <div class="fieldDescription" style="margin-bottom:1em;">
+                            Adds an <a href="https://www.opensubtitles.com" target="_blank">OpenSubtitles</a> subtitle provider.
+                            It matches by exact file hash first, then IMDb id / title, in your chosen languages. Register a free
+                            API key at opensubtitles.com (Consumers). Downloading subtitles requires your account login.
+                        </div>
+                        <label class="checkboxContainer">
+                            <input is="emby-checkbox" type="checkbox" id="enableOpenSubtitles" />
+                            <span>Enable the OpenSubtitles subtitle provider.</span>
+                        </label>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="password" id="openSubtitlesApiKey" label="OpenSubtitles API key" />
+                            <div class="fieldDescription">From opensubtitles.com → Consumers.</div>
+                        </div>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="text" id="openSubtitlesUsername" label="OpenSubtitles username" />
+                            <div class="fieldDescription">Required to download subtitles.</div>
+                        </div>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="password" id="openSubtitlesPassword" label="OpenSubtitles password" />
+                            <div class="fieldDescription">Required to download subtitles.</div>
+                        </div>
+                        <button is="emby-button" type="button" id="testOpenSubtitles" class="raised block"><span>Save &amp; test OpenSubtitles</span></button>
+                        <div id="osResult" class="fieldDescription" style="margin-top:.5em;"></div>
+                    </div>
+                    <div class="verticalSection">
                         <h2>Download (SABnzbd)</h2>
                         <div class="fieldDescription" style="margin-bottom:1em;">
                             When SABnzbd is configured, "Grab" sends releases straight into the SABnzbd download queue.
@@ -138,6 +164,10 @@
                 config.FilterByLanguage = document.querySelector('#filterByLanguage').checked;
                 config.EnableXrel = document.querySelector('#enableXrel').checked;
                 config.XrelBaseUrl = document.querySelector('#xrelBaseUrl').value.trim();
+                config.EnableOpenSubtitles = document.querySelector('#enableOpenSubtitles').checked;
+                config.OpenSubtitlesApiKey = document.querySelector('#openSubtitlesApiKey').value.trim();
+                config.OpenSubtitlesUsername = document.querySelector('#openSubtitlesUsername').value.trim();
+                config.OpenSubtitlesPassword = document.querySelector('#openSubtitlesPassword').value;
                 config.NzbDropFolder = document.querySelector('#nzbDropFolder').value;
                 config.SabnzbdUrl = document.querySelector('#sabnzbdUrl').value;
                 config.SabnzbdApiKey = document.querySelector('#sabnzbdApiKey').value;
@@ -162,6 +192,10 @@
                         document.querySelector('#filterByLanguage').checked = !!config.FilterByLanguage;
                         document.querySelector('#enableXrel').checked = !!config.EnableXrel;
                         document.querySelector('#xrelBaseUrl').value = config.XrelBaseUrl || 'https://api.xrel.to/v2';
+                        document.querySelector('#enableOpenSubtitles').checked = !!config.EnableOpenSubtitles;
+                        document.querySelector('#openSubtitlesApiKey').value = config.OpenSubtitlesApiKey || '';
+                        document.querySelector('#openSubtitlesUsername').value = config.OpenSubtitlesUsername || '';
+                        document.querySelector('#openSubtitlesPassword').value = config.OpenSubtitlesPassword || '';
                         document.querySelector('#nzbDropFolder').value = config.NzbDropFolder || '';
                         document.querySelector('#sabnzbdUrl').value = config.SabnzbdUrl || '';
                         document.querySelector('#sabnzbdApiKey').value = config.SabnzbdApiKey || '';
@@ -210,6 +244,37 @@
                                 Dashboard.hideLoadingMsg();
                                 resultEl.style.color = 'red';
                                 resultEl.textContent = 'Connection test request failed.';
+                            });
+                        });
+                    });
+                });
+
+            document.querySelector('#testOpenSubtitles')
+                .addEventListener('click', function () {
+                    var resultEl = document.querySelector('#osResult');
+                    resultEl.textContent = 'Saving and testing OpenSubtitles...';
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(TreasureMapsConfig.pluginId).then(function (config) {
+                        ApiClient.updatePluginConfiguration(TreasureMapsConfig.pluginId, readFormInto(config)).then(function () {
+                            ApiClient.fetch({
+                                url: ApiClient.getUrl('TreasureMaps/OpenSubtitles/Test'),
+                                type: 'GET',
+                                dataType: 'json',
+                                headers: { accept: 'application/json' }
+                            }).then(function (res) {
+                                Dashboard.hideLoadingMsg();
+                                if (res && res.ok) {
+                                    resultEl.style.color = 'green';
+                                    resultEl.textContent = 'OpenSubtitles OK — ' + (res.loggedIn ? 'logged in' : 'search only (no login)')
+                                        + ', sample results: ' + res.sampleResults + '.';
+                                } else {
+                                    resultEl.style.color = 'red';
+                                    resultEl.textContent = 'OpenSubtitles test failed: ' + ((res && res.message) || 'unknown error');
+                                }
+                            }, function () {
+                                Dashboard.hideLoadingMsg();
+                                resultEl.style.color = 'red';
+                                resultEl.textContent = 'OpenSubtitles test request failed.';
                             });
                         });
                     });

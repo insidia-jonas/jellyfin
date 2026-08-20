@@ -105,4 +105,29 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Gets or sets the xREL API base URL. Defaults to the public xREL v2 API.
     /// </summary>
     public string XrelBaseUrl { get; set; } = "https://api.xrel.to/v2";
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the OpenSubtitles subtitle provider is enabled.
+    /// </summary>
+    public bool EnableOpenSubtitles { get; set; }
+
+    /// <summary>
+    /// Gets or sets the OpenSubtitles API key (from your opensubtitles.com consumer/app).
+    /// </summary>
+    public string OpenSubtitlesApiKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the OpenSubtitles username (required to download subtitles).
+    /// </summary>
+    public string OpenSubtitlesUsername { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the OpenSubtitles password (required to download subtitles).
+    /// </summary>
+    public string OpenSubtitlesPassword { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the OpenSubtitles API base URL. Defaults to the public REST API.
+    /// </summary>
+    public string OpenSubtitlesBaseUrl { get; set; } = "https://api.opensubtitles.com/api/v1";
 }

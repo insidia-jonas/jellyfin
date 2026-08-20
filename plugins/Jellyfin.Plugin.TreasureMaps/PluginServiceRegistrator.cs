@@ -17,6 +17,8 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<TreasureMapsApiClient>();
         serviceCollection.AddSingleton<SabnzbdClient>();
         serviceCollection.AddSingleton<Xrel.XrelClient>();
+        serviceCollection.AddSingleton<Subtitles.OpenSubtitlesClient>();
         serviceCollection.AddSingleton<IChannel, TreasureMapsChannel>();
+        serviceCollection.AddSingleton<MediaBrowser.Controller.Subtitles.ISubtitleProvider, Subtitles.OpenSubtitlesProvider>();
     }
 }

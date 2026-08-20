@@ -25,6 +25,7 @@ public class TreasureMapsController : ControllerBase
 {
     private readonly TreasureMapsApiClient _client;
     private readonly SabnzbdClient _sabnzbd;
+    private readonly Subtitles.OpenSubtitlesClient _openSubtitles;
     private readonly ILogger<TreasureMapsController> _logger;
 
     /// <summary>
@@ -32,12 +33,44 @@ public class TreasureMapsController : ControllerBase
     /// </summary>
     /// <param name="client">The Treasure-Maps API client.</param>
     /// <param name="sabnzbd">The SABnzbd client.</param>
+    /// <param name="openSubtitles">The OpenSubtitles client.</param>
     /// <param name="logger">The logger.</param>
-    public TreasureMapsController(TreasureMapsApiClient client, SabnzbdClient sabnzbd, ILogger<TreasureMapsController> logger)
+    public TreasureMapsController(TreasureMapsApiClient client, SabnzbdClient sabnzbd, Subtitles.OpenSubtitlesClient openSubtitles, ILogger<TreasureMapsController> logger)
     {
         _client = client;
         _sabnzbd = sabnzbd;
+        _openSubtitles = openSubtitles;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Validates the OpenSubtitles configuration (API key + optional login).
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The connection status.</returns>
+    [HttpGet("OpenSubtitles/Test")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> TestOpenSubtitles(CancellationToken cancellationToken)
+    {
+        if (!Subtitles.OpenSubtitlesClient.IsEnabled)
+        {
+            return Ok(new { ok = false, message = "Enable OpenSubtitles and set an API key first." });
+        }
+
+        try
+        {
+            var token = await _openSubtitles.GetTokenAsync(cancellationToken).ConfigureAwait(false);
+            var probe = await _openSubtitles.SearchAsync(
+                new Dictionary<string, string?> { ["languages"] = "en", ["query"] = "matrix", ["type"] = "movie" },
+                cancellationToken).ConfigureAwait(false);
+            var count = probe?.Data?.Count ?? 0;
+            return Ok(new { ok = true, loggedIn = !string.IsNullOrEmpty(token), sampleResults = count });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "OpenSubtitles connection test failed");
+            return Ok(new { ok = false, message = ex.Message });
+        }
     }
 
     /// <summary>
