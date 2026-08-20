@@ -30,8 +30,25 @@ public class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>
     /// Gets or sets an optional local folder into which grabbed NZB files are written.
-    /// Point a Usenet download client (SABnzbd / NZBGet "watched folder") at this path to
-    /// actually download the movie; once imported into a Jellyfin library it becomes playable.
+    /// Used as a fallback when SABnzbd is not configured. Point a Usenet download client
+    /// (SABnzbd / NZBGet "watched folder") at this path to actually download the movie.
     /// </summary>
     public string NzbDropFolder { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the base URL of the SABnzbd instance (for example <c>http://localhost:8080</c>).
+    /// When set together with <see cref="SabnzbdApiKey"/>, grabbed releases are pushed straight
+    /// into the SABnzbd download queue instead of only being written to <see cref="NzbDropFolder"/>.
+    /// </summary>
+    public string SabnzbdUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the SABnzbd API key (SABnzbd → Config → General → API Key).
+    /// </summary>
+    public string SabnzbdApiKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the SABnzbd category to assign to grabbed downloads (optional, e.g. <c>movies</c>).
+    /// </summary>
+    public string SabnzbdCategory { get; set; } = string.Empty;
 }

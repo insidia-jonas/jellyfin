@@ -29,11 +29,31 @@
                         <input is="emby-input" type="number" id="minRating" min="0" max="10" step="0.1" label="Minimum rating" />
                         <div class="fieldDescription">Hide releases below this community rating. Set to 0 to show everything.</div>
                     </div>
+                    <div class="verticalSection">
+                        <h2>Download (SABnzbd)</h2>
+                        <div class="fieldDescription" style="margin-bottom:1em;">
+                            When SABnzbd is configured, "Grab" sends releases straight into the SABnzbd download queue.
+                            Otherwise, grabbed NZBs are written to the drop folder below. Jellyfin itself does not download or unpack NZBs.
+                        </div>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="text" id="sabnzbdUrl" label="SABnzbd URL" />
+                            <div class="fieldDescription">e.g. <code>http://localhost:8080</code>.</div>
+                        </div>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="password" id="sabnzbdApiKey" label="SABnzbd API key" />
+                            <div class="fieldDescription">SABnzbd → Config → General → API Key.</div>
+                        </div>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="text" id="sabnzbdCategory" label="SABnzbd category (optional)" />
+                            <div class="fieldDescription">Assigns downloads to a SABnzbd category, e.g. <code>movies</code>.</div>
+                        </div>
+                        <button is="emby-button" type="button" id="testSabnzbd" class="raised block"><span>Save &amp; test SABnzbd</span></button>
+                        <div id="sabResult" class="fieldDescription" style="margin-top:0.5em;"></div>
+                    </div>
                     <div class="inputContainer inputContainer-withDescription">
-                        <input is="emby-input" type="text" id="nzbDropFolder" label="NZB drop folder (optional)" />
+                        <input is="emby-input" type="text" id="nzbDropFolder" label="NZB drop folder (fallback)" />
                         <div class="fieldDescription">
-                            Optional local folder for grabbed NZB files. Point a Usenet client (SABnzbd / NZBGet watched folder)
-                            here to actually download a movie. Jellyfin itself does not download or unpack NZBs.
+                            Used only when SABnzbd is not configured. Point a Usenet client's watched folder here.
                         </div>
                     </div>
                     <div style="margin-top:1em;">
@@ -55,6 +75,9 @@
                 config.ResultLimit = parseInt(document.querySelector('#resultLimit').value, 10) || 60;
                 config.MinRating = parseFloat(document.querySelector('#minRating').value) || 0;
                 config.NzbDropFolder = document.querySelector('#nzbDropFolder').value;
+                config.SabnzbdUrl = document.querySelector('#sabnzbdUrl').value;
+                config.SabnzbdApiKey = document.querySelector('#sabnzbdApiKey').value;
+                config.SabnzbdCategory = document.querySelector('#sabnzbdCategory').value;
                 return config;
             }
 
@@ -67,6 +90,9 @@
                         document.querySelector('#resultLimit').value = config.ResultLimit || 60;
                         document.querySelector('#minRating').value = config.MinRating || 0;
                         document.querySelector('#nzbDropFolder').value = config.NzbDropFolder || '';
+                        document.querySelector('#sabnzbdUrl').value = config.SabnzbdUrl || '';
+                        document.querySelector('#sabnzbdApiKey').value = config.SabnzbdApiKey || '';
+                        document.querySelector('#sabnzbdCategory').value = config.SabnzbdCategory || '';
                         Dashboard.hideLoadingMsg();
                     });
                 });
@@ -107,6 +133,36 @@
                                 Dashboard.hideLoadingMsg();
                                 resultEl.style.color = 'red';
                                 resultEl.textContent = 'Connection test request failed.';
+                            });
+                        });
+                    });
+                });
+
+            document.querySelector('#testSabnzbd')
+                .addEventListener('click', function () {
+                    var resultEl = document.querySelector('#sabResult');
+                    resultEl.textContent = 'Saving and testing SABnzbd...';
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(TreasureMapsConfig.pluginId).then(function (config) {
+                        ApiClient.updatePluginConfiguration(TreasureMapsConfig.pluginId, readFormInto(config)).then(function () {
+                            ApiClient.fetch({
+                                url: ApiClient.getUrl('TreasureMaps/Sabnzbd/Test'),
+                                type: 'GET',
+                                dataType: 'json',
+                                headers: { accept: 'application/json' }
+                            }).then(function (res) {
+                                Dashboard.hideLoadingMsg();
+                                if (res && res.ok) {
+                                    resultEl.style.color = 'green';
+                                    resultEl.textContent = 'SABnzbd connected (version ' + (res.version || '?') + ').';
+                                } else {
+                                    resultEl.style.color = 'red';
+                                    resultEl.textContent = 'SABnzbd test failed: ' + ((res && res.message) || 'unknown error');
+                                }
+                            }, function () {
+                                Dashboard.hideLoadingMsg();
+                                resultEl.style.color = 'red';
+                                resultEl.textContent = 'SABnzbd test request failed.';
                             });
                         });
                     });
