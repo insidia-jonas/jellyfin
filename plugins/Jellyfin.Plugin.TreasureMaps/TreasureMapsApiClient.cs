@@ -64,6 +64,24 @@ public class TreasureMapsApiClient
     }
 
     /// <summary>
+    /// Searches for TV releases.
+    /// </summary>
+    /// <param name="query">Free-text query, may be null.</param>
+    /// <param name="limit">Maximum number of results.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The release list response.</returns>
+    public Task<ReleaseListResponse?> SearchTvAsync(string? query, int limit, CancellationToken cancellationToken)
+    {
+        var parameters = new Dictionary<string, string?>
+        {
+            ["q"] = string.IsNullOrWhiteSpace(query) ? "*" : query,
+            ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
+            ["extended"] = "1"
+        };
+        return GetJsonAsync<ReleaseListResponse>("tv", parameters, cancellationToken);
+    }
+
+    /// <summary>
     /// Gets the trending / spotlight releases.
     /// </summary>
     /// <param name="limit">Maximum number of results.</param>

@@ -68,9 +68,33 @@ public class Release
     [JsonPropertyName("movie")]
     public ReleaseMovie? Movie { get; set; }
 
+    /// <summary>Gets or sets the TV metadata.</summary>
+    [JsonPropertyName("tv")]
+    public ReleaseTv? Tv { get; set; }
+
     /// <summary>Gets or sets the related links.</summary>
     [JsonPropertyName("links")]
     public ReleaseLinks? Links { get; set; }
+}
+
+/// <summary>TV metadata for a release.</summary>
+public class ReleaseTv
+{
+    /// <summary>Gets or sets the series title.</summary>
+    [JsonPropertyName("title")]
+    public string? Title { get; set; }
+
+    /// <summary>Gets or sets the IMDb id.</summary>
+    [JsonPropertyName("imdb")]
+    public string? Imdb { get; set; }
+
+    /// <summary>Gets or sets the TMDB id.</summary>
+    [JsonPropertyName("tmdb")]
+    public string? Tmdb { get; set; }
+
+    /// <summary>Gets or sets the first-aired date (used for the year).</summary>
+    [JsonPropertyName("first_aired")]
+    public string? FirstAired { get; set; }
 }
 
 /// <summary>External identifiers for a release.</summary>

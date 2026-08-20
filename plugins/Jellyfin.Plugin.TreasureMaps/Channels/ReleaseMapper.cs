@@ -28,24 +28,38 @@ public static class ReleaseMapper
         }
 
         var movie = release.Movie;
+        var tv = release.Tv;
+        var isTv = movie is null && tv is not null;
+
         var rating = ParseRating(movie?.Rating);
         if (minRating > 0 && rating.HasValue && rating.Value < minRating)
         {
             return null;
         }
 
+        var title = movie?.Title;
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            title = tv?.Title;
+        }
+
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            title = release.Title;
+        }
+
         var item = new ChannelItemInfo
         {
             Id = release.Guid,
-            Name = string.IsNullOrWhiteSpace(movie?.Title) ? release.Title : movie!.Title!,
+            Name = title!,
             Type = ChannelItemType.Media,
-            ContentType = ChannelMediaContentType.Movie,
+            ContentType = isTv ? ChannelMediaContentType.Episode : ChannelMediaContentType.Movie,
             MediaType = ChannelMediaType.Video,
             Overview = BuildOverview(release),
             ImageUrl = release.Images?.Cover,
             HomePageUrl = release.Links?.Details,
             CommunityRating = rating.HasValue ? (float)rating.Value : null,
-            ProductionYear = ParseYear(movie?.Year)
+            ProductionYear = isTv ? ParseYear(FirstFour(tv?.FirstAired)) : ParseYear(movie?.Year)
         };
 
         if (!string.IsNullOrWhiteSpace(movie?.Genres))
@@ -64,18 +78,23 @@ public static class ReleaseMapper
 
         item.Tags.Add(FormatSize(release.Size));
 
-        if (!string.IsNullOrWhiteSpace(release.Ids?.Imdb))
+        var imdb = release.Ids?.Imdb ?? tv?.Imdb;
+        if (!string.IsNullOrWhiteSpace(imdb))
         {
-            item.ProviderIds["Imdb"] = release.Ids!.Imdb!;
+            item.ProviderIds["Imdb"] = imdb!;
         }
 
-        if (!string.IsNullOrWhiteSpace(release.Ids?.Tmdb))
+        var tmdb = release.Ids?.Tmdb ?? tv?.Tmdb;
+        if (!string.IsNullOrWhiteSpace(tmdb))
         {
-            item.ProviderIds["Tmdb"] = release.Ids!.Tmdb!;
+            item.ProviderIds["Tmdb"] = tmdb!;
         }
 
         return item;
     }
+
+    private static string? FirstFour(string? value)
+        => string.IsNullOrWhiteSpace(value) || value.Length < 4 ? value : value[..4];
 
     /// <summary>
     /// Formats a byte count as a human-readable size.

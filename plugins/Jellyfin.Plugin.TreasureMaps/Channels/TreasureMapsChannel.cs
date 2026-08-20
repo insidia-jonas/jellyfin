@@ -17,7 +17,7 @@ namespace Jellyfin.Plugin.TreasureMaps.Channels;
 /// Exposes a Treasure-Maps indexer as a browsable Jellyfin channel
 /// (Trending feed and browse-by-genre), with rich movie cards.
 /// </summary>
-public class TreasureMapsChannel : IChannel
+public class TreasureMapsChannel : IChannel, ISupportsLatestMedia
 {
     private const string GenrePrefix = "genre:";
 
@@ -42,7 +42,7 @@ public class TreasureMapsChannel : IChannel
     public string Description => "Browse movie releases from your Treasure-Maps indexer.";
 
     /// <inheritdoc />
-    public string DataVersion => "3";
+    public string DataVersion => "4";
 
     /// <inheritdoc />
     public string HomePageUrl => Plugin.Instance?.Configuration.BaseUrl ?? string.Empty;
@@ -90,6 +90,18 @@ public class TreasureMapsChannel : IChannel
                 return MapReleases(trending);
             }
 
+            if (string.Equals(query.FolderId, "movies", StringComparison.Ordinal))
+            {
+                var movies = await _client.SearchMoviesAsync(null, null, Config.ResultLimit, cancellationToken).ConfigureAwait(false);
+                return MapReleases(movies);
+            }
+
+            if (string.Equals(query.FolderId, "tv", StringComparison.Ordinal))
+            {
+                var tv = await _client.SearchTvAsync(null, Config.ResultLimit, cancellationToken).ConfigureAwait(false);
+                return MapReleases(tv);
+            }
+
             if (string.Equals(query.FolderId, "genres", StringComparison.Ordinal))
             {
                 return await GetGenreFoldersAsync(cancellationToken).ConfigureAwait(false);
@@ -115,23 +127,42 @@ public class TreasureMapsChannel : IChannel
     {
         var items = new List<ChannelItemInfo>
         {
-            new ChannelItemInfo
-            {
-                Id = "trending",
-                Name = "Trending",
-                Type = ChannelItemType.Folder,
-                FolderType = ChannelFolderType.Container
-            },
-            new ChannelItemInfo
-            {
-                Id = "genres",
-                Name = "Browse by genre",
-                Type = ChannelItemType.Folder,
-                FolderType = ChannelFolderType.Container
-            }
+            Folder("trending", "Trending"),
+            Folder("movies", "Movies"),
+            Folder("tv", "TV Shows"),
+            Folder("genres", "Browse by genre")
         };
 
         return new ChannelItemResult { Items = items, TotalRecordCount = items.Count };
+    }
+
+    private static ChannelItemInfo Folder(string id, string name) => new ChannelItemInfo
+    {
+        Id = id,
+        Name = name,
+        Type = ChannelItemType.Folder,
+        FolderType = ChannelFolderType.Container
+    };
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<ChannelItemInfo>> GetLatestMedia(ChannelLatestMediaSearch request, CancellationToken cancellationToken)
+    {
+        // Surfaces a "Treasure-Maps" row of the latest trending releases on the Jellyfin home screen.
+        if (!TreasureMapsApiClient.IsConfigured)
+        {
+            return Array.Empty<ChannelItemInfo>();
+        }
+
+        try
+        {
+            var trending = await _client.GetTrendingAsync(Config.ResultLimit, cancellationToken).ConfigureAwait(false);
+            return MapReleases(trending).Items;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load latest Treasure-Maps media");
+            return Array.Empty<ChannelItemInfo>();
+        }
     }
 
     private async Task<ChannelItemResult> GetGenreFoldersAsync(CancellationToken cancellationToken)

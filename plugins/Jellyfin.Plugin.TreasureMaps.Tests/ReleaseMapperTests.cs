@@ -86,6 +86,31 @@ public class ReleaseMapperTests
         Assert.Null(item);
     }
 
+    [Fact]
+    public void ToChannelItem_MapsTvRelease()
+    {
+        const string tvJson = """
+        {
+          "guid": "guid-reacher",
+          "title": "Reacher.S01.2160p",
+          "size": 21474836480,
+          "ids": { "imdb": "tt9288030" },
+          "images": { "cover": "https://img/reacher.jpg" },
+          "video": { "codec": "HEVC", "resolution": "2160p" },
+          "tv": { "title": "Reacher", "imdb": "tt9288030", "first_aired": "2022-02-04" }
+        }
+        """;
+        var release = JsonSerializer.Deserialize<Release>(tvJson, _options)!;
+
+        var item = ReleaseMapper.ToChannelItem(release, minRating: 0);
+
+        Assert.NotNull(item);
+        Assert.Equal("Reacher", item!.Name);
+        Assert.Equal(2022, item.ProductionYear);
+        Assert.Equal("tt9288030", item.ProviderIds["Imdb"]);
+        Assert.Equal("https://img/reacher.jpg", item.ImageUrl);
+    }
+
     [Theory]
     [InlineData(0, "unknown size")]
     [InlineData(512, "512 B")]
