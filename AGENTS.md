@@ -78,6 +78,14 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   **same** id, Jellyfin reparents the shared item and the other folders appear empty after you
   open one of them. The plugin therefore prefixes item ids with a per-folder scope
   (`"movies|<guid>"`, `"latest|<guid>"`, …). Keep leaf item ids unique per folder.
+- Language preferences: the config page has a primary language + accepted secondary languages +
+  a "only these languages" filter. Releases are filtered/ranked by audio language
+  (`LanguageMatcher`). Two Jellyfin caveats: (1) channel **folders are sorted by Jellyfin**
+  (SortName), so the plugin's primary-first ordering is best-effort; (2) channel items are
+  cached, so settings that change the produced items are folded into `DataVersion` to force a
+  re-fetch. Rapidly toggling the language filter on/off within one session can briefly show
+  stale items (shared ids get removed/re-added across cache generations) until the channel fully
+  refreshes.
 - Demonstrating the UI requires the separate `jellyfin-web` client (Node >= 24): build its
   `dist` and start the server with `dotnet run --project Jellyfin.Server --webdir <dist>`
   instead of `--nowebclient`.
