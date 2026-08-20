@@ -42,7 +42,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia
     public string Description => "Browse movie releases from your Treasure-Maps indexer.";
 
     /// <inheritdoc />
-    public string DataVersion => "4";
+    public string DataVersion => "7";
 
     /// <inheritdoc />
     public string HomePageUrl => Plugin.Instance?.Configuration.BaseUrl ?? string.Empty;
@@ -87,19 +87,19 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia
             if (string.Equals(query.FolderId, "trending", StringComparison.Ordinal))
             {
                 var trending = await _client.GetTrendingAsync(Config.ResultLimit, cancellationToken).ConfigureAwait(false);
-                return MapReleases(trending);
+                return MapReleases(trending, "trending");
             }
 
             if (string.Equals(query.FolderId, "movies", StringComparison.Ordinal))
             {
                 var movies = await _client.SearchMoviesAsync(null, null, Config.ResultLimit, cancellationToken).ConfigureAwait(false);
-                return MapReleases(movies);
+                return MapReleases(movies, "movies");
             }
 
             if (string.Equals(query.FolderId, "tv", StringComparison.Ordinal))
             {
                 var tv = await _client.SearchTvAsync(null, Config.ResultLimit, cancellationToken).ConfigureAwait(false);
-                return MapReleases(tv);
+                return MapReleases(tv, "tv");
             }
 
             if (string.Equals(query.FolderId, "genres", StringComparison.Ordinal))
@@ -111,7 +111,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia
             {
                 var genre = query.FolderId[GenrePrefix.Length..];
                 var byGenre = await _client.SearchMoviesAsync(null, genre, Config.ResultLimit, cancellationToken).ConfigureAwait(false);
-                return MapReleases(byGenre);
+                return MapReleases(byGenre, query.FolderId);
             }
 
             return new ChannelItemResult();
@@ -156,7 +156,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia
         try
         {
             var trending = await _client.GetTrendingAsync(Config.ResultLimit, cancellationToken).ConfigureAwait(false);
-            return MapReleases(trending).Items;
+            return MapReleases(trending, "latest").Items;
         }
         catch (Exception ex)
         {
@@ -186,7 +186,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia
         return new ChannelItemResult { Items = items, TotalRecordCount = items.Count };
     }
 
-    private ChannelItemResult MapReleases(ReleaseListResponse? response)
+    private ChannelItemResult MapReleases(ReleaseListResponse? response, string scope)
     {
         var items = new List<ChannelItemInfo>();
         if (response?.Items is not null)
@@ -196,6 +196,9 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia
                 var item = ReleaseMapper.ToChannelItem(release, Config.MinRating);
                 if (item is not null)
                 {
+                    // Scope the item id per folder so the same release appearing in multiple
+                    // folders (Trending/Movies/Latest) does not get reparented and emptied by Jellyfin.
+                    item.Id = scope + "|" + item.Id;
                     items.Add(item);
                 }
             }
