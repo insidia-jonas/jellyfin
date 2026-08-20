@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -43,7 +42,7 @@ public class TreasureMapsChannel : IChannel
     public string Description => "Browse movie releases from your Treasure-Maps indexer.";
 
     /// <inheritdoc />
-    public string DataVersion => "1";
+    public string DataVersion => "3";
 
     /// <inheritdoc />
     public string HomePageUrl => Plugin.Instance?.Configuration.BaseUrl ?? string.Empty;
@@ -163,7 +162,7 @@ public class TreasureMapsChannel : IChannel
         {
             foreach (var release in response.Items)
             {
-                var item = MapRelease(release);
+                var item = ReleaseMapper.ToChannelItem(release, Config.MinRating);
                 if (item is not null)
                 {
                     items.Add(item);
@@ -172,119 +171,5 @@ public class TreasureMapsChannel : IChannel
         }
 
         return new ChannelItemResult { Items = items, TotalRecordCount = items.Count };
-    }
-
-    private ChannelItemInfo? MapRelease(Release release)
-    {
-        if (string.IsNullOrWhiteSpace(release.Guid))
-        {
-            return null;
-        }
-
-        var movie = release.Movie;
-        var rating = ParseRating(movie?.Rating);
-        if (Config.MinRating > 0 && rating.HasValue && rating.Value < Config.MinRating)
-        {
-            return null;
-        }
-
-        var item = new ChannelItemInfo
-        {
-            Id = release.Guid,
-            Name = string.IsNullOrWhiteSpace(movie?.Title) ? release.Title : movie!.Title!,
-            Type = ChannelItemType.Folder,
-            FolderType = ChannelFolderType.Container,
-            Overview = BuildOverview(release),
-            ImageUrl = release.Images?.Cover,
-            HomePageUrl = release.Links?.Details,
-            CommunityRating = rating.HasValue ? (float)rating.Value : null,
-            ProductionYear = ParseYear(movie?.Year)
-        };
-
-        if (!string.IsNullOrWhiteSpace(movie?.Genres))
-        {
-            item.Genres = movie!.Genres!.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-        }
-
-        var quality = string.Join(' ', new[] { release.Video?.Resolution, release.Video?.Codec }.Where(s => !string.IsNullOrWhiteSpace(s)));
-        if (!string.IsNullOrWhiteSpace(quality))
-        {
-            item.Tags.Add(quality);
-        }
-
-        item.Tags.Add(FormatSize(release.Size));
-
-        if (!string.IsNullOrWhiteSpace(release.Ids?.Imdb))
-        {
-            item.ProviderIds["Imdb"] = release.Ids!.Imdb!;
-        }
-
-        if (!string.IsNullOrWhiteSpace(release.Ids?.Tmdb))
-        {
-            item.ProviderIds["Tmdb"] = release.Ids!.Tmdb!;
-        }
-
-        return item;
-    }
-
-    private static string BuildOverview(Release release)
-    {
-        var movie = release.Movie;
-        var parts = new List<string>();
-        if (!string.IsNullOrWhiteSpace(movie?.Tagline))
-        {
-            parts.Add(movie!.Tagline!);
-        }
-
-        if (!string.IsNullOrWhiteSpace(movie?.Plot))
-        {
-            parts.Add(movie!.Plot!);
-        }
-
-        var tech = new List<string>();
-        if (!string.IsNullOrWhiteSpace(release.Video?.Resolution))
-        {
-            tech.Add(release.Video!.Resolution!);
-        }
-
-        if (!string.IsNullOrWhiteSpace(release.Video?.Codec))
-        {
-            tech.Add(release.Video!.Codec!);
-        }
-
-        tech.Add(FormatSize(release.Size));
-        if (release.Grabs > 0)
-        {
-            tech.Add(release.Grabs.ToString(CultureInfo.InvariantCulture) + " grabs");
-        }
-
-        parts.Add("Release: " + release.Title);
-        parts.Add(string.Join(" \u2022 ", tech));
-        return string.Join("\n\n", parts);
-    }
-
-    private static double? ParseRating(string? rating)
-        => double.TryParse(rating, NumberStyles.Any, CultureInfo.InvariantCulture, out var value) ? value : null;
-
-    private static int? ParseYear(string? year)
-        => int.TryParse(year, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : null;
-
-    private static string FormatSize(long bytes)
-    {
-        if (bytes <= 0)
-        {
-            return "unknown size";
-        }
-
-        string[] units = { "B", "KB", "MB", "GB", "TB" };
-        double size = bytes;
-        var unit = 0;
-        while (size >= 1024 && unit < units.Length - 1)
-        {
-            size /= 1024;
-            unit++;
-        }
-
-        return string.Format(CultureInfo.InvariantCulture, "{0:0.##} {1}", size, units[unit]);
     }
 }
