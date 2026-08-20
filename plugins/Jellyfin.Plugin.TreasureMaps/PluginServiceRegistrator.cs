@@ -16,6 +16,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     {
         serviceCollection.AddSingleton<TreasureMapsApiClient>();
         serviceCollection.AddSingleton<SabnzbdClient>();
+        serviceCollection.AddSingleton<Xrel.XrelClient>();
         serviceCollection.AddSingleton<IChannel, TreasureMapsChannel>();
     }
 }

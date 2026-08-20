@@ -69,4 +69,15 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Gets or sets the SABnzbd category to assign to grabbed downloads (optional, e.g. <c>movies</c>).
     /// </summary>
     public string SabnzbdCategory { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether releases are enriched with xREL ratings
+    /// (looked up by release/scene name).
+    /// </summary>
+    public bool EnableXrel { get; set; }
+
+    /// <summary>
+    /// Gets or sets the xREL API base URL. Defaults to the public xREL v2 API.
+    /// </summary>
+    public string XrelBaseUrl { get; set; } = "https://api.xrel.to/v2";
 }

@@ -83,7 +83,7 @@ public class ReleaseMapperTests
         release.AudioLanguages = new[] { "English" };
         var prefs = new Languages.LanguagePreferences("de", new[] { "en" }, false);
 
-        var item = ReleaseMapper.ToChannelItem(release, minRating: 0, prefs, out var rank);
+        var item = ReleaseMapper.ToChannelItem(release, minRating: 0, prefs, null, out var rank);
 
         Assert.NotNull(item);
         Assert.Equal(1, rank); // English is the first secondary language
@@ -98,7 +98,7 @@ public class ReleaseMapperTests
         release.AudioLanguages = new[] { "Spanish" };
         var prefs = new Languages.LanguagePreferences("de", new[] { "en" }, FilterOut: true);
 
-        var item = ReleaseMapper.ToChannelItem(release, minRating: 0, prefs, out _);
+        var item = ReleaseMapper.ToChannelItem(release, minRating: 0, prefs, null, out _);
 
         Assert.Null(item);
     }

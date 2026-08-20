@@ -49,6 +49,21 @@
                         </label>
                     </div>
                     <div class="verticalSection">
+                        <h2>Ratings (xREL)</h2>
+                        <div class="fieldDescription" style="margin-bottom:1em;">
+                            Enrich releases with <a href="https://www.xrel.to" target="_blank">xREL</a> ratings, matched by
+                            the release/scene name. Adds the scene video/audio rating (and the title rating) to each card.
+                        </div>
+                        <label class="checkboxContainer">
+                            <input is="emby-checkbox" type="checkbox" id="enableXrel" />
+                            <span>Fetch xREL ratings for releases.</span>
+                        </label>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="text" id="xrelBaseUrl" label="xREL API base URL" />
+                            <div class="fieldDescription">Defaults to <code>https://api.xrel.to/v2</code>. These endpoints are public (no key required).</div>
+                        </div>
+                    </div>
+                    <div class="verticalSection">
                         <h2>Download (SABnzbd)</h2>
                         <div class="fieldDescription" style="margin-bottom:1em;">
                             When SABnzbd is configured, "Grab" sends releases straight into the SABnzbd download queue.
@@ -97,6 +112,8 @@
                 config.SecondaryLanguages = document.querySelector('#secondaryLanguages').value
                     .split(',').map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 0; });
                 config.FilterByLanguage = document.querySelector('#filterByLanguage').checked;
+                config.EnableXrel = document.querySelector('#enableXrel').checked;
+                config.XrelBaseUrl = document.querySelector('#xrelBaseUrl').value.trim();
                 config.NzbDropFolder = document.querySelector('#nzbDropFolder').value;
                 config.SabnzbdUrl = document.querySelector('#sabnzbdUrl').value;
                 config.SabnzbdApiKey = document.querySelector('#sabnzbdApiKey').value;
@@ -115,6 +132,8 @@
                         document.querySelector('#primaryLanguage').value = config.PrimaryLanguage || '';
                         document.querySelector('#secondaryLanguages').value = (config.SecondaryLanguages || []).join(', ');
                         document.querySelector('#filterByLanguage').checked = !!config.FilterByLanguage;
+                        document.querySelector('#enableXrel').checked = !!config.EnableXrel;
+                        document.querySelector('#xrelBaseUrl').value = config.XrelBaseUrl || 'https://api.xrel.to/v2';
                         document.querySelector('#nzbDropFolder').value = config.NzbDropFolder || '';
                         document.querySelector('#sabnzbdUrl').value = config.SabnzbdUrl || '';
                         document.querySelector('#sabnzbdApiKey').value = config.SabnzbdApiKey || '';

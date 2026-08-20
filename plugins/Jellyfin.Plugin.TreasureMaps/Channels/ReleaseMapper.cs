@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using Jellyfin.Plugin.TreasureMaps.Api;
 using Jellyfin.Plugin.TreasureMaps.Languages;
+using Jellyfin.Plugin.TreasureMaps.Xrel;
 using MediaBrowser.Controller.Channels;
 using MediaBrowser.Model.Channels;
 
@@ -22,7 +23,7 @@ public static class ReleaseMapper
     /// <param name="minRating">The minimum community rating (0 disables the filter).</param>
     /// <returns>The mapped channel item, or <c>null</c> if the release is invalid or filtered out.</returns>
     public static ChannelItemInfo? ToChannelItem(Release release, double minRating)
-        => ToChannelItem(release, minRating, default, out _);
+        => ToChannelItem(release, minRating, default, null, out _);
 
     /// <summary>
     /// Converts a release into a rich channel item, applying rating and language filters.
@@ -30,9 +31,10 @@ public static class ReleaseMapper
     /// <param name="release">The release to map.</param>
     /// <param name="minRating">The minimum community rating (0 disables the filter).</param>
     /// <param name="languages">The language preferences.</param>
+    /// <param name="xrel">Optional xREL rating for this release.</param>
     /// <param name="languageRank">Outputs the language sort rank (lower is better).</param>
     /// <returns>The mapped channel item, or <c>null</c> if the release is invalid or filtered out.</returns>
-    public static ChannelItemInfo? ToChannelItem(Release release, double minRating, LanguagePreferences languages, out int languageRank)
+    public static ChannelItemInfo? ToChannelItem(Release release, double minRating, LanguagePreferences languages, XrelRating? xrel, out int languageRank)
     {
         languageRank = 0;
         if (release is null || string.IsNullOrWhiteSpace(release.Guid))
@@ -103,6 +105,8 @@ public static class ReleaseMapper
             item.Tags.Add(languageMatch.Label);
         }
 
+        ApplyXrel(item, xrel);
+
         var imdb = release.Ids?.Imdb ?? tv?.Imdb;
         if (!string.IsNullOrWhiteSpace(imdb))
         {
@@ -120,6 +124,51 @@ public static class ReleaseMapper
 
     private static string? FirstFour(string? value)
         => string.IsNullOrWhiteSpace(value) || value.Length < 4 ? value : value[..4];
+
+    private static void ApplyXrel(ChannelItemInfo item, XrelRating? xrel)
+    {
+        if (xrel is not { HasAny: true } rating)
+        {
+            return;
+        }
+
+        var parts = new List<string>();
+        if (rating.VideoRating.HasValue)
+        {
+            parts.Add("V" + rating.VideoRating.Value.ToString("0.#", CultureInfo.InvariantCulture));
+        }
+
+        if (rating.AudioRating.HasValue)
+        {
+            parts.Add("A" + rating.AudioRating.Value.ToString("0.#", CultureInfo.InvariantCulture));
+        }
+
+        var label = "xREL";
+        if (parts.Count > 0)
+        {
+            label += " " + string.Join("/", parts);
+            if (rating.NumRatings > 0)
+            {
+                label += " (" + rating.NumRatings.ToString(CultureInfo.InvariantCulture) + ")";
+            }
+        }
+
+        item.Tags.Add(label);
+
+        // Use the xREL title rating as the community rating when the indexer has none.
+        if (!item.CommunityRating.HasValue && rating.TitleRating.HasValue)
+        {
+            item.CommunityRating = (float)rating.TitleRating.Value;
+        }
+
+        var overviewLine = "xREL rating: " + (parts.Count > 0 ? string.Join(", ", parts) : "n/a");
+        if (rating.TitleRating.HasValue)
+        {
+            overviewLine += " | title " + rating.TitleRating.Value.ToString("0.#", CultureInfo.InvariantCulture);
+        }
+
+        item.Overview = string.IsNullOrEmpty(item.Overview) ? overviewLine : item.Overview + "\n\n" + overviewLine;
+    }
 
     /// <summary>
     /// Formats a byte count as a human-readable size.

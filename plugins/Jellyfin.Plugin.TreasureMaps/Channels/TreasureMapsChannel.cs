@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.TreasureMaps.Api;
 using Jellyfin.Plugin.TreasureMaps.Configuration;
 using Jellyfin.Plugin.TreasureMaps.Languages;
+using Jellyfin.Plugin.TreasureMaps.Xrel;
 using MediaBrowser.Controller.Channels;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Channels;
@@ -23,16 +24,19 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia
     private const string GenrePrefix = "genre:";
 
     private readonly TreasureMapsApiClient _client;
+    private readonly XrelClient _xrel;
     private readonly ILogger<TreasureMapsChannel> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TreasureMapsChannel"/> class.
     /// </summary>
     /// <param name="client">The Treasure-Maps API client.</param>
+    /// <param name="xrel">The xREL client.</param>
     /// <param name="logger">The logger.</param>
-    public TreasureMapsChannel(TreasureMapsApiClient client, ILogger<TreasureMapsChannel> logger)
+    public TreasureMapsChannel(TreasureMapsApiClient client, XrelClient xrel, ILogger<TreasureMapsChannel> logger)
     {
         _client = client;
+        _xrel = xrel;
         _logger = logger;
     }
 
@@ -57,7 +61,8 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
                 c.MinRating.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                c.ResultLimit.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                c.ResultLimit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                c.EnableXrel ? "x1" : "x0");
         }
     }
 
@@ -104,19 +109,19 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia
             if (string.Equals(query.FolderId, "trending", StringComparison.Ordinal))
             {
                 var trending = await _client.GetTrendingAsync(Config.ResultLimit, cancellationToken).ConfigureAwait(false);
-                return MapReleases(trending, "trending");
+                return await MapReleasesAsync(trending, "trending", cancellationToken).ConfigureAwait(false);
             }
 
             if (string.Equals(query.FolderId, "movies", StringComparison.Ordinal))
             {
                 var movies = await _client.SearchMoviesAsync(null, null, Config.ResultLimit, cancellationToken).ConfigureAwait(false);
-                return MapReleases(movies, "movies");
+                return await MapReleasesAsync(movies, "movies", cancellationToken).ConfigureAwait(false);
             }
 
             if (string.Equals(query.FolderId, "tv", StringComparison.Ordinal))
             {
                 var tv = await _client.SearchTvAsync(null, Config.ResultLimit, cancellationToken).ConfigureAwait(false);
-                return MapReleases(tv, "tv");
+                return await MapReleasesAsync(tv, "tv", cancellationToken).ConfigureAwait(false);
             }
 
             if (string.Equals(query.FolderId, "genres", StringComparison.Ordinal))
@@ -128,7 +133,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia
             {
                 var genre = query.FolderId[GenrePrefix.Length..];
                 var byGenre = await _client.SearchMoviesAsync(null, genre, Config.ResultLimit, cancellationToken).ConfigureAwait(false);
-                return MapReleases(byGenre, query.FolderId);
+                return await MapReleasesAsync(byGenre, query.FolderId, cancellationToken).ConfigureAwait(false);
             }
 
             return new ChannelItemResult();
@@ -173,7 +178,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia
         try
         {
             var trending = await _client.GetTrendingAsync(Config.ResultLimit, cancellationToken).ConfigureAwait(false);
-            return MapReleases(trending, "latest").Items;
+            return (await MapReleasesAsync(trending, "latest", cancellationToken).ConfigureAwait(false)).Items;
         }
         catch (Exception ex)
         {
@@ -203,23 +208,33 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia
         return new ChannelItemResult { Items = items, TotalRecordCount = items.Count };
     }
 
-    private ChannelItemResult MapReleases(ReleaseListResponse? response, string scope)
+    private async Task<ChannelItemResult> MapReleasesAsync(ReleaseListResponse? response, string scope, CancellationToken cancellationToken)
     {
         var prefs = GetLanguagePreferences();
+        var releases = response?.Items ?? Array.Empty<Release>();
+        var xrelRatings = await FetchXrelRatingsAsync(releases, cancellationToken).ConfigureAwait(false);
+
+        // Fold the settings-dependent DataVersion into the id so a config change recreates items
+        // fresh (Jellyfin does not refresh tags/overview on reused channel items).
+        var marker = ShortHash(DataVersion);
+
         var ranked = new List<(ChannelItemInfo Item, int Rank, int Order)>();
-        if (response?.Items is not null)
+        var order = 0;
+        foreach (var release in releases)
         {
-            var order = 0;
-            foreach (var release in response.Items)
+            XrelRating? xrel = null;
+            if (!string.IsNullOrWhiteSpace(release.Title))
             {
-                var item = ReleaseMapper.ToChannelItem(release, Config.MinRating, prefs, out var rank);
-                if (item is not null)
-                {
-                    // Scope the item id per folder so the same release appearing in multiple
-                    // folders (Trending/Movies/Latest) does not get reparented and emptied by Jellyfin.
-                    item.Id = scope + "|" + item.Id;
-                    ranked.Add((item, rank, order++));
-                }
+                xrelRatings.TryGetValue(release.Title, out xrel);
+            }
+
+            var item = ReleaseMapper.ToChannelItem(release, Config.MinRating, prefs, xrel, out var rank);
+            if (item is not null)
+            {
+                // Scope the item id per folder (so the same release in multiple folders is not
+                // reparented/emptied) and per config marker (so settings changes refresh items).
+                item.Id = scope + "|" + marker + "|" + item.Id;
+                ranked.Add((item, rank, order++));
             }
         }
 
@@ -231,6 +246,38 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia
             .ToList();
 
         return new ChannelItemResult { Items = items, TotalRecordCount = items.Count };
+    }
+
+    private async Task<Dictionary<string, XrelRating?>> FetchXrelRatingsAsync(IReadOnlyList<Release> releases, CancellationToken cancellationToken)
+    {
+        var map = new Dictionary<string, XrelRating?>(StringComparer.OrdinalIgnoreCase);
+        if (!XrelClient.IsEnabled)
+        {
+            return map;
+        }
+
+        var names = releases
+            .Select(r => r.Title)
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var results = await Task.WhenAll(names.Select(async name =>
+            (Name: name!, Rating: await _xrel.GetRatingByDirnameAsync(name, cancellationToken).ConfigureAwait(false))))
+            .ConfigureAwait(false);
+
+        foreach (var (name, rating) in results)
+        {
+            map[name] = rating;
+        }
+
+        return map;
+    }
+
+    private static string ShortHash(string value)
+    {
+        var bytes = System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(value));
+        return Convert.ToHexString(bytes, 0, 4).ToLowerInvariant();
     }
 
     private static LanguagePreferences GetLanguagePreferences()
