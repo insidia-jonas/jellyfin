@@ -78,6 +78,15 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   **same** id, Jellyfin reparents the shared item and the other folders appear empty after you
   open one of them. The plugin therefore prefixes item ids with a per-folder scope
   (`"movies|<guid>"`, `"latest|<guid>"`, …). Keep leaf item ids unique per folder.
+- xREL ratings: the config page has an "enable xREL" toggle + base URL (public API, no key). When
+  enabled, each release is looked up on xREL by its scene/release name (`/release/info.json?dirname=`)
+  and the scene video/audio rating (+ title rating) is added as a tag/overview line and, when the
+  indexer has no rating, used as the community rating. `XrelClient` caches lookups in memory.
+- Reliable-refresh gotcha: Jellyfin does not refresh tags/overview on **reused** channel items, so
+  enrichment (language/xREL) would appear stale after enabling it on already-materialized items. The
+  channel therefore folds a hash of the settings-dependent `DataVersion` into each item id, so a
+  settings change recreates items fresh. (Rapidly changing settings during a single session can still
+  leave orphaned items from earlier generations until the channel fully reconciles.)
 - Language preferences: the config page has a primary language + accepted secondary languages +
   a "only these languages" filter. Releases are filtered/ranked by audio language
   (`LanguageMatcher`). Two Jellyfin caveats: (1) channel **folders are sorted by Jellyfin**
