@@ -78,6 +78,15 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   **same** id, Jellyfin reparents the shared item and the other folders appear empty after you
   open one of them. The plugin therefore prefixes item ids with a per-folder scope
   (`"movies|<guid>"`, `"latest|<guid>"`, …). Keep leaf item ids unique per folder.
+- Browse & Grab: the plugin ships a **second** dashboard page (`browse.html`, registered in
+  `Plugin.GetPages()` as `TreasureMapsBrowse`, linked from the config page). It calls
+  `GET TreasureMaps/Search?type=movie|tv&q=` and each result's `Grab` button calls
+  `POST TreasureMaps/Releases/{guid}/Grab?type=&name=`. The Grab endpoint auto-picks the SABnzbd
+  category by media type (`SabnzbdMovieCategory` / `SabnzbdTvCategory`, fallback `SabnzbdCategory`)
+  so movies and series land in their own SABnzbd completed folders — point the Jellyfin Movies/Shows
+  libraries at those folders and everything sorts itself. Jellyfin channels can't host custom
+  action buttons, which is why grabbing lives on this dedicated plugin page rather than on channel
+  cards.
 - Release-name parsing: `ReleaseNameParser` extracts scene attributes from the release/dirname
   (resolution, source BluRay/WEB/CAM/TELESYNC/…, codec, HDR, `DL` dual-language, detected
   languages, group) and — for theatrical rips — the audio source `MIC` (microphone, worse) vs
