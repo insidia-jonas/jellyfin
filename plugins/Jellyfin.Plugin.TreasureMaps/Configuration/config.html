@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Treasure-Maps</title>
+</head>
+<body>
+    <div id="TreasureMapsConfigPage" data-role="page" class="page type-interior pluginConfigurationPage configPage" data-require="emby-input,emby-button,emby-checkbox">
+        <div data-role="content">
+            <div class="content-primary">
+                <h1>Treasure-Maps</h1>
+                <p class="fieldDescription" style="margin-bottom:1.5em;">
+                    Connect Jellyfin to your Treasure-Maps indexer. Enter the server address and your API key,
+                    then browse movie releases from the <strong>Treasure-Maps</strong> channel on the home screen.
+                </p>
+                <form class="treasureMapsConfigForm">
+                    <div class="inputContainer inputContainer-withDescription">
+                        <input is="emby-input" type="text" id="baseUrl" label="Base URL" />
+                        <div class="fieldDescription">The Treasure-Maps server address, e.g. <code>https://treasure-maps.example</code>. The <code>/api/v1</code> path is added automatically.</div>
+                    </div>
+                    <div class="inputContainer inputContainer-withDescription">
+                        <input is="emby-input" type="password" id="apiKey" label="API key" />
+                        <div class="fieldDescription">Sent as the <code>X-API-Key</code> header. Find it in your Treasure-Maps account settings.</div>
+                    </div>
+                    <div class="inputContainer inputContainer-withDescription">
+                        <input is="emby-input" type="number" id="resultLimit" pattern="[0-9]*" min="1" max="500" label="Results per page" />
+                        <div class="fieldDescription">How many releases to load per browse request (1-500).</div>
+                    </div>
+                    <div class="inputContainer inputContainer-withDescription">
+                        <input is="emby-input" type="number" id="minRating" min="0" max="10" step="0.1" label="Minimum rating" />
+                        <div class="fieldDescription">Hide releases below this community rating. Set to 0 to show everything.</div>
+                    </div>
+                    <div class="inputContainer inputContainer-withDescription">
+                        <input is="emby-input" type="text" id="nzbDropFolder" label="NZB drop folder (optional)" />
+                        <div class="fieldDescription">
+                            Optional local folder for grabbed NZB files. Point a Usenet client (SABnzbd / NZBGet watched folder)
+                            here to actually download a movie. Jellyfin itself does not download or unpack NZBs.
+                        </div>
+                    </div>
+                    <div style="margin-top:1em;">
+                        <button is="emby-button" type="submit" class="raised button-submit block"><span>Save</span></button>
+                        <button is="emby-button" type="button" id="testConnection" class="raised block"><span>Save &amp; test connection</span></button>
+                    </div>
+                    <div id="testResult" class="fieldDescription" style="margin-top:1em;"></div>
+                </form>
+            </div>
+        </div>
+        <script type="text/javascript">
+            var TreasureMapsConfig = {
+                pluginId: "e2c9a6f4-8b1d-4f3a-9c2e-7a5b6d4c3e21"
+            };
+
+            function readFormInto(config) {
+                config.BaseUrl = document.querySelector('#baseUrl').value;
+                config.ApiKey = document.querySelector('#apiKey').value;
+                config.ResultLimit = parseInt(document.querySelector('#resultLimit').value, 10) || 60;
+                config.MinRating = parseFloat(document.querySelector('#minRating').value) || 0;
+                config.NzbDropFolder = document.querySelector('#nzbDropFolder').value;
+                return config;
+            }
+
+            document.querySelector('.configPage')
+                .addEventListener('pageshow', function () {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(TreasureMapsConfig.pluginId).then(function (config) {
+                        document.querySelector('#baseUrl').value = config.BaseUrl || '';
+                        document.querySelector('#apiKey').value = config.ApiKey || '';
+                        document.querySelector('#resultLimit').value = config.ResultLimit || 60;
+                        document.querySelector('#minRating').value = config.MinRating || 0;
+                        document.querySelector('#nzbDropFolder').value = config.NzbDropFolder || '';
+                        Dashboard.hideLoadingMsg();
+                    });
+                });
+
+            document.querySelector('.treasureMapsConfigForm')
+                .addEventListener('submit', function (e) {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(TreasureMapsConfig.pluginId).then(function (config) {
+                        ApiClient.updatePluginConfiguration(TreasureMapsConfig.pluginId, readFormInto(config))
+                            .then(Dashboard.processPluginConfigurationUpdateResult);
+                    });
+                    e.preventDefault();
+                    return false;
+                });
+
+            document.querySelector('#testConnection')
+                .addEventListener('click', function () {
+                    var resultEl = document.querySelector('#testResult');
+                    resultEl.textContent = 'Saving and testing...';
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(TreasureMapsConfig.pluginId).then(function (config) {
+                        ApiClient.updatePluginConfiguration(TreasureMapsConfig.pluginId, readFormInto(config)).then(function () {
+                            ApiClient.fetch({
+                                url: ApiClient.getUrl('TreasureMaps/Test'),
+                                type: 'GET',
+                                dataType: 'json',
+                                headers: { accept: 'application/json' }
+                            }).then(function (res) {
+                                Dashboard.hideLoadingMsg();
+                                if (res && res.ok) {
+                                    resultEl.style.color = 'green';
+                                    resultEl.textContent = 'Connected as ' + (res.username || 'user') + (res.role ? ' (' + res.role + ')' : '') + '.';
+                                } else {
+                                    resultEl.style.color = 'red';
+                                    resultEl.textContent = 'Connection failed: ' + ((res && res.message) || 'unknown error');
+                                }
+                            }, function () {
+                                Dashboard.hideLoadingMsg();
+                                resultEl.style.color = 'red';
+                                resultEl.textContent = 'Connection test request failed.';
+                            });
+                        });
+                    });
+                });
+        </script>
+    </div>
+</body>
+</html>

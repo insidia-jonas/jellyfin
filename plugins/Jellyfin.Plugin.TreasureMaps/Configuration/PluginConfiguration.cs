@@ -1,0 +1,37 @@
+using MediaBrowser.Model.Plugins;
+
+namespace Jellyfin.Plugin.TreasureMaps.Configuration;
+
+/// <summary>
+/// Configuration for the Treasure-Maps plugin.
+/// </summary>
+public class PluginConfiguration : BasePluginConfiguration
+{
+    /// <summary>
+    /// Gets or sets the base URL of the Treasure-Maps API (for example <c>https://treasure-maps.example</c>).
+    /// The <c>/api/v1</c> prefix is appended automatically.
+    /// </summary>
+    public string BaseUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the API key sent as the <c>X-API-Key</c> header.
+    /// </summary>
+    public string ApiKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the maximum number of releases fetched per browse request.
+    /// </summary>
+    public int ResultLimit { get; set; } = 60;
+
+    /// <summary>
+    /// Gets or sets the minimum community rating used when browsing (0 disables the filter).
+    /// </summary>
+    public double MinRating { get; set; }
+
+    /// <summary>
+    /// Gets or sets an optional local folder into which grabbed NZB files are written.
+    /// Point a Usenet download client (SABnzbd / NZBGet "watched folder") at this path to
+    /// actually download the movie; once imported into a Jellyfin library it becomes playable.
+    /// </summary>
+    public string NzbDropFolder { get; set; } = string.Empty;
+}
