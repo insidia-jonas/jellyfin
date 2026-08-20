@@ -91,11 +91,9 @@ public static class ReleaseMapper
             ProductionYear = isTv ? ParseYear(FirstFour(tv?.FirstAired)) : ParseYear(movie?.Year)
         };
 
-        if (!string.IsNullOrWhiteSpace(movie?.Genres))
+        if (movie?.Genres is { Count: > 0 })
         {
-            item.Genres = movie!.Genres!
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .ToList();
+            item.Genres = movie.Genres.ToList();
         }
 
         var quality = string.Join(' ', new[] { release.Video?.Resolution, release.Video?.Codec }

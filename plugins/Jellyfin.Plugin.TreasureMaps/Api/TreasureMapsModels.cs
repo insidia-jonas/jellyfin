@@ -94,14 +94,17 @@ public class ReleaseTv
 
     /// <summary>Gets or sets the IMDb id.</summary>
     [JsonPropertyName("imdb")]
+    [JsonConverter(typeof(FlexibleStringConverter))]
     public string? Imdb { get; set; }
 
     /// <summary>Gets or sets the TMDB id.</summary>
     [JsonPropertyName("tmdb")]
+    [JsonConverter(typeof(FlexibleStringConverter))]
     public string? Tmdb { get; set; }
 
     /// <summary>Gets or sets the first-aired date (used for the year).</summary>
     [JsonPropertyName("first_aired")]
+    [JsonConverter(typeof(FlexibleStringConverter))]
     public string? FirstAired { get; set; }
 }
 
@@ -110,10 +113,12 @@ public class ReleaseIds
 {
     /// <summary>Gets or sets the IMDb id.</summary>
     [JsonPropertyName("imdb")]
+    [JsonConverter(typeof(FlexibleStringConverter))]
     public string? Imdb { get; set; }
 
     /// <summary>Gets or sets the TMDB id.</summary>
     [JsonPropertyName("tmdb")]
+    [JsonConverter(typeof(FlexibleStringConverter))]
     public string? Tmdb { get; set; }
 }
 
@@ -156,25 +161,29 @@ public class ReleaseMovie
     [JsonPropertyName("plot")]
     public string? Plot { get; set; }
 
-    /// <summary>Gets or sets the rating (as a string).</summary>
+    /// <summary>Gets or sets the rating (may be a string or a number).</summary>
     [JsonPropertyName("rating")]
+    [JsonConverter(typeof(FlexibleStringConverter))]
     public string? Rating { get; set; }
 
-    /// <summary>Gets or sets the comma-separated genres.</summary>
+    /// <summary>Gets or sets the genres (accepts a comma-separated string or an array).</summary>
     [JsonPropertyName("genres")]
-    public string? Genres { get; set; }
+    [JsonConverter(typeof(StringOrArrayConverter))]
+    public List<string>? Genres { get; set; }
 
-    /// <summary>Gets or sets the release year (as a string).</summary>
+    /// <summary>Gets or sets the release year (may be a string or a number).</summary>
     [JsonPropertyName("year")]
+    [JsonConverter(typeof(FlexibleStringConverter))]
     public string? Year { get; set; }
 
     /// <summary>Gets or sets the director.</summary>
     [JsonPropertyName("director")]
     public string? Director { get; set; }
 
-    /// <summary>Gets or sets the comma-separated actors.</summary>
+    /// <summary>Gets or sets the actors (accepts a comma-separated string or an array).</summary>
     [JsonPropertyName("actors")]
-    public string? Actors { get; set; }
+    [JsonConverter(typeof(StringOrArrayConverter))]
+    public List<string>? Actors { get; set; }
 }
 
 /// <summary>Related links for a release.</summary>

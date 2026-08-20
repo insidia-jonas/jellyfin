@@ -115,6 +115,47 @@ public class ReleaseMapperTests
     }
 
     [Fact]
+    public void Deserialize_RealApiShape_GenresArray_And_NumericFields()
+    {
+        // Mirrors the real Treasure-Maps API: genres as an ARRAY, year/rating/ids as NUMBERS.
+        const string json = """
+        {
+          "items": [
+            {
+              "guid": "guid-x",
+              "title": "Spider-Man.No.Way.Home.2021.1080p",
+              "size": 12000000000,
+              "ids": { "imdb": 10872600, "tmdb": 634649 },
+              "images": { "cover": "https://img/cover.jpg" },
+              "video": { "codec": "H264", "resolution": "1080p" },
+              "movie": {
+                "title": "Spider-Man: No Way Home",
+                "rating": 8.2,
+                "genres": ["Action", "Adventure", "Science Fiction"],
+                "year": 2021,
+                "actors": ["Tom Holland", "Zendaya"]
+              }
+            }
+          ]
+        }
+        """;
+
+        var response = JsonSerializer.Deserialize<ReleaseListResponse>(json, _options);
+        Assert.NotNull(response);
+        var release = Assert.Single(response!.Items);
+        Assert.Equal("2021", release.Movie?.Year);
+        Assert.Equal("8.2", release.Movie?.Rating);
+        Assert.Equal("10872600", release.Ids?.Imdb);
+        Assert.Contains("Science Fiction", release.Movie!.Genres!);
+
+        var item = ReleaseMapper.ToChannelItem(release, 0);
+        Assert.NotNull(item);
+        Assert.Equal("Spider-Man: No Way Home", item!.Name);
+        Assert.Equal(2021, item.ProductionYear);
+        Assert.Contains("Action", item.Genres);
+    }
+
+    [Fact]
     public void ToChannelItem_MapsTvRelease()
     {
         const string tvJson = """

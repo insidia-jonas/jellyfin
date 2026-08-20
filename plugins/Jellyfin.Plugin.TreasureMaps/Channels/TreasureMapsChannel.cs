@@ -56,7 +56,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia
             var c = Config;
             return string.Join(
                 '|',
-                "9",
+                "10",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
