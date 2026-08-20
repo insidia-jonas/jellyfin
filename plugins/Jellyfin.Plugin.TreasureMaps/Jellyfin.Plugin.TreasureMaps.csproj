@@ -21,6 +21,8 @@
   <ItemGroup>
     <None Remove="Configuration\config.html" />
     <EmbeddedResource Include="Configuration\config.html" />
+    <None Remove="Configuration\browse.html" />
+    <EmbeddedResource Include="Configuration\browse.html" />
   </ItemGroup>
 
 </Project>

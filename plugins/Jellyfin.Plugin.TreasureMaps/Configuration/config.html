@@ -78,8 +78,16 @@
                             <div class="fieldDescription">SABnzbd → Config → General → API Key.</div>
                         </div>
                         <div class="inputContainer inputContainer-withDescription">
-                            <input is="emby-input" type="text" id="sabnzbdCategory" label="SABnzbd category (optional)" />
-                            <div class="fieldDescription">Assigns downloads to a SABnzbd category, e.g. <code>movies</code>.</div>
+                            <input is="emby-input" type="text" id="sabnzbdMovieCategory" label="SABnzbd category — Movies" />
+                            <div class="fieldDescription">Grabbed <strong>movies</strong> use this SABnzbd category, e.g. <code>movies</code>. Point your Jellyfin "Movies" library at this category's completed folder.</div>
+                        </div>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="text" id="sabnzbdTvCategory" label="SABnzbd category — TV Shows" />
+                            <div class="fieldDescription">Grabbed <strong>series</strong> use this SABnzbd category, e.g. <code>tv</code>. Point your Jellyfin "Shows" library at this category's completed folder.</div>
+                        </div>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="text" id="sabnzbdCategory" label="SABnzbd category — fallback (optional)" />
+                            <div class="fieldDescription">Used when a per-type category above is empty.</div>
                         </div>
                         <button is="emby-button" type="button" id="testSabnzbd" class="raised block"><span>Save &amp; test SABnzbd</span></button>
                         <div id="sabResult" class="fieldDescription" style="margin-top:0.5em;"></div>
@@ -118,6 +126,8 @@
                 config.SabnzbdUrl = document.querySelector('#sabnzbdUrl').value;
                 config.SabnzbdApiKey = document.querySelector('#sabnzbdApiKey').value;
                 config.SabnzbdCategory = document.querySelector('#sabnzbdCategory').value;
+                config.SabnzbdMovieCategory = document.querySelector('#sabnzbdMovieCategory').value.trim();
+                config.SabnzbdTvCategory = document.querySelector('#sabnzbdTvCategory').value.trim();
                 return config;
             }
 
@@ -138,6 +148,8 @@
                         document.querySelector('#sabnzbdUrl').value = config.SabnzbdUrl || '';
                         document.querySelector('#sabnzbdApiKey').value = config.SabnzbdApiKey || '';
                         document.querySelector('#sabnzbdCategory').value = config.SabnzbdCategory || '';
+                        document.querySelector('#sabnzbdMovieCategory').value = config.SabnzbdMovieCategory || 'movies';
+                        document.querySelector('#sabnzbdTvCategory').value = config.SabnzbdTvCategory || 'tv';
                         Dashboard.hideLoadingMsg();
                     });
                 });

@@ -1,8 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net.Mime;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.TreasureMaps.ReleaseNaming;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -90,16 +93,70 @@ public class TreasureMapsController : ControllerBase
     }
 
     /// <summary>
-    /// Grabs a release: downloads its NZB and either pushes it to SABnzbd (preferred) or writes
-    /// it into the configured drop folder.
+    /// Searches Treasure-Maps for the Browse &amp; Grab page.
+    /// </summary>
+    /// <param name="type">The media type to search: <c>movie</c> or <c>tv</c>.</param>
+    /// <param name="q">The free-text query (optional).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A lightweight list of releases for the UI.</returns>
+    [HttpGet("Search")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> Search([FromQuery] string type, [FromQuery] string? q, CancellationToken cancellationToken)
+    {
+        if (!TreasureMapsApiClient.IsConfigured)
+        {
+            return Ok(new { ok = false, message = "Configure the Treasure-Maps connection first.", items = Array.Empty<object>() });
+        }
+
+        var isTv = string.Equals(type, "tv", StringComparison.OrdinalIgnoreCase);
+        var limit = Plugin.Instance?.Configuration.ResultLimit ?? 60;
+        try
+        {
+            var response = isTv
+                ? await _client.SearchTvAsync(q, limit, cancellationToken).ConfigureAwait(false)
+                : await _client.SearchMoviesAsync(q, null, limit, cancellationToken).ConfigureAwait(false);
+
+            var items = (response?.Items ?? Enumerable.Empty<Release>())
+                .Where(r => !string.IsNullOrWhiteSpace(r.Guid))
+                .Select(r =>
+                {
+                    var parsed = ReleaseNameParser.Parse(r.Title);
+                    var title = r.Movie?.Title ?? r.Tv?.Title ?? r.Title;
+                    return new
+                    {
+                        guid = r.Guid,
+                        title,
+                        scene = r.Title,
+                        year = r.Movie?.Year ?? r.Tv?.FirstAired,
+                        poster = r.Images?.Cover,
+                        type = isTv ? "tv" : "movie",
+                        quality = string.Join(" · ", parsed.DisplayTags)
+                    };
+                })
+                .ToList();
+
+            return Ok(new { ok = true, items });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Treasure-Maps search failed");
+            return Ok(new { ok = false, message = ex.Message, items = Array.Empty<object>() });
+        }
+    }
+
+    /// <summary>
+    /// Grabs a release: downloads its NZB and pushes it to SABnzbd with the category that matches the
+    /// media type (so movies and series land in their own folders), or writes it to the drop folder.
     /// </summary>
     /// <param name="guid">The release GUID.</param>
+    /// <param name="type">The media type (<c>movie</c> or <c>tv</c>); auto-detected from the name when omitted.</param>
+    /// <param name="name">An optional human-readable name for the SABnzbd job.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The result of the grab (SABnzbd job ids or the written file path).</returns>
     [HttpPost("Releases/{guid}/Grab")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> Grab([FromRoute] string guid, CancellationToken cancellationToken)
+    public async Task<IActionResult> Grab([FromRoute] string guid, [FromQuery] string? type, [FromQuery] string? name, CancellationToken cancellationToken)
     {
         var config = Plugin.Instance?.Configuration ?? new Configuration.PluginConfiguration();
         if (!SabnzbdClient.IsConfigured && string.IsNullOrWhiteSpace(config.NzbDropFolder))
@@ -107,16 +164,20 @@ public class TreasureMapsController : ControllerBase
             return BadRequest(new { ok = false, message = "Configure SABnzbd or an NZB drop folder first." });
         }
 
+        var isTv = ResolveIsTv(type, name);
+        var category = PickCategory(config, isTv);
+
         try
         {
             var payload = await _client.DownloadNzbAsync(guid, cancellationToken).ConfigureAwait(false);
-            var safeName = guid.Replace(Path.DirectorySeparatorChar, '_').Replace(Path.AltDirectorySeparatorChar, '_');
+            var jobName = string.IsNullOrWhiteSpace(name) ? guid : name!;
+            var safeName = Sanitize(jobName);
 
             if (SabnzbdClient.IsConfigured)
             {
-                var nzoIds = await _sabnzbd.AddNzbAsync(payload, safeName, cancellationToken).ConfigureAwait(false);
-                _logger.LogInformation("Grabbed Treasure-Maps release {Guid} into SABnzbd ({Ids})", guid, string.Join(",", nzoIds));
-                return Ok(new { ok = true, target = "sabnzbd", nzoIds, bytes = payload.Length });
+                var nzoIds = await _sabnzbd.AddNzbAsync(payload, safeName, category, cancellationToken).ConfigureAwait(false);
+                _logger.LogInformation("Grabbed {Guid} into SABnzbd category '{Category}' ({Ids})", guid, category, string.Join(",", nzoIds));
+                return Ok(new { ok = true, target = "sabnzbd", category, mediaType = isTv ? "tv" : "movie", nzoIds, bytes = payload.Length });
             }
 
             Directory.CreateDirectory(config.NzbDropFolder);
@@ -130,5 +191,34 @@ public class TreasureMapsController : ControllerBase
             _logger.LogError(ex, "Failed to grab Treasure-Maps release {Guid}", guid);
             return Ok(new { ok = false, message = ex.Message });
         }
+    }
+
+    private static bool ResolveIsTv(string? type, string? name)
+    {
+        if (string.Equals(type, "tv", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.Equals(type, "movie", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // No explicit type: infer from the scene name (SxxExx => series).
+        return !string.IsNullOrWhiteSpace(name)
+            && System.Text.RegularExpressions.Regex.IsMatch(name!, "S[0-9]{1,2}E[0-9]{1,3}", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    }
+
+    private static string? PickCategory(Configuration.PluginConfiguration config, bool isTv)
+    {
+        var preferred = isTv ? config.SabnzbdTvCategory : config.SabnzbdMovieCategory;
+        return !string.IsNullOrWhiteSpace(preferred) ? preferred : config.SabnzbdCategory;
+    }
+
+    private static string Sanitize(string name)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        return new string(name.Select(c => invalid.Contains(c) ? '_' : c).ToArray());
     }
 }

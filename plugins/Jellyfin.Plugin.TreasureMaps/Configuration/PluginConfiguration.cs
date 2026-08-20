@@ -66,9 +66,21 @@ public class PluginConfiguration : BasePluginConfiguration
     public string SabnzbdApiKey { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the SABnzbd category to assign to grabbed downloads (optional, e.g. <c>movies</c>).
+    /// Gets or sets the default/fallback SABnzbd category (used when a per-type category is not set).
     /// </summary>
     public string SabnzbdCategory { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the SABnzbd category for movie grabs (e.g. <c>movies</c>). SABnzbd routes this
+    /// category to its own completed folder, which you point the Jellyfin "Movies" library at.
+    /// </summary>
+    public string SabnzbdMovieCategory { get; set; } = "movies";
+
+    /// <summary>
+    /// Gets or sets the SABnzbd category for TV grabs (e.g. <c>tv</c>). SABnzbd routes this category
+    /// to its own completed folder, which you point the Jellyfin "Shows" library at.
+    /// </summary>
+    public string SabnzbdTvCategory { get; set; } = "tv";
 
     /// <summary>
     /// Gets or sets a value indicating whether releases are enriched with xREL ratings

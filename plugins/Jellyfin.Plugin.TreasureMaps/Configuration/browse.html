@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Treasure-Maps · Browse &amp; Grab</title>
+</head>
+<body>
+    <div id="TreasureMapsBrowsePage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select">
+        <div data-role="content">
+            <div class="content-primary">
+                <h1>Treasure-Maps · Browse &amp; Grab</h1>
+                <p class="fieldDescription" style="margin-bottom:1em;">
+                    Search the indexer, then press <strong>Grab</strong> on a title. The plugin sends it to SABnzbd with
+                    the matching category (movies vs. series), so it lands in the right folder automatically — no manual sorting.
+                </p>
+
+                <div style="display:flex; gap:0.5em; align-items:flex-end; flex-wrap:wrap; margin-bottom:1em;">
+                    <div class="selectContainer" style="min-width:140px;">
+                        <select is="emby-select" id="searchType" label="Type">
+                            <option value="movie">Movies</option>
+                            <option value="tv">TV Shows</option>
+                        </select>
+                    </div>
+                    <div class="inputContainer" style="flex:1; min-width:220px; margin-bottom:0;">
+                        <input is="emby-input" type="text" id="searchQuery" label="Search (leave empty for latest)" />
+                    </div>
+                    <button is="emby-button" type="button" id="searchButton" class="raised button-submit"><span>Search</span></button>
+                </div>
+
+                <div id="searchStatus" class="fieldDescription" style="margin-bottom:1em;"></div>
+                <div id="results"></div>
+            </div>
+        </div>
+
+        <script type="text/javascript">
+            (function () {
+                var pluginId = "e2c9a6f4-8b1d-4f3a-9c2e-7a5b6d4c3e21";
+
+                function esc(s) {
+                    return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) {
+                        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+                    });
+                }
+
+                function render(items, type) {
+                    var container = document.querySelector('#results');
+                    if (!items || !items.length) {
+                        container.innerHTML = '<p class="fieldDescription">No results.</p>';
+                        return;
+                    }
+                    container.innerHTML = items.map(function (i) {
+                        var poster = i.poster
+                            ? '<img src="' + esc(i.poster) + '" style="width:92px;height:138px;object-fit:cover;border-radius:4px;flex:0 0 auto;" onerror="this.style.visibility=\'hidden\'" />'
+                            : '<div style="width:92px;height:138px;background:#333;border-radius:4px;flex:0 0 auto;"></div>';
+                        return '<div class="listItem" style="display:flex;gap:1em;align-items:flex-start;padding:0.75em 0;border-bottom:1px solid rgba(255,255,255,0.08);">'
+                            + poster
+                            + '<div style="flex:1;min-width:0;">'
+                            + '<div style="font-weight:600;">' + esc(i.title) + (i.year ? ' (' + esc(i.year) + ')' : '') + '</div>'
+                            + '<div class="fieldDescription" style="margin:.25em 0;">' + esc(i.quality || '') + '</div>'
+                            + '<div class="fieldDescription" style="opacity:.7;word-break:break-all;">' + esc(i.scene || '') + '</div>'
+                            + '</div>'
+                            + '<button is="emby-button" type="button" class="raised button-submit grabBtn" '
+                            + 'data-guid="' + esc(i.guid) + '" data-type="' + esc(type) + '" data-name="' + esc(i.scene) + '">'
+                            + '<span>Grab</span></button>'
+                            + '</div>';
+                    }).join('');
+
+                    Array.prototype.forEach.call(container.querySelectorAll('.grabBtn'), function (btn) {
+                        btn.addEventListener('click', function () { grab(btn); });
+                    });
+                }
+
+                function grab(btn) {
+                    var guid = btn.getAttribute('data-guid');
+                    var type = btn.getAttribute('data-type');
+                    var name = btn.getAttribute('data-name');
+                    var span = btn.querySelector('span');
+                    var original = span.textContent;
+                    span.textContent = 'Grabbing…';
+                    btn.disabled = true;
+                    ApiClient.fetch({
+                        url: ApiClient.getUrl('TreasureMaps/Releases/' + encodeURIComponent(guid) + '/Grab'
+                            + '?type=' + encodeURIComponent(type) + '&name=' + encodeURIComponent(name)),
+                        type: 'POST',
+                        dataType: 'json',
+                        headers: { accept: 'application/json' }
+                    }).then(function (res) {
+                        if (res && res.ok) {
+                            var where = res.target === 'sabnzbd'
+                                ? 'SABnzbd (category "' + (res.category || '') + '")'
+                                : 'drop folder';
+                            span.textContent = '✓ Sent to ' + where;
+                            Dashboard.alert({ title: 'Grabbed', message: 'Sent to ' + where + '.' });
+                        } else {
+                            span.textContent = original;
+                            btn.disabled = false;
+                            Dashboard.alert({ title: 'Grab failed', message: (res && res.message) || 'Unknown error' });
+                        }
+                    }, function () {
+                        span.textContent = original;
+                        btn.disabled = false;
+                        Dashboard.alert({ title: 'Grab failed', message: 'Request failed.' });
+                    });
+                }
+
+                function search() {
+                    var type = document.querySelector('#searchType').value;
+                    var q = document.querySelector('#searchQuery').value.trim();
+                    var status = document.querySelector('#searchStatus');
+                    status.textContent = 'Searching…';
+                    document.querySelector('#results').innerHTML = '';
+                    Dashboard.showLoadingMsg();
+                    ApiClient.fetch({
+                        url: ApiClient.getUrl('TreasureMaps/Search?type=' + encodeURIComponent(type) + '&q=' + encodeURIComponent(q)),
+                        type: 'GET',
+                        dataType: 'json',
+                        headers: { accept: 'application/json' }
+                    }).then(function (res) {
+                        Dashboard.hideLoadingMsg();
+                        if (res && res.ok) {
+                            status.textContent = (res.items ? res.items.length : 0) + ' result(s).';
+                            render(res.items, type);
+                        } else {
+                            status.textContent = (res && res.message) || 'Search failed.';
+                        }
+                    }, function () {
+                        Dashboard.hideLoadingMsg();
+                        status.textContent = 'Search request failed.';
+                    });
+                }
+
+                var page = document.querySelector('#TreasureMapsBrowsePage');
+                page.addEventListener('pageshow', function () {
+                    document.querySelector('#searchStatus').textContent = '';
+                });
+                document.querySelector('#searchButton').addEventListener('click', search);
+                document.querySelector('#searchQuery').addEventListener('keydown', function (e) {
+                    if (e.key === 'Enter') { search(); }
+                });
+            })();
+        </script>
+    </div>
+</body>
+</html>

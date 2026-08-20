@@ -61,15 +61,16 @@ public class SabnzbdClient
     /// </summary>
     /// <param name="nzbContent">The raw NZB bytes.</param>
     /// <param name="name">A human-readable name for the download.</param>
+    /// <param name="category">The SABnzbd category (determines the completed folder). May be null.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The SABnzbd job ids (nzo_ids) that were created.</returns>
-    public async Task<IReadOnlyList<string>> AddNzbAsync(byte[] nzbContent, string name, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<string>> AddNzbAsync(byte[] nzbContent, string name, string? category, CancellationToken cancellationToken)
     {
         using var client = _httpClientFactory.CreateClient();
         var url = BuildApiUrl(new Dictionary<string, string?>
         {
             ["mode"] = "addfile",
-            ["cat"] = string.IsNullOrWhiteSpace(Config.SabnzbdCategory) ? null : Config.SabnzbdCategory,
+            ["cat"] = string.IsNullOrWhiteSpace(category) ? null : category,
             ["nzbname"] = name
         });
 
