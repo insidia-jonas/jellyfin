@@ -78,6 +78,17 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   **same** id, Jellyfin reparents the shared item and the other folders appear empty after you
   open one of them. The plugin therefore prefixes item ids with a per-folder scope
   (`"movies|<guid>"`, `"latest|<guid>"`, …). Keep leaf item ids unique per folder.
+- OpenSubtitles: `OpenSubtitlesProvider` implements Jellyfin's `ISubtitleProvider` (registered in
+  `PluginServiceRegistrator`), so it appears in each item's native "Subtitles → Search". It matches
+  by OSDB **movie-hash** (exact file, computed by `MovieHasher` from the item's `MediaPath`) first,
+  then IMDb id / query, ranked by hash-match then download count. Search needs the OpenSubtitles API
+  key; downloading needs the account login (username/password). Config + "test" button on the plugin
+  config page.
+- Pi deployment: `scripts/pi/build-jellyfin12.sh` builds this repo's Jellyfin 12 (.NET 10) server +
+  the plugin on aarch64/Debian. A fresh Jellyfin 12 DB initialises fine from zero (an earlier
+  __EFMigrationsHistory crash was a corrupted partial data-dir, not a real bug); do not wipe a
+  data-dir partially. The web client (jellyfin-web) is arch-independent; the script can build it
+  (Node >= 24) or take a prebuilt `dist` via `WEB_DIST`.
 - SABnzbd self-configuration: the config page's "Set up SABnzbd categories" button
   (`POST TreasureMaps/Sabnzbd/Setup`) creates/updates the `movies` and `tv` categories with their
   download folders in SABnzbd via `mode=set_config&section=categories` (`SabnzbdMovieFolder` /
