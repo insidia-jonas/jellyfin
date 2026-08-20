@@ -20,6 +20,11 @@ public class TreasureMapsApiClient
 {
     private static readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
 
+    // Treasure-Maps category ids (movies/TV incl. language variants). Without a category the
+    // /movie endpoint returns unrelated results (even books) with no movie metadata.
+    private const string MovieCategories = "2000,2100,2200,2300";
+    private const string TvCategories = "5000,5100,5200,5300";
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<TreasureMapsApiClient> _logger;
 
@@ -57,7 +62,9 @@ public class TreasureMapsApiClient
         {
             ["q"] = string.IsNullOrWhiteSpace(query) ? "*" : query,
             ["genre"] = genre,
+            ["cat"] = MovieCategories,
             ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
+            ["sort"] = "posted_desc",
             ["extended"] = "1"
         };
         return GetJsonAsync<ReleaseListResponse>("movie", parameters, cancellationToken);
@@ -74,8 +81,10 @@ public class TreasureMapsApiClient
     {
         var parameters = new Dictionary<string, string?>
         {
-            ["q"] = string.IsNullOrWhiteSpace(query) ? "*" : query,
+            ["q"] = string.IsNullOrWhiteSpace(query) ? null : query,
+            ["cat"] = TvCategories,
             ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
+            ["sort"] = "posted_desc",
             ["extended"] = "1"
         };
         return GetJsonAsync<ReleaseListResponse>("tv", parameters, cancellationToken);
@@ -109,8 +118,11 @@ public class TreasureMapsApiClient
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The user info.</returns>
-    public Task<UserInfo?> GetUserAsync(CancellationToken cancellationToken)
-        => GetJsonAsync<UserInfo>("user", null, cancellationToken);
+    public async Task<UserInfo?> GetUserAsync(CancellationToken cancellationToken)
+    {
+        var response = await GetJsonAsync<UserInfoResponse>("user", null, cancellationToken).ConfigureAwait(false);
+        return response?.User;
+    }
 
     /// <summary>
     /// Downloads the NZB for a release, following the API redirect.

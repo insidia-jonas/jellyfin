@@ -90,7 +90,7 @@ public class TreasureMapsController : ControllerBase
         try
         {
             var user = await _client.GetUserAsync(cancellationToken).ConfigureAwait(false);
-            return Ok(new { ok = true, username = user?.Username, role = user?.Role });
+            return Ok(new { ok = true, username = user?.Username, grabs = user?.Grabs });
         }
         catch (Exception ex)
         {

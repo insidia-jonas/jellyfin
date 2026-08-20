@@ -222,14 +222,26 @@ public class CapsNamedItem
     public string? Name { get; set; }
 }
 
-/// <summary>Response for the <c>/user</c> endpoint (subset used for connection testing).</summary>
+/// <summary>Wrapper for the <c>/user</c> endpoint (<c>{ "user": { ... } }</c>).</summary>
+public class UserInfoResponse
+{
+    /// <summary>Gets or sets the user info.</summary>
+    [JsonPropertyName("user")]
+    public UserInfo? User { get; set; }
+}
+
+/// <summary>User info from the <c>/user</c> endpoint (subset used for connection testing).</summary>
 public class UserInfo
 {
     /// <summary>Gets or sets the username.</summary>
     [JsonPropertyName("username")]
     public string? Username { get; set; }
 
-    /// <summary>Gets or sets the account role.</summary>
-    [JsonPropertyName("role")]
-    public string? Role { get; set; }
+    /// <summary>Gets or sets the account role id.</summary>
+    [JsonPropertyName("role_id")]
+    public int RoleId { get; set; }
+
+    /// <summary>Gets or sets the total number of grabs.</summary>
+    [JsonPropertyName("grabs")]
+    public int Grabs { get; set; }
 }
