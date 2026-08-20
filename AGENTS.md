@@ -94,6 +94,12 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   download folders in SABnzbd via `mode=set_config&section=categories` (`SabnzbdMovieFolder` /
   `SabnzbdTvFolder`). This needs the SABnzbd **full** API key (the NZB-only key can submit downloads
   but not change config).
+- Grab from the normal UI: `GrabOnFavoriteService` (an `IHostedService`) subscribes to
+  `IUserDataManager.UserDataSaved`; marking a Treasure-Maps channel item as a **favorite** (the ❤ in
+  the normal browsing view) triggers a grab to SABnzbd. Channel items are tagged with
+  `ProviderIds["TreasureMaps"]` (release guid) + `["TreasureMapsKind"]` (movie/tv) by the mapper so
+  the handler can identify them. This exists because Jellyfin channels cannot add custom action
+  buttons to items — favouriting is the usable in-place gesture. Toggle: `GrabOnFavorite` (default on).
 - Browse & Grab: the plugin ships a **second** dashboard page (`browse.html`, registered in
   `Plugin.GetPages()` as `TreasureMapsBrowse`, linked from the config page). It calls
   `GET TreasureMaps/Search?type=movie|tv&q=` and each result's `Grab` button calls
