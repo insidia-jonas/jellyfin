@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using Jellyfin.Plugin.TreasureMaps.Api;
 using Jellyfin.Plugin.TreasureMaps.Languages;
+using Jellyfin.Plugin.TreasureMaps.ReleaseNaming;
 using Jellyfin.Plugin.TreasureMaps.Xrel;
 using MediaBrowser.Controller.Channels;
 using MediaBrowser.Model.Channels;
@@ -42,7 +43,13 @@ public static class ReleaseMapper
             return null;
         }
 
-        var languageMatch = LanguageMatcher.Match(languages, release.AudioLanguages);
+        // Parse the scene/release name for attributes the structured API fields may not carry
+        // (source, dual-language, MIC/LINE audio source, group, ...).
+        var parsed = ReleaseNameParser.Parse(release.Title);
+
+        // Language can come from the structured field and/or the name (e.g. "GERMAN DL").
+        var releaseLanguages = (release.AudioLanguages ?? Enumerable.Empty<string>()).Concat(parsed.Languages);
+        var languageMatch = LanguageMatcher.Match(languages, releaseLanguages);
         if (!languageMatch.Keep)
         {
             return null;
@@ -106,6 +113,7 @@ public static class ReleaseMapper
         }
 
         ApplyXrel(item, xrel);
+        ApplyParsedName(item, parsed);
 
         var imdb = release.Ids?.Imdb ?? tv?.Imdb;
         if (!string.IsNullOrWhiteSpace(imdb))
@@ -124,6 +132,31 @@ public static class ReleaseMapper
 
     private static string? FirstFour(string? value)
         => string.IsNullOrWhiteSpace(value) || value.Length < 4 ? value : value[..4];
+
+    private static void ApplyParsedName(ChannelItemInfo item, ParsedRelease parsed)
+    {
+        foreach (var tag in parsed.DisplayTags)
+        {
+            if (!item.Tags.Contains(tag, StringComparer.OrdinalIgnoreCase))
+            {
+                item.Tags.Add(tag);
+            }
+        }
+
+        // Spell out the theatrical audio source, since MIC vs LINE is a big quality signal.
+        var audioNote = parsed.AudioSource switch
+        {
+            "MIC" => "Audio source: MIC (microphone recording \u2013 lower quality)",
+            "LINE" => "Audio source: LINE (direct/line audio \u2013 higher quality)",
+            "MD" => "Audio source: MD (mic dubbed)",
+            _ => null
+        };
+
+        if (audioNote is not null)
+        {
+            item.Overview = string.IsNullOrEmpty(item.Overview) ? audioNote : item.Overview + "\n\n" + audioNote;
+        }
+    }
 
     private static void ApplyXrel(ChannelItemInfo item, XrelRating? xrel)
     {
