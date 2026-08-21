@@ -113,10 +113,13 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   dashboard pages. So the Fire-TV-facing surface is the **channel** (`TreasureMapsChannel`): its root
   shows the folders `Trending / Movies / TV Shows / Movies (DE) / TV Shows (DE) / Browse by genre /
   Find A–Z` **plus** ~24 recently-added title cards (mixed movies+TV), so opening the channel
-  immediately shows content. Jellyfin sorts channel views strictly by name-derived `SortName` (and
-  the title cards are folders too, so folders-first grouping can't separate them); the category
-  folders are therefore prefixed with `# ` — ASCII `#` sorts before digits and letters, pinning
-  them as one block at the top. Don't remove the prefix or the folders scatter between the posters.
+  immediately shows content. Pinning the category folders to the top must survive BOTH client sort
+  modes: the `# ` name prefix wins the SortName sort, and a far-future staggered `DateCreated`
+  (2099 minus index minutes) wins the "Date added" (descending) sort AND fixes the folders'
+  relative order; title cards/release tiles carry the real `posted_at` as `DateCreated` so
+  "Date added" shows newest first. GOTCHA: category folders have static external ids, so their
+  entities are reused forever — ChannelManager was patched (this fork) to update `DateCreated` on
+  reused channel items, otherwise provider-supplied dates only apply to brand-new entities.
 - Top-menu ordering is a per-user preference (`OrderedViews`), not sortable server-wide.
   `POST TreasureMaps/Menu/MoveChannelLast` (config-page button "Move Treasure-Maps to the end of
   the menu") rewrites every user's ordered views so the channel comes after the media libraries.

@@ -72,7 +72,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             var c = Config;
             return string.Join(
                 '|',
-                "22",
+                "23",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",

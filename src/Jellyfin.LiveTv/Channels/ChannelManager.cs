@@ -1031,6 +1031,15 @@ namespace Jellyfin.LiveTv.Channels
                 }
             }
 
+            // Honor a provider-supplied creation date on reused items too (channels use static
+            // external ids for their category folders, so those entities are practically never
+            // "new" again, but providers may still want to control the Date-added sort).
+            if (!isNew && info.DateCreated.HasValue && item.DateCreated != info.DateCreated.Value)
+            {
+                item.DateCreated = info.DateCreated.Value;
+                forceUpdate = true;
+            }
+
             if (item is IHasArtist hasArtists)
             {
                 hasArtists.Artists = info.Artists.ToArray();
