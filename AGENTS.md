@@ -101,14 +101,24 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   the handler can identify them. This exists because Jellyfin channels cannot add custom action
   buttons to items — favouriting is the usable in-place gesture. Toggle: `GrabOnFavorite` (default on).
 - Browse & Grab: the plugin ships a **second** dashboard page (`browse.html`, registered in
-  `Plugin.GetPages()` as `TreasureMapsBrowse`, linked from the config page). It calls
-  `GET TreasureMaps/Search?type=movie|tv&q=` and each result's `Grab` button calls
-  `POST TreasureMaps/Releases/{guid}/Grab?type=&name=`. The Grab endpoint auto-picks the SABnzbd
-  category by media type (`SabnzbdMovieCategory` / `SabnzbdTvCategory`, fallback `SabnzbdCategory`)
-  so movies and series land in their own SABnzbd completed folders — point the Jellyfin Movies/Shows
-  libraries at those folders and everything sorts itself. Jellyfin channels can't host custom
-  action buttons, which is why grabbing lives on this dedicated plugin page rather than on channel
-  cards.
+  `Plugin.GetPages()` as `TreasureMapsBrowse`, linked from the config page) styled like the
+  Treasure-Maps website (tabs Trending/Movies/TV, poster grid, curated genre selector, 1-click Grab).
+  It calls `GET TreasureMaps/Search?type=trending|movie|tv&q=&genre=` (+ `GET TreasureMaps/Genres`
+  for the selector) and each poster's `Grab` button calls `POST TreasureMaps/Releases/{guid}/Grab?type=&name=`.
+  The Grab endpoint auto-picks the SABnzbd category by media type (`SabnzbdMovieCategory` /
+  `SabnzbdTvCategory`, fallback `SabnzbdCategory`) so movies and series land in their own SABnzbd
+  completed folders — point the Jellyfin Movies/Shows libraries at those folders and everything sorts
+  itself. NOTE: this dashboard page is **admin-web only**; it is NOT reachable on TV/mobile client apps.
+- TV/mobile clients (e.g. Fire TV) see ONLY Libraries, **Channels**, and global Search — never plugin
+  dashboard pages. So the Fire-TV-facing surface is the **channel** (`TreasureMapsChannel`): its
+  folders (Trending/Movies/TV/Browse-by-genre) are the browsable poster grid, and the download action
+  is favouriting (❤) an item (`GrabOnFavoriteService`), because Jellyfin channels can't host custom
+  buttons. Releases are metadata-only `ChannelItemType.Media` cards with **no stream**, so pressing
+  **Play** on a client shows a playback error — that is expected; use ❤ to grab. `IDisableMediaSourceDisplay`
+  hides the versions/sources picker to make them read as catalog cards. Global search only finds channel
+  items that have already been browsed (Jellyfin syncs channel items to the DB on browse; ~3h cache);
+  there is no live in-channel text-search hook in the channel API (`ISearchableChannel`/`CanSearch` are
+  unused in this Jellyfin version).
 - Release-name parsing: `ReleaseNameParser` extracts scene attributes from the release/dirname
   (resolution, source BluRay/WEB/CAM/TELESYNC/…, codec, HDR, `DL` dual-language, detected
   languages, group) and — for theatrical rips — the audio source `MIC` (microphone, worse) vs
