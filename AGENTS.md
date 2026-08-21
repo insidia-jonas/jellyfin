@@ -229,6 +229,22 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   reason is prepended to the card overview ("✨ ..."). Recommendations are cached per user+history
   hash (`ForYouCacheHours`, default 6h) so browsing doesn't burn tokens. `GET TreasureMaps/Ai/Test`
   validates the key with a tiny prompt. Channel query's `UserId` provides per-user personalization.
+- Client script injection (web only): `WebScriptInjector` inserts
+  `<script plugin="TreasureMaps" defer src="/TreasureMaps/ClientScript">` into the web client's
+  `index.html` at startup (marker-guarded, same pattern as Intro Skipper; served anonymously by
+  `GET TreasureMaps/ClientScript` from `Web/treasuremaps.js`). Rebuilding jellyfin-web replaces
+  index.html — the injection re-applies on the next server start. The script: (1) replaces the
+  generic children card row on Treasure-Maps title pages with a "Releases" LIST (row per release,
+  flag+badge name, blue Download button calling the Grab endpoint), (2) polls
+  `GET TreasureMaps/Downloads/Status` (SABnzbd queue+history: percent/speed/ETA/completed/failed)
+  every 3s and shows per-row live status, matching jobs by nzo id (from the grab response) with a
+  normalized-name fallback, (3) adds a Download button on release tile pages, (4) hides hover play
+  overlays on channel pages.
+- Actor photos: channel items add People by NAME only and nothing refreshes them (the
+  "Refresh People" task only validates/deletes). `PeopleImageService` queues full metadata+image
+  refreshes for imageless persons every 12h (TMDB resolves them by name search);
+  `POST TreasureMaps/People/RefreshImages` triggers a sweep on demand. Obscure names without a
+  TMDB entry keep the placeholder.
 - "Treasure Glass" theme: a macOS-like glassmorphism skin ships as an embedded resource
   (`Theme/glass.css`). `POST TreasureMaps/Theme/Apply` (config-page button) installs it into the
   server's branding Custom CSS inside a `/* TREASURE-GLASS-BEGIN/END */` marker block (existing
