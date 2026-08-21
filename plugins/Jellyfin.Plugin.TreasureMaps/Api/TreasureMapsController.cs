@@ -5,10 +5,13 @@ using System.Linq;
 using System.Net.Mime;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Data;
 using Jellyfin.Plugin.TreasureMaps.ReleaseNaming;
+using MediaBrowser.Controller.Channels;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Configuration;
 using MediaBrowser.Model.Entities;
+using MediaBrowser.Model.Library;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -30,6 +33,8 @@ public class TreasureMapsController : ControllerBase
     private readonly SabnzbdClient _sabnzbd;
     private readonly Subtitles.OpenSubtitlesClient _openSubtitles;
     private readonly ILibraryManager _libraryManager;
+    private readonly IUserManager _userManager;
+    private readonly IUserViewManager _userViewManager;
     private readonly ILogger<TreasureMapsController> _logger;
 
     /// <summary>
@@ -39,13 +44,24 @@ public class TreasureMapsController : ControllerBase
     /// <param name="sabnzbd">The SABnzbd client.</param>
     /// <param name="openSubtitles">The OpenSubtitles client.</param>
     /// <param name="libraryManager">The library manager.</param>
+    /// <param name="userManager">The user manager.</param>
+    /// <param name="userViewManager">The user view manager.</param>
     /// <param name="logger">The logger.</param>
-    public TreasureMapsController(TreasureMapsApiClient client, SabnzbdClient sabnzbd, Subtitles.OpenSubtitlesClient openSubtitles, ILibraryManager libraryManager, ILogger<TreasureMapsController> logger)
+    public TreasureMapsController(
+        TreasureMapsApiClient client,
+        SabnzbdClient sabnzbd,
+        Subtitles.OpenSubtitlesClient openSubtitles,
+        ILibraryManager libraryManager,
+        IUserManager userManager,
+        IUserViewManager userViewManager,
+        ILogger<TreasureMapsController> logger)
     {
         _client = client;
         _sabnzbd = sabnzbd;
         _openSubtitles = openSubtitles;
         _libraryManager = libraryManager;
+        _userManager = userManager;
+        _userViewManager = userViewManager;
         _logger = logger;
     }
 
@@ -271,6 +287,79 @@ public class TreasureMapsController : ControllerBase
         _libraryManager.AddMediaPath(name, new MediaPathInfo(path));
         _logger.LogInformation("Added {Path} to existing Jellyfin library '{Name}'", path, name);
         return "path added";
+    }
+
+    /// <summary>
+    /// Moves the Treasure-Maps channel to the end of the top menu (after Movies, TV Shows, ...)
+    /// for every user, by updating each user's ordered-views preference.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The users that were updated.</returns>
+    [HttpPost("Menu/MoveChannelLast")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> MoveChannelLast(CancellationToken cancellationToken)
+    {
+        var channelName = Plugin.Instance?.Name ?? "Treasure-Maps";
+        var updated = new List<string>();
+        try
+        {
+            foreach (var user in _userManager.GetUsers().ToList())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var views = _userViewManager.GetUserViews(new UserViewQuery { User = user, IncludeExternalContent = true });
+                var channelViews = views
+                    .Where(v => v is Channel && string.Equals(v.Name, channelName, StringComparison.OrdinalIgnoreCase))
+                    .Select(v => v.Id)
+                    .ToList();
+                if (channelViews.Count == 0)
+                {
+                    continue;
+                }
+
+                var ordered = views.Select(v => v.Id)
+                    .Where(id => !channelViews.Contains(id))
+                    .Concat(channelViews)
+                    .ToArray();
+
+                var config = BuildUserConfiguration(user);
+                config.OrderedViews = ordered;
+                await _userManager.UpdateConfigurationAsync(user.Id, config).ConfigureAwait(false);
+                updated.Add(user.Username);
+            }
+
+            return Ok(new { ok = true, users = updated });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to reorder the menu");
+            return Ok(new { ok = false, message = ex.Message, users = updated });
+        }
+    }
+
+    // UpdateConfigurationAsync overwrites the WHOLE configuration, so every current value has to
+    // be carried over (mirrors UserManager.GetUserDto's mapping) before changing OrderedViews.
+    private static UserConfiguration BuildUserConfiguration(Jellyfin.Database.Implementations.Entities.User user)
+    {
+        return new UserConfiguration
+        {
+            SubtitleMode = user.SubtitleMode,
+            HidePlayedInLatest = user.HidePlayedInLatest,
+            EnableLocalPassword = user.EnableLocalPassword,
+            PlayDefaultAudioTrack = user.PlayDefaultAudioTrack,
+            DisplayCollectionsView = user.DisplayCollectionsView,
+            DisplayMissingEpisodes = user.DisplayMissingEpisodes,
+            AudioLanguagePreference = user.AudioLanguagePreference,
+            RememberAudioSelections = user.RememberAudioSelections,
+            EnableNextEpisodeAutoPlay = user.EnableNextEpisodeAutoPlay,
+            RememberSubtitleSelections = user.RememberSubtitleSelections,
+            SubtitleLanguagePreference = user.SubtitleLanguagePreference ?? string.Empty,
+            OrderedViews = user.GetPreferenceValues<Guid>(Jellyfin.Database.Implementations.Enums.PreferenceKind.OrderedViews),
+            GroupedFolders = user.GetPreferenceValues<Guid>(Jellyfin.Database.Implementations.Enums.PreferenceKind.GroupedFolders),
+            MyMediaExcludes = user.GetPreferenceValues<Guid>(Jellyfin.Database.Implementations.Enums.PreferenceKind.MyMediaExcludes),
+            LatestItemsExcludes = user.GetPreferenceValues<Guid>(Jellyfin.Database.Implementations.Enums.PreferenceKind.LatestItemExcludes),
+            CastReceiverId = user.CastReceiverId
+        };
     }
 
     /// <summary>

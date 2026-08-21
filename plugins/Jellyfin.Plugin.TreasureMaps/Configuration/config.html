@@ -138,6 +138,8 @@
                         <div class="fieldDescription" style="margin-top:.35em;">Creates/updates the <code>movies</code> and <code>tv</code> categories with the folders above directly in SABnzbd (needs the SABnzbd <strong>full</strong> API key).</div>
                         <button is="emby-button" type="button" id="setupLibraries" class="raised block"><span>Create media libraries (Movies / TV Shows)</span></button>
                         <div class="fieldDescription" style="margin-top:.35em;">Creates Jellyfin libraries pointing at the download folders above, so finished downloads appear in the top menu under <strong>Movies</strong> / <strong>TV Shows</strong>.</div>
+                        <button is="emby-button" type="button" id="moveMenuLast" class="raised block"><span>Move Treasure-Maps to the end of the menu</span></button>
+                        <div class="fieldDescription" style="margin-top:.35em;">Reorders every user's top menu so the Treasure-Maps channel comes after the media libraries.</div>
                         <div id="sabResult" class="fieldDescription" style="margin-top:0.5em;"></div>
                     </div>
                     <div class="inputContainer inputContainer-withDescription">
@@ -347,6 +349,32 @@
                                 resultEl.textContent = 'Library setup request failed.';
                             });
                         });
+                    });
+                });
+
+            document.querySelector('#moveMenuLast')
+                .addEventListener('click', function () {
+                    var resultEl = document.querySelector('#sabResult');
+                    resultEl.textContent = 'Reordering the menu...';
+                    Dashboard.showLoadingMsg();
+                    ApiClient.fetch({
+                        url: ApiClient.getUrl('TreasureMaps/Menu/MoveChannelLast'),
+                        type: 'POST',
+                        dataType: 'json',
+                        headers: { accept: 'application/json' }
+                    }).then(function (res) {
+                        Dashboard.hideLoadingMsg();
+                        if (res && res.ok) {
+                            resultEl.style.color = 'green';
+                            resultEl.textContent = 'Menu updated for: ' + ((res.users || []).join(', ') || 'no users with the channel view');
+                        } else {
+                            resultEl.style.color = 'red';
+                            resultEl.textContent = 'Menu update failed: ' + ((res && res.message) || 'unknown error');
+                        }
+                    }, function () {
+                        Dashboard.hideLoadingMsg();
+                        resultEl.style.color = 'red';
+                        resultEl.textContent = 'Menu update request failed.';
                     });
                 });
 

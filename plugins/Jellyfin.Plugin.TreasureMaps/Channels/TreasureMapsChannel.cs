@@ -72,7 +72,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             var c = Config;
             return string.Join(
                 '|',
-                "17",
+                "18",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -222,15 +222,19 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
     /// </summary>
     private async Task<ChannelItemResult> GetRootAsync(CancellationToken cancellationToken)
     {
+        // Jellyfin sorts a channel folder strictly by (name-derived) SortName, and the title cards
+        // are folders too, so without a marker the category folders would be scattered
+        // alphabetically between the movie posters. The "# " prefix sorts before digits and
+        // letters, so the categories always form one block at the top of the view.
         var items = new List<ChannelItemInfo>
         {
-            Folder("trending", "Trending"),
-            Folder("movies", "Movies"),
-            Folder("tv", "TV Shows"),
-            Folder("movies-de", "Movies (DE)"),
-            Folder("tv-de", "TV Shows (DE)"),
-            Folder("genres", "Browse by genre"),
-            Folder("find", "Find A\u2013Z")
+            Folder("trending", "# Trending"),
+            Folder("movies", "# Movies"),
+            Folder("tv", "# TV Shows"),
+            Folder("movies-de", "# Movies (DE)"),
+            Folder("tv-de", "# TV Shows (DE)"),
+            Folder("genres", "# Browse by genre"),
+            Folder("find", "# Find A\u2013Z")
         };
 
         try
