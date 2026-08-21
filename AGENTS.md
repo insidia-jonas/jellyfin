@@ -184,10 +184,13 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   can take ~10–15s after favouriting before it appears in SABnzbd — don't judge it as failed after only
   a few seconds. If you change item ids/type/naming in the channel, **bump `DataVersion`** or Jellyfin
   reuses the cached entities (this bit us: name changes didn't show until the version was bumped).
-- Trending: `Trending` splits into `Movies` and `TV Shows` (`/trending?type=movie|tv`). The trending
-  feed only carries an `imdb` id and NO cover, so each item is enriched with a `q=<title>` lookup
-  (matched by imdb) to pull the poster/metadata. Cover URLs cannot be synthesized (TV uses an internal
-  id). API gotchas: `imdbid`/`tmdbid` filters return 0 (broken) — use `q=<title>`; `/tv` is only
+- Trending: `Trending` splits into `Movies` / `TV Shows`, each listing the website's five TMDB
+  spotlight rows via the undocumented `/spotlight?type=movie|tv&feed=1..5` endpoint (1=popular,
+  2=trending today, 3=trending week, 4=top rated, 5=now playing / on air; only titles that have
+  releases; discovered by probing — `feed` takes NUMBERS, named keys are rejected). Spotlight items
+  only carry an `imdb` id and NO cover, so each item is enriched with a `q=<title>` lookup (matched
+  by imdb) to pull the poster/metadata. Cover URLs cannot be synthesized (TV uses an internal id).
+  API gotchas: `imdbid`/`tmdbid` filters return 0 (broken) — use `q=<title>`; `/tv` is only
   partially enriched; single-letter `q` is a broad substring search (hence Find A–Z prefix-filters
   client-side). Rapid API calls get rate-limited (degraded/empty JSON), so space out manual probing.
 - `Find A–Z` (`SearchByLetterAsync`) is the TV-friendly search: letter folders `0-9,A–Z`, each runs a
