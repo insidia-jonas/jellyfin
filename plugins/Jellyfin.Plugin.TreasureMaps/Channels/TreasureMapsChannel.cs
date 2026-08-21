@@ -72,7 +72,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             var c = Config;
             return string.Join(
                 '|',
-                "16",
+                "17",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -207,8 +207,11 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
         }
         catch (Exception ex)
         {
+            // Rethrow instead of returning an empty result: Jellyfin caches whatever a channel
+            // folder returns (for hours), so a transient indexer failure returned as "empty"
+            // would freeze the folder as blank until the next cache invalidation.
             _logger.LogError(ex, "Failed to load Treasure-Maps channel items for folder {FolderId}", query.FolderId);
-            return new ChannelItemResult();
+            throw;
         }
     }
 
@@ -252,21 +255,42 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
 
     /// <summary>
     /// Fetches multiple result pages (the API caps a single request at ~100 items) and
-    /// concatenates them, newest first.
+    /// concatenates them, newest first. Pages are fetched independently: a slow/failed page
+    /// (cold single-letter queries can 504 on the indexer side) must not blank the whole view.
     /// </summary>
     private async Task<IReadOnlyList<Release>> FetchPagesAsync(string kind, string? query, string? genre, string? categories, int pages, CancellationToken cancellationToken)
     {
-        var tasks = new List<Task<ReleaseListResponse?>>(pages);
+        var tasks = new List<Task<(IReadOnlyList<Release> Items, bool Ok)>>(pages);
         for (var page = 0; page < pages; page++)
         {
-            var offset = page * PageSize;
-            tasks.Add(string.Equals(kind, "tv", StringComparison.Ordinal)
-                ? _client.SearchTvAsync(query, categories, PageSize, offset, cancellationToken)
-                : _client.SearchMoviesAsync(query, genre, categories, PageSize, offset, cancellationToken));
+            tasks.Add(FetchPageSafeAsync(kind, query, genre, categories, page * PageSize, cancellationToken));
         }
 
         var responses = await Task.WhenAll(tasks).ConfigureAwait(false);
-        return responses.SelectMany(r => r?.Items ?? (IReadOnlyList<Release>)Array.Empty<Release>()).ToList();
+
+        // If every page failed the view must error (and NOT get cached as empty by Jellyfin).
+        if (responses.All(r => !r.Ok))
+        {
+            throw new InvalidOperationException($"All Treasure-Maps {kind} pages failed (q={query ?? "*"}).");
+        }
+
+        return responses.SelectMany(r => r.Items).ToList();
+    }
+
+    private async Task<(IReadOnlyList<Release> Items, bool Ok)> FetchPageSafeAsync(string kind, string? query, string? genre, string? categories, int offset, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = string.Equals(kind, "tv", StringComparison.Ordinal)
+                ? await _client.SearchTvAsync(query, categories, PageSize, offset, cancellationToken).ConfigureAwait(false)
+                : await _client.SearchMoviesAsync(query, genre, categories, PageSize, offset, cancellationToken).ConfigureAwait(false);
+            return (response?.Items ?? Array.Empty<Release>(), true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Treasure-Maps {Kind} page at offset {Offset} failed (q={Query}); continuing with the other pages", kind, offset, query);
+            return (Array.Empty<Release>(), false);
+        }
     }
 
     private static ChannelItemResult TrendingSubFolders()

@@ -111,11 +111,29 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   itself. NOTE: this dashboard page is **admin-web only**; it is NOT reachable on TV/mobile client apps.
 - TV/mobile clients (e.g. Fire TV) see ONLY Libraries, **Channels**, and global Search — never plugin
   dashboard pages. So the Fire-TV-facing surface is the **channel** (`TreasureMapsChannel`): its root
-  folders are `Trending / Movies / TV Shows / Movies (DE) / TV Shows (DE) / Browse by genre / Find A–Z`.
-  The DE rows mirror the website's language blocks: the indexer's `x100` category block is German
-  (`cat=2100` movies, `cat=5100` TV — constants `GermanMovieCategories`/`GermanTvCategories` on the
-  API client; `SearchMoviesAsync`/`SearchTvAsync` take an optional category override). The cat filter
-  is loose: a few cross-listed non-DE releases can appear in the DE rows (API-side behavior).
+  shows the folders `Trending / Movies / TV Shows / Movies (DE) / TV Shows (DE) / Browse by genre /
+  Find A–Z` **plus** ~24 recently-added title cards (mixed movies+TV), so opening the channel
+  immediately shows content. The DE rows mirror the website's language blocks: the indexer's `x100`
+  category block is German (`cat=2100` movies, `cat=5100` TV — constants
+  `GermanMovieCategories`/`GermanTvCategories` on the API client; `SearchMoviesAsync`/`SearchTvAsync`
+  take optional category + offset overrides). The cat filter is loose: a few cross-listed non-DE
+  releases can appear in the DE rows (API-side behavior).
+- API paging/limits: a single request above ~100 items **504s**; use `limit=100` + `offset` paging
+  (`FetchPagesAsync`). Cold single-letter/substring queries can hang until the gateway 504s (~55s),
+  so the client uses a 30s timeout and pages are fetched fault-tolerantly (one failed page must not
+  blank the view). CRITICAL: if a channel folder returns an *empty* result, Jellyfin **caches it as
+  empty for hours** — on total failure the channel must THROW (it does), never return empty.
+- The API client keeps a 5-minute in-memory response cache (1h for caps), which is what makes
+  channel navigation fast (~30ms cached vs 4-60s cold). Restarting the server clears it; Jellyfin's
+  own channel item cache persists across restarts (bump `DataVersion` to bust it).
+- Genres: the indexer's caps expose ~5000 raw library tags incl. adult ones ("Adult/porn", "Erotica",
+  "Hentai", ...). Both the channel's "Browse by genre" and the Browse page selector only surface the
+  curated `CommonGenres` whitelist (20 common genres) — keep it that way.
+- Library setup: `POST TreasureMaps/Libraries/Setup` (config-page button "Create media libraries")
+  creates/completes the Jellyfin **Movies** / **TV Shows** libraries pointing at the SABnzbd
+  movie/TV download folders (absolute folders used as-is; relative ones resolved under SABnzbd's
+  `misc.complete_dir`), so finished downloads appear in the top menu. GOTCHA: Jellyfin ignores video
+  files with "sample" in the name — don't name test files `...-SAMPLE.mp4` when seeding a library.
 - Two-level, website-like layout: a category (Movies/TV/genre/letter/trending) shows **one poster
   card per title** (grouped by tmdb/imdb/normalized-title via `ReleaseGrouper`, id prefix `GRP::`),
   NOT one card per release. Opening a title card re-fetches that title's releases (`q=<title>`,

@@ -233,6 +233,10 @@ public class TreasureMapsApiClient
         var client = _httpClientFactory.CreateClient();
         client.DefaultRequestHeaders.Add("X-API-Key", Config.ApiKey);
         client.DefaultRequestHeaders.Add("Accept", "application/json");
+
+        // Cold indexer queries can hang until the gateway 504s (~55s); give up earlier so a slow
+        // page is dropped quickly and the rest of the (paged) view still renders.
+        client.Timeout = TimeSpan.FromSeconds(30);
         return client;
     }
 
