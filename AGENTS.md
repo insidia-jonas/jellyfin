@@ -111,15 +111,20 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   itself. NOTE: this dashboard page is **admin-web only**; it is NOT reachable on TV/mobile client apps.
 - TV/mobile clients (e.g. Fire TV) see ONLY Libraries, **Channels**, and global Search — never plugin
   dashboard pages. So the Fire-TV-facing surface is the **channel** (`TreasureMapsChannel`): its root
-  shows the folders `Trending / Movies / TV Shows / Movies (DE) / TV Shows (DE) / Browse by genre /
-  Find A–Z` **plus** ~24 recently-added title cards (mixed movies+TV), so opening the channel
-  immediately shows content. Pinning the category folders to the top must survive BOTH client sort
-  modes: the `# ` name prefix wins the SortName sort, and a far-future staggered `DateCreated`
-  (2099 minus index minutes) wins the "Date added" (descending) sort AND fixes the folders'
-  relative order; title cards/release tiles carry the real `posted_at` as `DateCreated` so
-  "Date added" shows newest first. GOTCHA: category folders have static external ids, so their
-  entities are reused forever — ChannelManager was patched (this fork) to update `DateCreated` on
-  reused channel items, otherwise provider-supplied dates only apply to brand-new entities.
+  shows ONLY the category folders `Recently added / Trending / Movies / TV Shows / Movies (DE) /
+  TV Shows (DE) / Browse by genre / Find A–Z`. This is deliberate and hard-learned: clients offer
+  many sort modes (name, date added, random, release date, ...) and ANY grid that mixes category
+  folders with title cards will scatter the folders between the posters under some of them (name
+  prefixes only win the name sort, DateCreated pinning only the date sort, random defeats both).
+  The recent titles live behind `Recently added`; the home screen keeps its Latest row. Folders
+  carry far-future staggered `DateCreated` (2099 minus index minutes) and cards/tiles the real
+  `posted_at`, so "Date added" sorts sensibly. GOTCHA: category folders have static external ids,
+  so their entities are reused forever — ChannelManager was patched (this fork) to update
+  `DateCreated` on reused channel items.
+- The indexer goes FULLY down at times (whole site 503 "No healthy origin available") and also
+  rate-limits. The API client serves expired cache entries as a fallback when a request fails
+  (stale-while-error), so browsing keeps working during outages once caches are warm; category
+  folder tiles may show a child's poster (Jellyfin folder image inheritance) — harmless.
 - Top-menu ordering is a per-user preference (`OrderedViews`), not sortable server-wide.
   `POST TreasureMaps/Menu/MoveChannelLast` (config-page button "Move Treasure-Maps to the end of
   the menu") rewrites every user's ordered views so the channel comes after the media libraries.
