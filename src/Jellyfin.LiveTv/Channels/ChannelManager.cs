@@ -1164,7 +1164,11 @@ namespace Jellyfin.LiveTv.Channels
                 }
             }
 
-            if (isNew || forceUpdate || item.DateLastRefreshed == DateTime.MinValue)
+            // Channel box sets carry their metadata from the channel provider; don't queue a
+            // scraper refresh for them or the TMDB box-set provider matches them by name and
+            // overwrites the title/metadata with a "... Collection" entry.
+            if ((isNew || forceUpdate || item.DateLastRefreshed == DateTime.MinValue)
+                && item is not MediaBrowser.Controller.Entities.Movies.BoxSet)
             {
                 _providerManager.QueueRefresh(item.Id, new MetadataRefreshOptions(new DirectoryService(_fileSystem)), RefreshPriority.Normal);
             }

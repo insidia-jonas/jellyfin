@@ -1981,7 +1981,7 @@ namespace MediaBrowser.Controller.Entities
 
         public virtual string GetClientTypeName()
         {
-            if (IsFolder && SourceType == SourceType.Channel && this is not Channel && this is not Season && this is not Series)
+            if (IsFolder && SourceType == SourceType.Channel && this is not Channel && this is not Season && this is not Series && this is not Movies.BoxSet)
             {
                 return "ChannelFolderItem";
             }

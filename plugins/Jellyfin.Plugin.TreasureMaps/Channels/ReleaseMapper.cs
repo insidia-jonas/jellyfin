@@ -123,7 +123,7 @@ public static class ReleaseMapper
         var imdb = release.Ids?.Imdb ?? tv?.Imdb;
         if (!string.IsNullOrWhiteSpace(imdb))
         {
-            item.ProviderIds["Imdb"] = imdb!;
+            item.ProviderIds["Imdb"] = NormalizeImdbId(imdb!);
         }
 
         var tmdb = release.Ids?.Tmdb ?? tv?.Tmdb;
@@ -254,6 +254,15 @@ public static class ReleaseMapper
 
         return badges.Count > 0 ? string.Join(" \u00b7 ", badges) : (release.Title ?? string.Empty);
     }
+
+    /// <summary>
+    /// Normalizes an IMDb id to the canonical <c>tt</c>-prefixed form (the indexer returns bare
+    /// numeric ids, which would produce broken imdb.com links).
+    /// </summary>
+    /// <param name="id">The raw IMDb id.</param>
+    /// <returns>The normalized id.</returns>
+    public static string NormalizeImdbId(string id)
+        => id.StartsWith("tt", StringComparison.OrdinalIgnoreCase) ? id : "tt" + id;
 
     /// <summary>
     /// Builds a short flag-emoji prefix for the audio languages of a release (from the API's

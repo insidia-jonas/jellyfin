@@ -72,7 +72,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             var c = Config;
             return string.Join(
                 '|',
-                "19",
+                "21",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -441,15 +441,11 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
                 card.People.Add(new MediaBrowser.Controller.Entities.PersonInfo { Name = actor, Type = Jellyfin.Data.Enums.PersonKind.Actor });
             }
 
-            // External ids give the details page its IMDb/TMDB links.
+            // The IMDb id gives the details page its IMDb link. (No TMDB id here: on a BoxSet it
+            // would render a themoviedb.org/collection/... link, which is wrong for a movie.)
             if (!string.IsNullOrWhiteSpace(group.Imdb))
             {
-                card.ProviderIds["Imdb"] = group.Imdb!;
-            }
-
-            if (!string.IsNullOrWhiteSpace(group.Tmdb))
-            {
-                card.ProviderIds["Tmdb"] = group.Tmdb!;
+                card.ProviderIds["Imdb"] = ReleaseMapper.NormalizeImdbId(group.Imdb!);
             }
 
             card.Tags.Add(count == 1 ? "1 release" : count + " releases");
