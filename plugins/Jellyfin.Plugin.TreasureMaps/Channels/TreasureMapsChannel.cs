@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.TreasureMaps.Api;
 using Jellyfin.Plugin.TreasureMaps.Configuration;
 using Jellyfin.Plugin.TreasureMaps.Languages;
+using Jellyfin.Plugin.TreasureMaps.ReleaseNaming;
 using Jellyfin.Plugin.TreasureMaps.Xrel;
 using MediaBrowser.Controller.Channels;
 using MediaBrowser.Controller.Providers;
@@ -18,7 +19,8 @@ namespace Jellyfin.Plugin.TreasureMaps.Channels;
 
 /// <summary>
 /// Exposes a Treasure-Maps indexer as a browsable Jellyfin channel that mirrors the website:
-/// Trending (Movies / TV Shows), browse Movies / TV Shows, browse by genre and a Find A–Z search.
+/// Trending (Movies / TV Shows), browse Movies / TV Shows (incl. the German "DE" rows),
+/// browse by genre and a Find A–Z search.
 /// Titles are shown once (one poster card per movie/show); opening a card lists the individual
 /// releases (qualities) behind it, which you grab by marking a release as a favorite (heart).
 /// </summary>
@@ -65,7 +67,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             var c = Config;
             return string.Join(
                 '|',
-                "14",
+                "15",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -162,6 +164,19 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
                 return BuildGroupCards(tv?.Items);
             }
 
+            // German rows, mirroring the website's "Movies - DE" / "TV - DE" category blocks.
+            if (string.Equals(folderId, "movies-de", StringComparison.Ordinal))
+            {
+                var moviesDe = await _client.SearchMoviesAsync(null, null, TreasureMapsApiClient.GermanMovieCategories, BrowseFetchLimit, cancellationToken).ConfigureAwait(false);
+                return BuildGroupCards(moviesDe?.Items);
+            }
+
+            if (string.Equals(folderId, "tv-de", StringComparison.Ordinal))
+            {
+                var tvDe = await _client.SearchTvAsync(null, TreasureMapsApiClient.GermanTvCategories, BrowseFetchLimit, cancellationToken).ConfigureAwait(false);
+                return BuildGroupCards(tvDe?.Items);
+            }
+
             if (string.Equals(folderId, "genres", StringComparison.Ordinal))
             {
                 return await GetGenreFoldersAsync(cancellationToken).ConfigureAwait(false);
@@ -199,6 +214,8 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             Folder("trending", "Trending"),
             Folder("movies", "Movies"),
             Folder("tv", "TV Shows"),
+            Folder("movies-de", "Movies (DE)"),
+            Folder("tv-de", "TV Shows (DE)"),
             Folder("genres", "Browse by genre"),
             Folder("find", "Find A\u2013Z")
         };
@@ -310,9 +327,12 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
         foreach (var group in ordered)
         {
             var count = group.Releases.Count;
+
+            // The card's cover URL travels inside the id so that opening the card can show the
+            // exact same poster on every release tile (covers can differ between releases).
             var card = new ChannelItemInfo
             {
-                Id = string.Join(Sep, GroupPrefix.TrimEnd(':'), marker, group.Kind, Encode(group.Key), Encode(group.Title)),
+                Id = string.Join(Sep, GroupPrefix.TrimEnd(':'), marker, group.Kind, Encode(group.Key), Encode(group.Title), Encode(group.Cover ?? string.Empty)),
                 Name = group.Title,
                 Type = ChannelItemType.Folder,
                 FolderType = ChannelFolderType.Container,
@@ -349,6 +369,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
         var kind = parts[2];
         var key = Decode(parts[3]);
         var title = Decode(parts[4]);
+        var cover = parts.Length >= 6 ? Decode(parts[5]) : string.Empty;
 
         var response = string.Equals(kind, "tv", StringComparison.Ordinal)
             ? await _client.SearchTvAsync(title, BrowseFetchLimit, cancellationToken).ConfigureAwait(false)
@@ -361,20 +382,20 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             matching = all.ToList();
         }
 
-        return await BuildReleaseTilesAsync(matching, groupId, cancellationToken).ConfigureAwait(false);
+        return await BuildReleaseTilesAsync(matching, groupId, cover, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
     /// Builds the individual release tiles (one per release/quality) shown inside a title card.
     /// </summary>
-    private async Task<ChannelItemResult> BuildReleaseTilesAsync(IReadOnlyList<Release> releases, string scope, CancellationToken cancellationToken)
+    private async Task<ChannelItemResult> BuildReleaseTilesAsync(IReadOnlyList<Release> releases, string scope, string? groupCover, CancellationToken cancellationToken)
     {
         var prefs = GetLanguagePreferences();
         var xrelRatings = await FetchXrelRatingsAsync(releases, cancellationToken).ConfigureAwait(false);
         var marker = ShortHash(DataVersion);
         var scopeHash = ShortHash(scope);
 
-        var ranked = new List<(ChannelItemInfo Item, int Rank, int Order)>();
+        var ranked = new List<(ChannelItemInfo Item, int Rank, int Quality, int Order)>();
         var order = 0;
         foreach (var release in releases)
         {
@@ -388,21 +409,28 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             if (item is not null)
             {
                 var kind = item.ProviderIds.TryGetValue("TreasureMapsKind", out var k) && !string.IsNullOrEmpty(k) ? k : "movie";
-                // Inside a title card, show the distinguishing release/scene name (quality, source,
-                // language, group) rather than the movie title so the qualities are told apart.
-                if (!string.IsNullOrWhiteSpace(release.Title))
+
+                // Inside a title card, name the tile by its quality badges (resolution, source,
+                // codec, language, size, group) so the qualities are told apart at a glance. The
+                // full scene name stays visible in the tile's overview ("Release: ...").
+                var parsed = ReleaseNameParser.Parse(release.Title);
+                item.Name = ReleaseMapper.BuildQualityLabel(release);
+
+                // All tiles of a title share the card's poster so the card and its releases look alike.
+                if (!string.IsNullOrWhiteSpace(groupCover))
                 {
-                    item.Name = release.Title;
+                    item.ImageUrl = groupCover;
                 }
 
                 // REL::<scopeHash>::<marker>::<kind>::<guid> — unique per title card, refreshed on config change.
                 item.Id = string.Join(Sep, ReleasePrefix.TrimEnd(':'), scopeHash, marker, kind, item.Id);
-                ranked.Add((item, rank, order++));
+                ranked.Add((item, rank, parsed.QualityScore, order++));
             }
         }
 
         var items = ranked
             .OrderBy(x => x.Rank)
+            .ThenByDescending(x => x.Quality)
             .ThenBy(x => x.Order)
             .Select(x => x.Item)
             .Take(Config.ResultLimit)

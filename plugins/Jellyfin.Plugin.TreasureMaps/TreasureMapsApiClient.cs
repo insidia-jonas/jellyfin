@@ -22,8 +22,15 @@ public class TreasureMapsApiClient
 
     // Treasure-Maps category ids (movies/TV incl. language variants). Without a category the
     // /movie endpoint returns unrelated results (even books) with no movie metadata.
+    // The x100 block is the German ("DE") variant, mirroring the website's Movies-DE / TV-DE rows.
     private const string MovieCategories = "2000,2100,2200,2300";
     private const string TvCategories = "5000,5100,5200,5300";
+
+    /// <summary>The category id of the German movies block (Movies - DE).</summary>
+    public const string GermanMovieCategories = "2100";
+
+    /// <summary>The category id of the German TV block (TV - DE).</summary>
+    public const string GermanTvCategories = "5100";
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<TreasureMapsApiClient> _logger;
@@ -57,12 +64,24 @@ public class TreasureMapsApiClient
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The release list response.</returns>
     public Task<ReleaseListResponse?> SearchMoviesAsync(string? query, string? genre, int limit, CancellationToken cancellationToken)
+        => SearchMoviesAsync(query, genre, null, limit, cancellationToken);
+
+    /// <summary>
+    /// Searches for movie releases within specific categories.
+    /// </summary>
+    /// <param name="query">Free-text query, may be null.</param>
+    /// <param name="genre">Genre filter, may be null.</param>
+    /// <param name="categories">Category ids to search (null for all movie categories).</param>
+    /// <param name="limit">Maximum number of results.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The release list response.</returns>
+    public Task<ReleaseListResponse?> SearchMoviesAsync(string? query, string? genre, string? categories, int limit, CancellationToken cancellationToken)
     {
         var parameters = new Dictionary<string, string?>
         {
             ["q"] = string.IsNullOrWhiteSpace(query) ? "*" : query,
             ["genre"] = genre,
-            ["cat"] = MovieCategories,
+            ["cat"] = string.IsNullOrWhiteSpace(categories) ? MovieCategories : categories,
             ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
             ["sort"] = "posted_desc",
             ["extended"] = "1"
@@ -78,11 +97,22 @@ public class TreasureMapsApiClient
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The release list response.</returns>
     public Task<ReleaseListResponse?> SearchTvAsync(string? query, int limit, CancellationToken cancellationToken)
+        => SearchTvAsync(query, null, limit, cancellationToken);
+
+    /// <summary>
+    /// Searches for TV releases within specific categories.
+    /// </summary>
+    /// <param name="query">Free-text query, may be null.</param>
+    /// <param name="categories">Category ids to search (null for all TV categories).</param>
+    /// <param name="limit">Maximum number of results.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The release list response.</returns>
+    public Task<ReleaseListResponse?> SearchTvAsync(string? query, string? categories, int limit, CancellationToken cancellationToken)
     {
         var parameters = new Dictionary<string, string?>
         {
             ["q"] = string.IsNullOrWhiteSpace(query) ? null : query,
-            ["cat"] = TvCategories,
+            ["cat"] = string.IsNullOrWhiteSpace(categories) ? TvCategories : categories,
             ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
             ["sort"] = "posted_desc",
             ["extended"] = "1"

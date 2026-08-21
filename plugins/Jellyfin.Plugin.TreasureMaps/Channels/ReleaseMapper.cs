@@ -209,6 +209,53 @@ public static class ReleaseMapper
     }
 
     /// <summary>
+    /// Builds a short quality-badge label for a release (e.g. <c>1080p · BluRay · AVC · German · DL · 9.8 GB · [GROUP]</c>),
+    /// used as the tile name inside a title card instead of the raw scene name. Falls back to the
+    /// scene name when nothing could be parsed.
+    /// </summary>
+    /// <param name="release">The release.</param>
+    /// <returns>The badge label, never null.</returns>
+    public static string BuildQualityLabel(Release release)
+    {
+        var parsed = ReleaseNameParser.Parse(release.Title);
+        var badges = new List<string>();
+        void Add(string? badge)
+        {
+            if (!string.IsNullOrEmpty(badge))
+            {
+                badges.Add(badge!);
+            }
+        }
+
+        Add(parsed.Resolution);
+        Add(parsed.Source);
+        Add(parsed.AudioSource);
+        Add(parsed.Codec);
+        Add(parsed.Hdr);
+        foreach (var language in parsed.Languages)
+        {
+            Add(language);
+        }
+
+        if (parsed.DualLanguage)
+        {
+            Add("DL");
+        }
+
+        if (release.Size > 0)
+        {
+            Add(FormatSize(release.Size));
+        }
+
+        if (!string.IsNullOrEmpty(parsed.Group))
+        {
+            Add("[" + parsed.Group + "]");
+        }
+
+        return badges.Count > 0 ? string.Join(" \u00b7 ", badges) : (release.Title ?? string.Empty);
+    }
+
+    /// <summary>
     /// Formats a byte count as a human-readable size.
     /// </summary>
     /// <param name="bytes">The number of bytes.</param>
