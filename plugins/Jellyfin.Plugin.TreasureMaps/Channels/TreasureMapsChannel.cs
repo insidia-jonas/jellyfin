@@ -72,7 +72,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             var c = Config;
             return string.Join(
                 '|',
-                "21",
+                "22",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -228,13 +228,13 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
         // letters, so the categories always form one block at the top of the view.
         var items = new List<ChannelItemInfo>
         {
-            Folder("trending", "# Trending"),
-            Folder("movies", "# Movies"),
-            Folder("tv", "# TV Shows"),
-            Folder("movies-de", "# Movies (DE)"),
-            Folder("tv-de", "# TV Shows (DE)"),
-            Folder("genres", "# Browse by genre"),
-            Folder("find", "# Find A\u2013Z")
+            Folder("trending", "# Trending", 0),
+            Folder("movies", "# Movies", 1),
+            Folder("tv", "# TV Shows", 2),
+            Folder("movies-de", "# Movies (DE)", 3),
+            Folder("tv-de", "# TV Shows (DE)", 4),
+            Folder("genres", "# Browse by genre", 5),
+            Folder("find", "# Find A\u2013Z", 6)
         };
 
         try
@@ -298,14 +298,14 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
     }
 
     private static ChannelItemResult TrendingSubFolders()
-        => Result(new List<ChannelItemInfo> { Folder("trending-movie", "Movies"), Folder("trending-tv", "TV Shows") });
+        => Result(new List<ChannelItemInfo> { Folder("trending-movie", "Movies", 0), Folder("trending-tv", "TV Shows", 1) });
 
     private static ChannelItemResult GetLetterFolders()
     {
-        var items = new List<ChannelItemInfo> { Folder(FindPrefix + "0-9", "0-9") };
+        var items = new List<ChannelItemInfo> { Folder(FindPrefix + "0-9", "0-9", 0) };
         for (var c = 'A'; c <= 'Z'; c++)
         {
-            items.Add(Folder(FindPrefix + c, c.ToString()));
+            items.Add(Folder(FindPrefix + c, c.ToString(), c - 'A' + 1));
         }
 
         return Result(items);
@@ -420,7 +420,10 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
                 FolderType = ChannelFolderType.BoxSet,
                 ImageUrl = group.Cover,
                 ProductionYear = group.Year,
-                CommunityRating = group.Rating.HasValue ? (float)group.Rating.Value : null
+                CommunityRating = group.Rating.HasValue ? (float)group.Rating.Value : null,
+                // Real posted date so the client's "Date added" sort shows the newest titles
+                // first (and never above the future-pinned category folders).
+                DateCreated = group.Posted?.UtcDateTime
             };
 
             var hint = count + (count == 1 ? " release available." : " releases available.")
@@ -567,12 +570,18 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
         return Result(new List<ChannelItemInfo> { child });
     }
 
-    private static ChannelItemInfo Folder(string id, string name) => new ChannelItemInfo
+    // Category folders are pinned to the top for BOTH sort modes clients use: the "# " name
+    // prefix wins the (default) SortName sort, and a far-future, per-index staggered DateCreated
+    // wins the "Date added" (descending) sort while also fixing the folders' relative order.
+    private static readonly DateTime _folderPinBase = new DateTime(2099, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+    private static ChannelItemInfo Folder(string id, string name, int order = 0) => new ChannelItemInfo
     {
         Id = id,
         Name = name,
         Type = ChannelItemType.Folder,
-        FolderType = ChannelFolderType.Container
+        FolderType = ChannelFolderType.Container,
+        DateCreated = _folderPinBase.AddMinutes(-order)
     };
 
     /// <inheritdoc />
@@ -655,7 +664,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
         var caps = await _client.GetCapsAsync(cancellationToken).ConfigureAwait(false);
         var available = (caps?.Genres ?? new List<CapsNamedItem>()).Select(g => g.Name);
         var items = CommonGenres.FilterAvailable(available)
-            .Select(name => Folder(GenrePrefix + name, name))
+            .Select((name, index) => Folder(GenrePrefix + name, name, index))
             .ToList();
 
         return Result(items);

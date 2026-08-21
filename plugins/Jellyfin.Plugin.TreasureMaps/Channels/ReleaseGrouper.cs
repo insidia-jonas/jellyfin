@@ -39,6 +39,9 @@ public sealed class ReleaseGroup
     /// <summary>Gets or sets the tagline.</summary>
     public string? Tagline { get; set; }
 
+    /// <summary>Gets or sets the newest posted date of the releases in this group.</summary>
+    public DateTimeOffset? Posted { get; set; }
+
     /// <summary>Gets or sets the IMDb id.</summary>
     public string? Imdb { get; set; }
 
@@ -112,6 +115,11 @@ public static class ReleaseGrouper
             if (group.Genres.Count == 0 && release.Movie?.Genres is { Count: > 0 } genres)
             {
                 group.Genres.AddRange(genres);
+            }
+
+            if (release.PostedAt.HasValue && (!group.Posted.HasValue || release.PostedAt > group.Posted))
+            {
+                group.Posted = release.PostedAt;
             }
 
             group.Plot ??= release.Movie?.Plot ?? release.Tv?.Overview;

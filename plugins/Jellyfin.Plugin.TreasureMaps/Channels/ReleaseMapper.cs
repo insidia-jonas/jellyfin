@@ -91,7 +91,8 @@ public static class ReleaseMapper
             ImageUrl = release.Images?.Cover,
             HomePageUrl = release.Links?.Details,
             CommunityRating = rating.HasValue ? (float)rating.Value : null,
-            ProductionYear = isTv ? ParseYear(FirstFour(tv?.FirstAired)) : ParseYear(movie?.Year)
+            ProductionYear = isTv ? ParseYear(FirstFour(tv?.FirstAired)) : ParseYear(movie?.Year),
+            DateCreated = release.PostedAt?.UtcDateTime
         };
 
         if (movie?.Genres is { Count: > 0 })

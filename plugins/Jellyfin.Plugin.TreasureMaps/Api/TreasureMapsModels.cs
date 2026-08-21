@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
@@ -47,6 +48,10 @@ public class Release
     /// <summary>Gets or sets the size in bytes.</summary>
     [JsonPropertyName("size")]
     public long Size { get; set; }
+
+    /// <summary>Gets or sets the date the release was posted.</summary>
+    [JsonPropertyName("posted_at")]
+    public DateTimeOffset? PostedAt { get; set; }
 
     /// <summary>Gets or sets the number of grabs.</summary>
     [JsonPropertyName("grabs")]
