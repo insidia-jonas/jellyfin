@@ -202,12 +202,13 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
         // Live search against the indexer, then keep only titles whose (article-stripped) name
         // starts with the chosen letter/digit — a TV-friendly way to look up a specific title.
         var q = string.Equals(token, "0-9", StringComparison.Ordinal) ? null : token;
-        const int fetchLimit = 100;
-        var movies = await _client.SearchMoviesAsync(q, null, fetchLimit, cancellationToken).ConfigureAwait(false);
-        var tv = await _client.SearchTvAsync(q, fetchLimit, cancellationToken).ConfigureAwait(false);
+        const int fetchLimit = 80;
+        var moviesTask = _client.SearchMoviesAsync(q, null, fetchLimit, cancellationToken);
+        var tvTask = _client.SearchTvAsync(q, fetchLimit, cancellationToken);
+        await Task.WhenAll(moviesTask, tvTask).ConfigureAwait(false);
 
-        var releases = (movies?.Items ?? Array.Empty<Release>())
-            .Concat(tv?.Items ?? Array.Empty<Release>())
+        var releases = (moviesTask.Result?.Items ?? Array.Empty<Release>())
+            .Concat(tvTask.Result?.Items ?? Array.Empty<Release>())
             .Where(r => StartsWithToken(ResolveTitle(r), token))
             .Take(Config.ResultLimit)
             .ToList();
