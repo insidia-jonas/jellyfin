@@ -23,7 +23,9 @@ public class TreasureMapsApiClient
     // Short-lived in-memory response cache keyed by request URL. Channel navigation re-fetches the
     // same lists constantly (root -> category -> back), and the indexer is slow (~2-5s per search
     // page) and rate-limits rapid calls, so caching makes browsing feel instant instead of static.
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTimeOffset Expires, object Value)> _cache = new();
+    // Entries are kept beyond their freshness window: when the indexer errors (it 503s whole
+    // periods when rate-limited), the last known good response is served instead of a blank view.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTimeOffset FreshUntil, object Value)> _cache = new();
     private static readonly TimeSpan SearchCacheTtl = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan CapsCacheTtl = TimeSpan.FromHours(1);
 
@@ -200,32 +202,38 @@ public class TreasureMapsApiClient
         }
 
         var url = BuildUrl(path, parameters);
-        if (cacheTtl > TimeSpan.Zero
-            && _cache.TryGetValue(url, out var cached)
-            && cached.Expires > DateTimeOffset.UtcNow
-            && cached.Value is T hit)
+        var hasCached = cacheTtl > TimeSpan.Zero && _cache.TryGetValue(url, out var cached);
+        if (hasCached && cached.FreshUntil > DateTimeOffset.UtcNow && cached.Value is T hit)
         {
             return hit;
         }
 
-        using var client = CreateClient();
-        _logger.LogDebug("Treasure-Maps request: {Url}", url);
-
-        using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        var result = await response.Content.ReadFromJsonAsync<T>(_jsonOptions, cancellationToken).ConfigureAwait(false);
-
-        if (cacheTtl > TimeSpan.Zero && result is not null)
+        try
         {
-            if (_cache.Count > 500)
+            using var client = CreateClient();
+            _logger.LogDebug("Treasure-Maps request: {Url}", url);
+
+            using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+            var result = await response.Content.ReadFromJsonAsync<T>(_jsonOptions, cancellationToken).ConfigureAwait(false);
+
+            if (cacheTtl > TimeSpan.Zero && result is not null)
             {
-                _cache.Clear();
+                if (_cache.Count > 500)
+                {
+                    _cache.Clear();
+                }
+
+                _cache[url] = (DateTimeOffset.UtcNow.Add(cacheTtl), result);
             }
 
-            _cache[url] = (DateTimeOffset.UtcNow.Add(cacheTtl), result);
+            return result;
         }
-
-        return result;
+        catch (Exception ex) when (hasCached && cached.Value is T stale)
+        {
+            _logger.LogWarning(ex, "Treasure-Maps request failed; serving the last known response for {Url}", url);
+            return stale;
+        }
     }
 
     private HttpClient CreateClient()

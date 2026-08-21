@@ -245,17 +245,21 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
 
     /// <summary>
     /// Builds the "Recently added" view: the newest movie + TV titles, one poster card per title.
+    /// Fetches are fault-tolerant per kind (the indexer rate-limits with 503s); the view only
+    /// errors (and is not cached empty) when both kinds fail.
     /// </summary>
     private async Task<ChannelItemResult> GetRecentlyAddedAsync(CancellationToken cancellationToken)
     {
-        var moviesTask = _client.SearchMoviesAsync(null, null, null, PageSize, 0, cancellationToken);
-        var tvTask = _client.SearchTvAsync(null, null, PageSize, 0, cancellationToken);
+        var moviesTask = FetchPageSafeAsync("movie", null, null, null, 0, cancellationToken);
+        var tvTask = FetchPageSafeAsync("tv", null, null, null, 0, cancellationToken);
         var both = await Task.WhenAll(moviesTask, tvTask).ConfigureAwait(false);
 
-        var releases = (both[0]?.Items ?? Array.Empty<Release>())
-            .Concat(both[1]?.Items ?? Array.Empty<Release>())
-            .ToList();
+        if (both.All(r => !r.Ok))
+        {
+            throw new InvalidOperationException("Both the movie and TV feeds failed for the Recently added view.");
+        }
 
+        var releases = both.SelectMany(r => r.Items).ToList();
         var cards = BuildGroupCards(releases, "new");
         var items = cards.Items.Take(RootLatestCount).ToList();
         return Result(items);
