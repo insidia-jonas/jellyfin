@@ -77,13 +77,16 @@ public static class ReleaseMapper
             title = release.Title;
         }
 
+        // Releases are modelled as *folders*, not playable media: they have no stream, and on TV
+        // clients a playable item would show a "Play" button that errors. As a folder the item has
+        // no Play button; opening it shows a small grab detail, and the download is triggered by
+        // marking it as a favorite (handled by GrabOnFavoriteService via the ProviderIds below).
         var item = new ChannelItemInfo
         {
             Id = release.Guid,
             Name = title!,
-            Type = ChannelItemType.Media,
-            ContentType = isTv ? ChannelMediaContentType.Episode : ChannelMediaContentType.Movie,
-            MediaType = ChannelMediaType.Video,
+            Type = ChannelItemType.Folder,
+            FolderType = ChannelFolderType.Container,
             Overview = BuildOverview(release),
             ImageUrl = release.Images?.Cover,
             HomePageUrl = release.Links?.Details,
