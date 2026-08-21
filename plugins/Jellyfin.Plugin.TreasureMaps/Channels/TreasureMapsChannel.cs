@@ -46,6 +46,9 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
 
     private readonly TreasureMapsApiClient _client;
     private readonly XrelClient _xrel;
+    private readonly Recommendations.AiRecommender _ai;
+    private readonly MediaBrowser.Controller.Library.ILibraryManager _libraryManager;
+    private readonly MediaBrowser.Controller.Library.IUserManager _userManager;
     private readonly ILogger<TreasureMapsChannel> _logger;
 
     /// <summary>
@@ -53,11 +56,23 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
     /// </summary>
     /// <param name="client">The Treasure-Maps API client.</param>
     /// <param name="xrel">The xREL client.</param>
+    /// <param name="ai">The AI recommender.</param>
+    /// <param name="libraryManager">The library manager (for the user's history).</param>
+    /// <param name="userManager">The user manager.</param>
     /// <param name="logger">The logger.</param>
-    public TreasureMapsChannel(TreasureMapsApiClient client, XrelClient xrel, ILogger<TreasureMapsChannel> logger)
+    public TreasureMapsChannel(
+        TreasureMapsApiClient client,
+        XrelClient xrel,
+        Recommendations.AiRecommender ai,
+        MediaBrowser.Controller.Library.ILibraryManager libraryManager,
+        MediaBrowser.Controller.Library.IUserManager userManager,
+        ILogger<TreasureMapsChannel> logger)
     {
         _client = client;
         _xrel = xrel;
+        _ai = ai;
+        _libraryManager = libraryManager;
+        _userManager = userManager;
         _logger = logger;
     }
 
@@ -77,7 +92,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             var c = Config;
             return string.Join(
                 '|',
-                "25",
+                "26",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -136,6 +151,11 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             if (string.Equals(folderId, "new", StringComparison.Ordinal))
             {
                 return await GetRecentlyAddedAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            if (string.Equals(folderId, "foryou", StringComparison.Ordinal))
+            {
+                return await GetForYouAsync(query.UserId, cancellationToken).ConfigureAwait(false);
             }
 
             // A title card (GRP) opens into the individual releases behind that movie/show.
@@ -239,17 +259,172 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
     {
         var items = new List<ChannelItemInfo>
         {
-            Folder("new", "Recently added", 0),
-            Folder("trending", "Trending", 1),
-            Folder("movies", "Movies", 2),
-            Folder("tv", "TV Shows", 3),
-            Folder("movies-de", "Movies (DE)", 4),
-            Folder("tv-de", "TV Shows (DE)", 5),
-            Folder("genres", "Browse by genre", 6),
-            Folder("find", "Find A\u2013Z", 7)
+            Folder("foryou", "For You", 0),
+            Folder("new", "Recently added", 1),
+            Folder("trending", "Trending", 2),
+            Folder("movies", "Movies", 3),
+            Folder("tv", "TV Shows", 4),
+            Folder("movies-de", "Movies (DE)", 5),
+            Folder("tv-de", "TV Shows (DE)", 6),
+            Folder("genres", "Browse by genre", 7),
+            Folder("find", "Find A\u2013Z", 8)
         };
 
         return Result(items);
+    }
+
+    /// <summary>
+    /// Builds the AI-powered "For You" view: collects the user's watch/favorite history, asks the
+    /// configured LLM provider for personalized recommendations, and resolves each recommendation
+    /// against the indexer as a normal title card (with the AI's reason in the overview).
+    /// </summary>
+    private async Task<ChannelItemResult> GetForYouAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        if (!Recommendations.AiRecommender.IsEnabled)
+        {
+            var hint = Folder("foryou-hint", "Enable AI recommendations in the Treasure-Maps plugin settings", 0);
+            hint.Overview = "Set an AI provider (Grok / OpenAI / Anthropic) and API key on the plugin configuration page to get personal recommendations here.";
+            return Result(new List<ChannelItemInfo> { hint });
+        }
+
+        var (watched, favorites) = CollectHistory(userId);
+        var recommendations = await _ai.GetRecommendationsAsync(
+            userId.ToString("N"),
+            watched,
+            favorites,
+            15,
+            cancellationToken).ConfigureAwait(false);
+
+        if (recommendations.Count == 0)
+        {
+            throw new InvalidOperationException("The AI provider returned no usable recommendations.");
+        }
+
+        // Resolve every recommendation against the indexer in parallel; unavailable titles are skipped.
+        var resolved = await Task.WhenAll(recommendations.Select(r => ResolveRecommendationAsync(r, cancellationToken))).ConfigureAwait(false);
+        var items = resolved.Where(i => i is not null).Select(i => i!).ToList();
+        return Result(items);
+    }
+
+    /// <summary>
+    /// Collects the user's history: recently watched movies/series and favorites (including
+    /// favorited Treasure-Maps title cards, i.e. downloads).
+    /// </summary>
+    private (IReadOnlyList<string> Watched, IReadOnlyList<string> Favorites) CollectHistory(Guid userId)
+    {
+        var user = userId.Equals(default) ? null : _userManager.GetUserById(userId);
+        if (user is null)
+        {
+            return (Array.Empty<string>(), Array.Empty<string>());
+        }
+
+        var watchedQuery = new MediaBrowser.Controller.Entities.InternalItemsQuery(user)
+        {
+            IsPlayed = true,
+            IncludeItemTypes = new[] { Jellyfin.Data.Enums.BaseItemKind.Movie, Jellyfin.Data.Enums.BaseItemKind.Episode },
+            OrderBy = new[] { (Jellyfin.Data.Enums.ItemSortBy.DatePlayed, Jellyfin.Database.Implementations.Enums.SortOrder.Descending) },
+            Limit = 80,
+            Recursive = true
+        };
+        var watchedItems = _libraryManager.GetItemsResult(watchedQuery).Items;
+
+        var watched = new List<string>();
+        foreach (var item in watchedItems)
+        {
+            var label = item is MediaBrowser.Controller.Entities.TV.Episode episode
+                ? (episode.SeriesName ?? episode.Name) + " [tv]"
+                : item.Name + (item.ProductionYear.HasValue ? $" ({item.ProductionYear})" : string.Empty) + " [movie]";
+            if (!watched.Contains(label, StringComparer.OrdinalIgnoreCase))
+            {
+                watched.Add(label);
+            }
+
+            if (watched.Count >= 40)
+            {
+                break;
+            }
+        }
+
+        var favoriteQuery = new MediaBrowser.Controller.Entities.InternalItemsQuery(user)
+        {
+            IsFavorite = true,
+            IncludeItemTypes = new[]
+            {
+                Jellyfin.Data.Enums.BaseItemKind.Movie,
+                Jellyfin.Data.Enums.BaseItemKind.Series,
+                Jellyfin.Data.Enums.BaseItemKind.BoxSet
+            },
+            Limit = 40,
+            Recursive = true
+        };
+        var favorites = _libraryManager.GetItemsResult(favoriteQuery).Items
+            .Select(i => i.Name + (i.ProductionYear.HasValue ? $" ({i.ProductionYear})" : string.Empty))
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return (watched, favorites);
+    }
+
+    /// <summary>
+    /// Resolves one AI recommendation against the indexer and builds its title card.
+    /// </summary>
+    private async Task<ChannelItemInfo?> ResolveRecommendationAsync(Recommendations.AiRecommendation rec, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var kind = string.Equals(rec.Type, "tv", StringComparison.OrdinalIgnoreCase) ? "tv" : "movie";
+            var (releases, ok) = await FetchPageSafeAsync(kind, rec.Title, null, null, 0, cancellationToken).ConfigureAwait(false);
+            if (!ok || releases.Count == 0)
+            {
+                return null;
+            }
+
+            var wanted = NormalizeTitle(rec.Title);
+            var matching = releases
+                .Where(r =>
+                {
+                    var title = NormalizeTitle(ReleaseGrouper.TitleOf(r, ReleaseGrouper.KindOf(r)));
+                    return title.Length > 0 && (title == wanted || title.Contains(wanted, StringComparison.Ordinal) || wanted.Contains(title, StringComparison.Ordinal));
+                })
+                .ToList();
+            if (matching.Count == 0)
+            {
+                return null;
+            }
+
+            var card = BuildGroupCards(matching, "foryou").Items.FirstOrDefault();
+            if (card is not null && !string.IsNullOrWhiteSpace(rec.Reason))
+            {
+                card.Overview = "\u2728 " + rec.Reason + "\n\n" + (card.Overview ?? string.Empty);
+            }
+
+            return card;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not resolve AI recommendation {Title}", rec.Title);
+            return null;
+        }
+    }
+
+    private static string NormalizeTitle(string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return string.Empty;
+        }
+
+        var sb = new StringBuilder(title.Length);
+        foreach (var c in title.ToLowerInvariant())
+        {
+            if (char.IsLetterOrDigit(c))
+            {
+                sb.Append(c);
+            }
+        }
+
+        return sb.ToString();
     }
 
     /// <summary>

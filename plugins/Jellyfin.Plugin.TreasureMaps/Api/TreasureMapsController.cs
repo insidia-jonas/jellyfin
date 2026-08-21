@@ -369,6 +369,34 @@ public class TreasureMapsController : ControllerBase
         };
     }
 
+    /// <summary>
+    /// Validates the AI provider configuration with a tiny prompt.
+    /// </summary>
+    /// <param name="ai">The AI recommender.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The connection status.</returns>
+    [HttpGet("Ai/Test")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> TestAi([FromServices] Recommendations.AiRecommender ai, CancellationToken cancellationToken)
+    {
+        var config = Plugin.Instance?.Configuration ?? new Configuration.PluginConfiguration();
+        if (string.IsNullOrWhiteSpace(config.AiApiKey))
+        {
+            return Ok(new { ok = false, message = "Set an AI API key first." });
+        }
+
+        try
+        {
+            var reply = await ai.CompleteAsync("Reply with exactly: OK", cancellationToken).ConfigureAwait(false);
+            return Ok(new { ok = true, provider = config.AiProvider, reply = reply.Length <= 80 ? reply : reply[..80] });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AI connection test failed");
+            return Ok(new { ok = false, message = ex.Message });
+        }
+    }
+
     private const string ThemeBegin = "/* TREASURE-GLASS-BEGIN */";
     private const string ThemeEnd = "/* TREASURE-GLASS-END */";
 

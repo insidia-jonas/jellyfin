@@ -55,6 +55,38 @@
                         </label>
                     </div>
                     <div class="verticalSection">
+                        <h2>AI recommendations (For You)</h2>
+                        <div class="fieldDescription" style="margin-bottom:1em;">
+                            Powers the <strong>For You</strong> category in the channel: your watch/favorite history is sent to the
+                            chosen AI provider, which recommends matching movies &amp; shows that are then looked up on the indexer.
+                        </div>
+                        <label class="checkboxContainer">
+                            <input is="emby-checkbox" type="checkbox" id="enableForYou" />
+                            <span>Enable the AI-powered "For You" category.</span>
+                        </label>
+                        <div class="selectContainer">
+                            <select is="emby-select" id="aiProvider" label="AI provider">
+                                <option value="grok">Grok (xAI)</option>
+                                <option value="openai">OpenAI</option>
+                                <option value="anthropic">Anthropic (Claude)</option>
+                            </select>
+                        </div>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="password" id="aiApiKey" label="AI API key" autocomplete="new-password" />
+                            <div class="fieldDescription">Your key for the selected provider.</div>
+                        </div>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="text" id="aiModel" label="Model (optional)" />
+                            <div class="fieldDescription">Empty uses the default: <code>grok-3-mini</code> / <code>gpt-4o-mini</code> / <code>claude-3-5-haiku-latest</code>.</div>
+                        </div>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="text" id="aiBaseUrl" label="API base URL override (optional)" />
+                            <div class="fieldDescription">For OpenAI-compatible gateways (OpenRouter, local LLMs, ...). Empty uses the provider's official endpoint.</div>
+                        </div>
+                        <button is="emby-button" type="button" id="testAi" class="raised block"><span>Save &amp; test AI provider</span></button>
+                        <div id="aiResult" class="fieldDescription" style="margin-top:0.5em;"></div>
+                    </div>
+                    <div class="verticalSection">
                         <h2>Ratings (xREL)</h2>
                         <div class="fieldDescription" style="margin-bottom:1em;">
                             Enrich releases with <a href="https://www.xrel.to" target="_blank">xREL</a> ratings, matched by
@@ -175,6 +207,11 @@
                 config.FilterByLanguage = document.querySelector('#filterByLanguage').checked;
                 config.EnableXrel = document.querySelector('#enableXrel').checked;
                 config.XrelBaseUrl = document.querySelector('#xrelBaseUrl').value.trim();
+                config.EnableForYou = document.querySelector('#enableForYou').checked;
+                config.AiProvider = document.querySelector('#aiProvider').value;
+                config.AiApiKey = document.querySelector('#aiApiKey').value.trim();
+                config.AiModel = document.querySelector('#aiModel').value.trim();
+                config.AiBaseUrl = document.querySelector('#aiBaseUrl').value.trim();
                 config.EnableOpenSubtitles = document.querySelector('#enableOpenSubtitles').checked;
                 config.OpenSubtitlesApiKey = document.querySelector('#openSubtitlesApiKey').value.trim();
                 config.OpenSubtitlesUsername = document.querySelector('#openSubtitlesUsername').value.trim();
@@ -204,6 +241,11 @@
                         document.querySelector('#filterByLanguage').checked = !!config.FilterByLanguage;
                         document.querySelector('#enableXrel').checked = !!config.EnableXrel;
                         document.querySelector('#xrelBaseUrl').value = config.XrelBaseUrl || 'https://api.xrel.to/v2';
+                        document.querySelector('#enableForYou').checked = !!config.EnableForYou;
+                        document.querySelector('#aiProvider').value = config.AiProvider || 'openai';
+                        document.querySelector('#aiApiKey').value = config.AiApiKey || '';
+                        document.querySelector('#aiModel').value = config.AiModel || '';
+                        document.querySelector('#aiBaseUrl').value = config.AiBaseUrl || '';
                         document.querySelector('#enableOpenSubtitles').checked = !!config.EnableOpenSubtitles;
                         document.querySelector('#openSubtitlesApiKey').value = config.OpenSubtitlesApiKey || '';
                         document.querySelector('#openSubtitlesUsername').value = config.OpenSubtitlesUsername || '';
@@ -405,6 +447,36 @@
                     resultEl.textContent = label + ' request failed.';
                 });
             }
+
+            document.querySelector('#testAi')
+                .addEventListener('click', function () {
+                    var resultEl = document.querySelector('#aiResult');
+                    resultEl.textContent = 'Saving and testing the AI provider...';
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(TreasureMapsConfig.pluginId).then(function (config) {
+                        ApiClient.updatePluginConfiguration(TreasureMapsConfig.pluginId, readFormInto(config)).then(function () {
+                            ApiClient.fetch({
+                                url: ApiClient.getUrl('TreasureMaps/Ai/Test'),
+                                type: 'GET',
+                                dataType: 'json',
+                                headers: { accept: 'application/json' }
+                            }).then(function (res) {
+                                Dashboard.hideLoadingMsg();
+                                if (res && res.ok) {
+                                    resultEl.style.color = 'green';
+                                    resultEl.textContent = 'AI provider connected (' + res.provider + '): ' + (res.reply || '');
+                                } else {
+                                    resultEl.style.color = 'red';
+                                    resultEl.textContent = 'AI test failed: ' + ((res && res.message) || 'unknown error');
+                                }
+                            }, function () {
+                                Dashboard.hideLoadingMsg();
+                                resultEl.style.color = 'red';
+                                resultEl.textContent = 'AI test request failed.';
+                            });
+                        });
+                    });
+                });
 
             document.querySelector('#applyTheme')
                 .addEventListener('click', function () { themeAction('TreasureMaps/Theme/Apply', 'Applying glass theme'); });

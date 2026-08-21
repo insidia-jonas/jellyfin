@@ -14,6 +14,38 @@ public class PluginConfiguration : BasePluginConfiguration
     public string BaseUrl { get; set; } = string.Empty;
 
     /// <summary>
+    /// Gets or sets a value indicating whether the AI-powered "For You" channel category is enabled.
+    /// </summary>
+    public bool EnableForYou { get; set; }
+
+    /// <summary>
+    /// Gets or sets the AI provider: <c>grok</c> (xAI), <c>openai</c> or <c>anthropic</c>.
+    /// </summary>
+    public string AiProvider { get; set; } = "openai";
+
+    /// <summary>
+    /// Gets or sets the AI provider API key.
+    /// </summary>
+    public string AiApiKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the model name (empty uses the provider's default:
+    /// grok-3-mini / gpt-4o-mini / claude-3-5-haiku-latest).
+    /// </summary>
+    public string AiModel { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets an optional base-URL override for the AI API (e.g. an OpenAI-compatible
+    /// gateway such as OpenRouter or a local server). Empty uses the provider's official endpoint.
+    /// </summary>
+    public string AiBaseUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets how many hours AI recommendations are cached per user.
+    /// </summary>
+    public int ForYouCacheHours { get; set; } = 6;
+
+    /// <summary>
     /// Gets or sets the API key sent as the <c>X-API-Key</c> header.
     /// </summary>
     public string ApiKey { get; set; } = string.Empty;
