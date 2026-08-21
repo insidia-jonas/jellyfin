@@ -202,7 +202,8 @@ public class TreasureMapsApiClient
         }
 
         var url = BuildUrl(path, parameters);
-        var hasCached = cacheTtl > TimeSpan.Zero && _cache.TryGetValue(url, out var cached);
+        (DateTimeOffset FreshUntil, object Value) cached = default;
+        var hasCached = cacheTtl > TimeSpan.Zero && _cache.TryGetValue(url, out cached);
         if (hasCached && cached.FreshUntil > DateTimeOffset.UtcNow && cached.Value is T hit)
         {
             return hit;
