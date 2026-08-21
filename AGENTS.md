@@ -113,7 +113,15 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   dashboard pages. So the Fire-TV-facing surface is the **channel** (`TreasureMapsChannel`): its root
   shows the folders `Trending / Movies / TV Shows / Movies (DE) / TV Shows (DE) / Browse by genre /
   Find A–Z` **plus** ~24 recently-added title cards (mixed movies+TV), so opening the channel
-  immediately shows content. The DE rows mirror the website's language blocks: the indexer's `x100`
+  immediately shows content. Jellyfin sorts channel views strictly by name-derived `SortName` (and
+  the title cards are folders too, so folders-first grouping can't separate them); the category
+  folders are therefore prefixed with `# ` — ASCII `#` sorts before digits and letters, pinning
+  them as one block at the top. Don't remove the prefix or the folders scatter between the posters.
+- Top-menu ordering is a per-user preference (`OrderedViews`), not sortable server-wide.
+  `POST TreasureMaps/Menu/MoveChannelLast` (config-page button "Move Treasure-Maps to the end of
+  the menu") rewrites every user's ordered views so the channel comes after the media libraries.
+  NOTE: `IUserManager.UpdateConfigurationAsync` overwrites the whole `UserConfiguration` — always
+  carry over all current values (see `BuildUserConfiguration` in the controller). The DE rows mirror the website's language blocks: the indexer's `x100`
   category block is German (`cat=2100` movies, `cat=5100` TV — constants
   `GermanMovieCategories`/`GermanTvCategories` on the API client; `SearchMoviesAsync`/`SearchTvAsync`
   take optional category + offset overrides). The cat filter is loose: a few cross-listed non-DE
