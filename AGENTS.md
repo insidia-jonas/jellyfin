@@ -243,6 +243,11 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   view fresh while the plugin's in-memory API caches protect the indexer. Folder names on reused
   ids update because ChannelManager updates container-folder names (and this fork also updates
   DateCreated).
+- Downloads tiles show the movie POSTER, not text tiles: the cover travels through the
+  `REL::`/`grab::` ids into the grab, `GrabService` keeps an in-memory artwork registry
+  (nzo id + normalized job name → cover; fed by the play, favorite and API grab paths — the web
+  script passes a `poster` param). Registry is per-session: jobs grabbed before a server restart
+  fall back to text tiles until they age out of the SABnzbd history.
 - Client script injection (web only): `WebScriptInjector` inserts
   `<script plugin="TreasureMaps" defer src="/TreasureMaps/ClientScript">` into the web client's
   `index.html` at startup (marker-guarded, same pattern as Intro Skipper; served anonymously by
