@@ -97,9 +97,20 @@ public class TreasureMapsApiClient
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The release list response.</returns>
     public Task<ReleaseListResponse?> GetTrendingAsync(int limit, CancellationToken cancellationToken)
+        => GetTrendingAsync(null, limit, cancellationToken);
+
+    /// <summary>
+    /// Gets the trending / spotlight releases for a specific type.
+    /// </summary>
+    /// <param name="type">The trending type (<c>movie</c> or <c>tv</c>); null for all.</param>
+    /// <param name="limit">Maximum number of results.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The release list response.</returns>
+    public Task<ReleaseListResponse?> GetTrendingAsync(string? type, int limit, CancellationToken cancellationToken)
     {
         var parameters = new Dictionary<string, string?>
         {
+            ["type"] = type,
             ["limit"] = limit.ToString(CultureInfo.InvariantCulture)
         };
         return GetJsonAsync<ReleaseListResponse>("trending", parameters, cancellationToken);
