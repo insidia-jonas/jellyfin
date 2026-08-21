@@ -7,8 +7,11 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data;
 using Jellyfin.Plugin.TreasureMaps.ReleaseNaming;
+using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.Channels;
+using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Model.Branding;
 using MediaBrowser.Model.Configuration;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Library;
@@ -35,6 +38,7 @@ public class TreasureMapsController : ControllerBase
     private readonly ILibraryManager _libraryManager;
     private readonly IUserManager _userManager;
     private readonly IUserViewManager _userViewManager;
+    private readonly IServerConfigurationManager _configurationManager;
     private readonly ILogger<TreasureMapsController> _logger;
 
     /// <summary>
@@ -46,6 +50,7 @@ public class TreasureMapsController : ControllerBase
     /// <param name="libraryManager">The library manager.</param>
     /// <param name="userManager">The user manager.</param>
     /// <param name="userViewManager">The user view manager.</param>
+    /// <param name="configurationManager">The server configuration manager.</param>
     /// <param name="logger">The logger.</param>
     public TreasureMapsController(
         TreasureMapsApiClient client,
@@ -54,6 +59,7 @@ public class TreasureMapsController : ControllerBase
         ILibraryManager libraryManager,
         IUserManager userManager,
         IUserViewManager userViewManager,
+        IServerConfigurationManager configurationManager,
         ILogger<TreasureMapsController> logger)
     {
         _client = client;
@@ -62,6 +68,7 @@ public class TreasureMapsController : ControllerBase
         _libraryManager = libraryManager;
         _userManager = userManager;
         _userViewManager = userViewManager;
+        _configurationManager = configurationManager;
         _logger = logger;
     }
 
@@ -360,6 +367,90 @@ public class TreasureMapsController : ControllerBase
             LatestItemsExcludes = user.GetPreferenceValues<Guid>(Jellyfin.Database.Implementations.Enums.PreferenceKind.LatestItemExcludes),
             CastReceiverId = user.CastReceiverId
         };
+    }
+
+    private const string ThemeBegin = "/* TREASURE-GLASS-BEGIN */";
+    private const string ThemeEnd = "/* TREASURE-GLASS-END */";
+
+    /// <summary>
+    /// Applies the bundled "Treasure Glass" (macOS-like glassmorphism) theme to the server's
+    /// branding Custom CSS, so every web client gets the modern glass look. Existing custom CSS
+    /// outside the theme's marker block is preserved.
+    /// </summary>
+    /// <returns>The result of the operation.</returns>
+    [HttpPost("Theme/Apply")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult ApplyTheme()
+    {
+        try
+        {
+            using var stream = GetType().Assembly.GetManifestResourceStream("Jellyfin.Plugin.TreasureMaps.Theme.glass.css");
+            if (stream is null)
+            {
+                return Ok(new { ok = false, message = "Bundled theme resource not found." });
+            }
+
+            using var reader = new StreamReader(stream);
+            var css = reader.ReadToEnd();
+
+            var branding = _configurationManager.GetConfiguration<BrandingOptions>("branding");
+            var existing = StripThemeBlock(branding.CustomCss);
+            branding.CustomCss = (string.IsNullOrWhiteSpace(existing) ? string.Empty : existing.TrimEnd() + "\n\n")
+                + ThemeBegin + "\n" + css + "\n" + ThemeEnd;
+            _configurationManager.SaveConfiguration("branding", branding);
+
+            _logger.LogInformation("Applied the Treasure Glass theme to the branding custom CSS");
+            return Ok(new { ok = true, bytes = css.Length });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to apply the glass theme");
+            return Ok(new { ok = false, message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Removes the "Treasure Glass" theme from the branding Custom CSS (other custom CSS is kept).
+    /// </summary>
+    /// <returns>The result of the operation.</returns>
+    [HttpPost("Theme/Remove")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult RemoveTheme()
+    {
+        try
+        {
+            var branding = _configurationManager.GetConfiguration<BrandingOptions>("branding");
+            branding.CustomCss = StripThemeBlock(branding.CustomCss);
+            _configurationManager.SaveConfiguration("branding", branding);
+            return Ok(new { ok = true });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to remove the glass theme");
+            return Ok(new { ok = false, message = ex.Message });
+        }
+    }
+
+    private static string? StripThemeBlock(string? css)
+    {
+        if (string.IsNullOrEmpty(css))
+        {
+            return css;
+        }
+
+        var start = css.IndexOf(ThemeBegin, StringComparison.Ordinal);
+        if (start < 0)
+        {
+            return css;
+        }
+
+        var end = css.IndexOf(ThemeEnd, start, StringComparison.Ordinal);
+        if (end < 0)
+        {
+            return css[..start].TrimEnd();
+        }
+
+        return (css[..start] + css[(end + ThemeEnd.Length)..]).Trim();
     }
 
     /// <summary>

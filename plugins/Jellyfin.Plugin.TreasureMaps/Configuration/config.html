@@ -140,6 +140,9 @@
                         <div class="fieldDescription" style="margin-top:.35em;">Creates Jellyfin libraries pointing at the download folders above, so finished downloads appear in the top menu under <strong>Movies</strong> / <strong>TV Shows</strong>.</div>
                         <button is="emby-button" type="button" id="moveMenuLast" class="raised block"><span>Move Treasure-Maps to the end of the menu</span></button>
                         <div class="fieldDescription" style="margin-top:.35em;">Reorders every user's top menu so the Treasure-Maps channel comes after the media libraries.</div>
+                        <button is="emby-button" type="button" id="applyTheme" class="raised block"><span>Apply glass theme (modern macOS look)</span></button>
+                        <button is="emby-button" type="button" id="removeTheme" class="raised block"><span>Remove glass theme</span></button>
+                        <div class="fieldDescription" style="margin-top:.35em;">Installs the bundled "Treasure Glass" theme into Dashboard &gt; Branding &gt; Custom CSS (applies to all web clients; reload the page afterwards).</div>
                         <div id="sabResult" class="fieldDescription" style="margin-top:0.5em;"></div>
                     </div>
                     <div class="inputContainer inputContainer-withDescription">
@@ -377,6 +380,37 @@
                         resultEl.textContent = 'Menu update request failed.';
                     });
                 });
+
+            function themeAction(url, label) {
+                var resultEl = document.querySelector('#sabResult');
+                resultEl.textContent = label + '...';
+                Dashboard.showLoadingMsg();
+                ApiClient.fetch({
+                    url: ApiClient.getUrl(url),
+                    type: 'POST',
+                    dataType: 'json',
+                    headers: { accept: 'application/json' }
+                }).then(function (res) {
+                    Dashboard.hideLoadingMsg();
+                    if (res && res.ok) {
+                        resultEl.style.color = 'green';
+                        resultEl.textContent = label + ' done. Reload the page (Ctrl+F5) to see it.';
+                    } else {
+                        resultEl.style.color = 'red';
+                        resultEl.textContent = label + ' failed: ' + ((res && res.message) || 'unknown error');
+                    }
+                }, function () {
+                    Dashboard.hideLoadingMsg();
+                    resultEl.style.color = 'red';
+                    resultEl.textContent = label + ' request failed.';
+                });
+            }
+
+            document.querySelector('#applyTheme')
+                .addEventListener('click', function () { themeAction('TreasureMaps/Theme/Apply', 'Applying glass theme'); });
+
+            document.querySelector('#removeTheme')
+                .addEventListener('click', function () { themeAction('TreasureMaps/Theme/Remove', 'Removing glass theme'); });
 
             document.querySelector('#testSabnzbd')
                 .addEventListener('click', function () {

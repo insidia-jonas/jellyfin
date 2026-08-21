@@ -23,6 +23,8 @@
     <EmbeddedResource Include="Configuration\config.html" />
     <None Remove="Configuration\browse.html" />
     <EmbeddedResource Include="Configuration\browse.html" />
+    <None Remove="Theme\glass.css" />
+    <EmbeddedResource Include="Theme\glass.css" />
   </ItemGroup>
 
 </Project>
