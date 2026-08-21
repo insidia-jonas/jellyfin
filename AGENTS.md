@@ -218,6 +218,17 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   re-fetch. Rapidly toggling the language filter on/off within one session can briefly show
   stale items (shared ids get removed/re-added across cache generations) until the channel fully
   refreshes.
+- "For You" (AI recommendations): the channel's `foryou` folder collects the requesting user's
+  history (played movies/episodes via `ILibraryManager` + favorites incl. favorited channel
+  BoxSets), builds a prompt (`AiRecommender.BuildPrompt`) and asks the configured LLM provider —
+  `grok` (api.x.ai) / `openai` (both OpenAI chat-completions shaped) or `anthropic` (messages API).
+  `AiBaseUrl` overrides the endpoint (OpenRouter/local LLMs/mocks — testing uses an
+  OpenAI-compatible mock on 127.0.0.1:8092, `/tmp/ai_mock.py`, tmux `ai-mock`). Replies are parsed
+  tolerantly (`ParseRecommendations` extracts the JSON array from prose/fences); each rec is
+  resolved against the indexer by title (normalized match) and skipped when unavailable; the AI's
+  reason is prepended to the card overview ("✨ ..."). Recommendations are cached per user+history
+  hash (`ForYouCacheHours`, default 6h) so browsing doesn't burn tokens. `GET TreasureMaps/Ai/Test`
+  validates the key with a tiny prompt. Channel query's `UserId` provides per-user personalization.
 - "Treasure Glass" theme: a macOS-like glassmorphism skin ships as an embedded resource
   (`Theme/glass.css`). `POST TreasureMaps/Theme/Apply` (config-page button) installs it into the
   server's branding Custom CSS inside a `/* TREASURE-GLASS-BEGIN/END */` marker block (existing
