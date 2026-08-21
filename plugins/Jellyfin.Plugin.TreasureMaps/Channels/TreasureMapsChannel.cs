@@ -12,6 +12,7 @@ using Jellyfin.Plugin.TreasureMaps.Xrel;
 using MediaBrowser.Controller.Channels;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Channels;
+using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Entities;
 using Microsoft.Extensions.Logging;
 
@@ -24,7 +25,7 @@ namespace Jellyfin.Plugin.TreasureMaps.Channels;
 /// Titles are shown once (one poster card per movie/show); opening a card lists the individual
 /// releases (qualities) behind it, which you grab by marking a release as a favorite (heart).
 /// </summary>
-public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMediaSourceDisplay
+public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMediaSourceDisplay, IRequiresMediaInfoCallback, IHasCacheKey
 {
     private const string GenrePrefix = "genre:";
     private const string FindPrefix = "find:";
@@ -46,6 +47,8 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
 
     private readonly TreasureMapsApiClient _client;
     private readonly XrelClient _xrel;
+    private readonly SabnzbdClient _sabnzbd;
+    private readonly GrabService _grabService;
     private readonly Recommendations.AiRecommender _ai;
     private readonly MediaBrowser.Controller.Library.ILibraryManager _libraryManager;
     private readonly MediaBrowser.Controller.Library.IUserManager _userManager;
@@ -56,6 +59,8 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
     /// </summary>
     /// <param name="client">The Treasure-Maps API client.</param>
     /// <param name="xrel">The xREL client.</param>
+    /// <param name="sabnzbd">The SABnzbd client (for the Downloads folder).</param>
+    /// <param name="grabService">The shared grab service (play-to-download).</param>
     /// <param name="ai">The AI recommender.</param>
     /// <param name="libraryManager">The library manager (for the user's history).</param>
     /// <param name="userManager">The user manager.</param>
@@ -63,6 +68,8 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
     public TreasureMapsChannel(
         TreasureMapsApiClient client,
         XrelClient xrel,
+        SabnzbdClient sabnzbd,
+        GrabService grabService,
         Recommendations.AiRecommender ai,
         MediaBrowser.Controller.Library.ILibraryManager libraryManager,
         MediaBrowser.Controller.Library.IUserManager userManager,
@@ -70,6 +77,8 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
     {
         _client = client;
         _xrel = xrel;
+        _sabnzbd = sabnzbd;
+        _grabService = grabService;
         _ai = ai;
         _libraryManager = libraryManager;
         _userManager = userManager;
@@ -92,7 +101,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             var c = Config;
             return string.Join(
                 '|',
-                "26",
+                "27",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -116,7 +125,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
     {
         return new InternalChannelFeatures
         {
-            ContentTypes = new List<ChannelMediaContentType> { ChannelMediaContentType.Movie },
+            ContentTypes = new List<ChannelMediaContentType> { ChannelMediaContentType.Movie, ChannelMediaContentType.Clip },
             MediaTypes = new List<ChannelMediaType> { ChannelMediaType.Video },
             MaxPageSize = Config.ResultLimit
         };
@@ -156,6 +165,11 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             if (string.Equals(folderId, "foryou", StringComparison.Ordinal))
             {
                 return await GetForYouAsync(query.UserId, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (string.Equals(folderId, "downloads", StringComparison.Ordinal))
+            {
+                return await GetDownloadsAsync(cancellationToken).ConfigureAwait(false);
             }
 
             // A title card (GRP) opens into the individual releases behind that movie/show.
@@ -260,14 +274,15 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
         var items = new List<ChannelItemInfo>
         {
             Folder("foryou", "For You", 0),
-            Folder("new", "Recently added", 1),
-            Folder("trending", "Trending", 2),
-            Folder("movies", "Movies", 3),
-            Folder("tv", "TV Shows", 4),
-            Folder("movies-de", "Movies (DE)", 5),
-            Folder("tv-de", "TV Shows (DE)", 6),
-            Folder("genres", "Browse by genre", 7),
-            Folder("find", "Find A\u2013Z", 8)
+            Folder("downloads", "Downloads", 1),
+            Folder("new", "Recently added", 2),
+            Folder("trending", "Trending", 3),
+            Folder("movies", "Movies", 4),
+            Folder("tv", "TV Shows", 5),
+            Folder("movies-de", "Movies (DE)", 6),
+            Folder("tv-de", "TV Shows (DE)", 7),
+            Folder("genres", "Browse by genre", 8),
+            Folder("find", "Find A\u2013Z", 9)
         };
 
         return Result(items);
@@ -425,6 +440,122 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Builds the "Downloads" view: the SABnzbd queue (with live progress in the folder names)
+    /// and the most recent completed/failed jobs — the TV-friendly download status display.
+    /// The short channel cache key (see <see cref="GetCacheKey"/>) keeps this view fresh.
+    /// </summary>
+    private async Task<ChannelItemResult> GetDownloadsAsync(CancellationToken cancellationToken)
+    {
+        if (!SabnzbdClient.IsConfigured)
+        {
+            var hint = Folder("downloads-hint", "Configure SABnzbd in the Treasure-Maps plugin settings", 0);
+            return Result(new List<ChannelItemInfo> { hint });
+        }
+
+        var (speed, entries) = await _sabnzbd.GetDownloadStatusAsync(cancellationToken).ConfigureAwait(false);
+        var items = new List<ChannelItemInfo>();
+        var order = 0;
+        foreach (var entry in entries)
+        {
+            string name;
+            string overview;
+            if (string.Equals(entry.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+            {
+                name = "\u2713 " + entry.Name;
+                overview = "Download completed.";
+            }
+            else if (string.Equals(entry.Status, "Failed", StringComparison.OrdinalIgnoreCase))
+            {
+                name = "\u2717 " + entry.Name;
+                overview = "Download failed." + (string.IsNullOrWhiteSpace(entry.FailMessage) ? string.Empty : " " + entry.FailMessage);
+            }
+            else
+            {
+                name = $"\u2B07 {entry.Percent:0}% \u2013 {entry.Name}";
+                overview = $"Downloading \u2013 {entry.Percent:0}%"
+                    + (string.IsNullOrWhiteSpace(speed) ? string.Empty : $" \u00B7 {speed}B/s")
+                    + (string.IsNullOrWhiteSpace(entry.TimeLeft) ? string.Empty : $" \u00B7 {entry.TimeLeft} left")
+                    + (string.IsNullOrWhiteSpace(entry.LeftMb) ? string.Empty : $" \u00B7 {entry.LeftMb}/{entry.SizeMb} MB remaining");
+            }
+
+            var row = Folder("dl" + Sep + (entry.Id ?? order.ToString(System.Globalization.CultureInfo.InvariantCulture)), name, order++);
+            row.Overview = overview;
+            items.Add(row);
+        }
+
+        if (items.Count == 0)
+        {
+            items.Add(Folder("downloads-empty", "No active downloads", 0));
+        }
+
+        return Result(items);
+    }
+
+    /// <inheritdoc />
+    public string? GetCacheKey(string? userId)
+    {
+        // Jellyfin caches channel folder results on disk for hours; folding a 2-minute time
+        // bucket into the key keeps the Downloads view (progress in names) reasonably live.
+        // The plugin's own in-memory API caches keep this cheap for the indexer.
+        var bucket = DateTime.UtcNow.Ticks / TimeSpan.FromMinutes(2).Ticks;
+        return (userId ?? string.Empty) + "-" + DataVersion + "-" + bucket.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// Play-to-download: the grab entry below a release is a playable clip. Starting playback
+    /// (the native Play button on Fire TV/any client) kicks off the SABnzbd grab in the
+    /// background and plays a short bundled "Download started" confirmation video.
+    /// </summary>
+    /// <param name="id">The channel item external id (<c>grab::&lt;kind&gt;::&lt;guid&gt;::&lt;name&gt;</c>).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The confirmation clip media source.</returns>
+    public Task<IEnumerable<MediaSourceInfo>> GetChannelItemMediaInfo(string id, CancellationToken cancellationToken)
+    {
+        if (id.StartsWith(GrabPrefix, StringComparison.Ordinal))
+        {
+            // grab::<kind>::<guid>::<b64 name>
+            var parts = id.Split(Sep);
+            var kind = parts.Length > 1 ? parts[1] : "movie";
+            var guid = parts.Length > 2 ? parts[2] : string.Empty;
+            var name = parts.Length > 3 ? Decode(parts[3]) : guid;
+
+            if (!string.IsNullOrEmpty(guid))
+            {
+                _ = Task.Run(
+                    async () =>
+                    {
+                        try
+                        {
+                            await _grabService.GrabAsync(guid, name, string.Equals(kind, "tv", StringComparison.Ordinal), CancellationToken.None).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Play-to-download grab failed for {Guid}", guid);
+                        }
+                    },
+                    CancellationToken.None);
+            }
+        }
+
+        var clip = Media.ConfirmationClip.GetPath(_logger);
+        var source = new MediaSourceInfo
+        {
+            Id = "tm-confirmation",
+            Name = "Download started",
+            Path = clip,
+            Protocol = MediaBrowser.Model.MediaInfo.MediaProtocol.File,
+            Container = "mp4",
+            IsRemote = false,
+            SupportsDirectPlay = true,
+            SupportsDirectStream = true,
+            SupportsTranscoding = true,
+            RunTimeTicks = TimeSpan.FromSeconds(6).Ticks
+        };
+
+        return Task.FromResult<IEnumerable<MediaSourceInfo>>(new[] { source });
     }
 
     /// <summary>
@@ -720,8 +851,9 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
                     item.ImageUrl = groupCover;
                 }
 
-                // REL::<scopeHash>::<marker>::<kind>::<guid> — unique per title card, refreshed on config change.
-                item.Id = string.Join(Sep, ReleasePrefix.TrimEnd(':'), scopeHash, marker, kind, item.Id);
+                // REL::<scopeHash>::<marker>::<kind>::<guid>::<b64 name> — unique per title card,
+                // refreshed on config change; the name travels along for the grab job name.
+                item.Id = string.Join(Sep, ReleasePrefix.TrimEnd(':'), scopeHash, marker, kind, item.Id, Encode(item.Name));
                 ranked.Add((item, rank, parsed.QualityScore, order++));
             }
         }
@@ -739,22 +871,27 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
 
     private static ChannelItemResult GetReleaseDetail(string folderId)
     {
-        // REL::<scopeHash>::<marker>::<kind>::<guid>
+        // REL::<scopeHash>::<marker>::<kind>::<guid>::<b64 name>
         var parts = folderId.Split(Sep);
-        var guid = parts[^1];
-        var kind = parts.Length >= 2 ? parts[^2] : "movie";
-        if (!string.Equals(kind, "tv", StringComparison.Ordinal))
+        if (parts.Length < 5)
         {
-            kind = "movie";
+            return new ChannelItemResult();
         }
 
+        var kind = string.Equals(parts[3], "tv", StringComparison.Ordinal) ? "tv" : "movie";
+        var guid = parts[4];
+        var name = parts.Length >= 6 ? parts[5] : Encode(guid);
+
+        // A playable clip: pressing the native PLAY button (Fire TV etc.) starts the download and
+        // plays a short confirmation video (see GetChannelItemMediaInfo). Favoriting still works.
         var child = new ChannelItemInfo
         {
-            Id = GrabPrefix.TrimEnd(':') + Sep + guid,
-            Name = "\u2193 Download \u2013 mark as favorite (\u2764)",
-            Type = ChannelItemType.Folder,
-            FolderType = ChannelFolderType.Container,
-            Overview = "Mark this entry as a favorite (the \u2764 icon) to send the release to your download client (SABnzbd)."
+            Id = string.Join(Sep, GrabPrefix.TrimEnd(':'), kind, guid, name),
+            Name = "\u2B07 Start download",
+            Type = ChannelItemType.Media,
+            ContentType = ChannelMediaContentType.Clip,
+            MediaType = ChannelMediaType.Video,
+            Overview = "Press Play to send this release to your download client (SABnzbd). A short confirmation clip plays, and the progress appears in the Downloads folder. Marking as favorite (\u2764) works too."
         };
         child.ProviderIds["TreasureMaps"] = guid;
         child.ProviderIds["TreasureMapsKind"] = kind;

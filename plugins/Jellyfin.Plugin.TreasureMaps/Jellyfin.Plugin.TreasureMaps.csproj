@@ -27,6 +27,8 @@
     <EmbeddedResource Include="Theme\glass.css" />
     <None Remove="Web\treasuremaps.js" />
     <EmbeddedResource Include="Web\treasuremaps.js" />
+    <None Remove="Media\download_started.mp4" />
+    <EmbeddedResource Include="Media\download_started.mp4" />
   </ItemGroup>
 
 </Project>

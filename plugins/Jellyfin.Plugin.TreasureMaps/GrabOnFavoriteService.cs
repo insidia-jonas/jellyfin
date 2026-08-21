@@ -17,23 +17,19 @@ namespace Jellyfin.Plugin.TreasureMaps;
 public sealed class GrabOnFavoriteService : IHostedService
 {
     private readonly IUserDataManager _userDataManager;
-    private readonly TreasureMapsApiClient _client;
-    private readonly SabnzbdClient _sabnzbd;
+    private readonly GrabService _grabService;
     private readonly ILogger<GrabOnFavoriteService> _logger;
-    private readonly ConcurrentDictionary<string, byte> _handled = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="GrabOnFavoriteService"/> class.
     /// </summary>
     /// <param name="userDataManager">The user data manager.</param>
-    /// <param name="client">The Treasure-Maps API client.</param>
-    /// <param name="sabnzbd">The SABnzbd client.</param>
+    /// <param name="grabService">The shared grab service.</param>
     /// <param name="logger">The logger.</param>
-    public GrabOnFavoriteService(IUserDataManager userDataManager, TreasureMapsApiClient client, SabnzbdClient sabnzbd, ILogger<GrabOnFavoriteService> logger)
+    public GrabOnFavoriteService(IUserDataManager userDataManager, GrabService grabService, ILogger<GrabOnFavoriteService> logger)
     {
         _userDataManager = userDataManager;
-        _client = client;
-        _sabnzbd = sabnzbd;
+        _grabService = grabService;
         _logger = logger;
     }
 
@@ -79,13 +75,8 @@ public sealed class GrabOnFavoriteService : IHostedService
                 return;
             }
 
-            if (!_handled.TryAdd(guid, 0))
-            {
-                return; // already grabbed this session
-            }
-
             var isTv = string.Equals(item.GetProviderId("TreasureMapsKind"), "tv", StringComparison.OrdinalIgnoreCase);
-            _ = GrabAsync(guid!, item.Name ?? guid!, isTv);
+            _ = RunGrabAsync(guid!, item.Name ?? guid!, isTv);
         }
         catch (Exception ex)
         {
@@ -93,34 +84,15 @@ public sealed class GrabOnFavoriteService : IHostedService
         }
     }
 
-    private async Task GrabAsync(string guid, string name, bool isTv)
+    private async Task RunGrabAsync(string guid, string name, bool isTv)
     {
         try
         {
-            if (!SabnzbdClient.IsConfigured)
-            {
-                _logger.LogWarning("Favorited '{Name}' but SABnzbd is not configured — cannot grab.", name);
-                return;
-            }
-
-            var payload = await _client.DownloadNzbAsync(guid, CancellationToken.None).ConfigureAwait(false);
-            var config = Plugin.Instance!.Configuration;
-            var preferred = isTv ? config.SabnzbdTvCategory : config.SabnzbdMovieCategory;
-            var category = string.IsNullOrWhiteSpace(preferred) ? config.SabnzbdCategory : preferred;
-
-            var ids = await _sabnzbd.AddNzbAsync(payload, Sanitize(name), category, CancellationToken.None).ConfigureAwait(false);
-            _logger.LogInformation("Grab-on-favorite: sent '{Name}' to SABnzbd category '{Category}' ({Ids})", name, category, string.Join(",", ids));
+            await _grabService.GrabAsync(guid, name, isTv, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Grab-on-favorite failed for {Guid}", guid);
-            _handled.TryRemove(guid, out _);
         }
-    }
-
-    private static string Sanitize(string name)
-    {
-        var invalid = System.IO.Path.GetInvalidFileNameChars();
-        return new string(name.Select(c => invalid.Contains(c) ? '_' : c).ToArray());
     }
 }
