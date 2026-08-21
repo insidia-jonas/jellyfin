@@ -76,7 +76,8 @@ public sealed class GrabOnFavoriteService : IHostedService
             }
 
             var isTv = string.Equals(item.GetProviderId("TreasureMapsKind"), "tv", StringComparison.OrdinalIgnoreCase);
-            _ = RunGrabAsync(guid!, item.Name ?? guid!, isTv);
+            var cover = item.PrimaryImagePath;
+            _ = RunGrabAsync(guid!, item.Name ?? guid!, isTv, cover);
         }
         catch (Exception ex)
         {
@@ -84,11 +85,11 @@ public sealed class GrabOnFavoriteService : IHostedService
         }
     }
 
-    private async Task RunGrabAsync(string guid, string name, bool isTv)
+    private async Task RunGrabAsync(string guid, string name, bool isTv, string? cover)
     {
         try
         {
-            await _grabService.GrabAsync(guid, name, isTv, CancellationToken.None).ConfigureAwait(false);
+            await _grabService.GrabAsync(guid, name, isTv, cover, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

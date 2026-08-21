@@ -678,12 +678,14 @@ public class TreasureMapsController : ControllerBase
     /// <param name="guid">The release GUID.</param>
     /// <param name="type">The media type (<c>movie</c> or <c>tv</c>); auto-detected from the name when omitted.</param>
     /// <param name="name">An optional human-readable name for the SABnzbd job.</param>
+    /// <param name="poster">An optional cover URL, shown on the Downloads folder tile.</param>
+    /// <param name="grabService">The shared grab service (artwork registry).</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The result of the grab (SABnzbd job ids or the written file path).</returns>
     [HttpPost("Releases/{guid}/Grab")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> Grab([FromRoute] string guid, [FromQuery] string? type, [FromQuery] string? name, CancellationToken cancellationToken)
+    public async Task<IActionResult> Grab([FromRoute] string guid, [FromQuery] string? type, [FromQuery] string? name, [FromQuery] string? poster, [FromServices] GrabService grabService, CancellationToken cancellationToken)
     {
         var config = Plugin.Instance?.Configuration ?? new Configuration.PluginConfiguration();
         if (!SabnzbdClient.IsConfigured && string.IsNullOrWhiteSpace(config.NzbDropFolder))
@@ -703,6 +705,7 @@ public class TreasureMapsController : ControllerBase
             if (SabnzbdClient.IsConfigured)
             {
                 var nzoIds = await _sabnzbd.AddNzbAsync(payload, safeName, category, cancellationToken).ConfigureAwait(false);
+                grabService.RegisterArtwork(nzoIds, safeName, poster);
                 _logger.LogInformation("Grabbed {Guid} into SABnzbd category '{Category}' ({Ids})", guid, category, string.Join(",", nzoIds));
                 return Ok(new { ok = true, target = "sabnzbd", category, mediaType = isTv ? "tv" : "movie", nzoIds, bytes = payload.Length });
             }

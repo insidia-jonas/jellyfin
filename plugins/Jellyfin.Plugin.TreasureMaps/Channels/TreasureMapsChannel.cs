@@ -101,7 +101,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             var c = Config;
             return string.Join(
                 '|',
-                "27",
+                "28",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -483,6 +483,8 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
 
             var row = Folder("dl" + Sep + (entry.Id ?? order.ToString(System.Globalization.CultureInfo.InvariantCulture)), name, order++);
             row.Overview = overview;
+            // Show the title's poster on the tile (registered at grab time) instead of a text tile.
+            row.ImageUrl = _grabService.GetArtwork(entry.Id, entry.Name);
             items.Add(row);
         }
 
@@ -516,11 +518,12 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
     {
         if (id.StartsWith(GrabPrefix, StringComparison.Ordinal))
         {
-            // grab::<kind>::<guid>::<b64 name>
+            // grab::<kind>::<guid>::<b64 name>::<b64 cover>
             var parts = id.Split(Sep);
             var kind = parts.Length > 1 ? parts[1] : "movie";
             var guid = parts.Length > 2 ? parts[2] : string.Empty;
             var name = parts.Length > 3 ? Decode(parts[3]) : guid;
+            var cover = parts.Length > 4 ? Decode(parts[4]) : null;
 
             if (!string.IsNullOrEmpty(guid))
             {
@@ -529,7 +532,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
                     {
                         try
                         {
-                            await _grabService.GrabAsync(guid, name, string.Equals(kind, "tv", StringComparison.Ordinal), CancellationToken.None).ConfigureAwait(false);
+                            await _grabService.GrabAsync(guid, name, string.Equals(kind, "tv", StringComparison.Ordinal), cover, CancellationToken.None).ConfigureAwait(false);
                         }
                         catch (Exception ex)
                         {
@@ -882,9 +885,10 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
                     item.ImageUrl = groupCover;
                 }
 
-                // REL::<scopeHash>::<marker>::<kind>::<guid>::<b64 name> — unique per title card,
-                // refreshed on config change; the name travels along for the grab job name.
-                item.Id = string.Join(Sep, ReleasePrefix.TrimEnd(':'), scopeHash, marker, kind, item.Id, Encode(item.Name));
+                // REL::<scopeHash>::<marker>::<kind>::<guid>::<b64 name>::<b64 cover> — unique per
+                // title card, refreshed on config change; name + cover travel along so the grab
+                // job and the Downloads tile can carry them.
+                item.Id = string.Join(Sep, ReleasePrefix.TrimEnd(':'), scopeHash, marker, kind, item.Id, Encode(item.Name), Encode(item.ImageUrl ?? string.Empty));
                 ranked.Add((item, rank, parsed.QualityScore, order++));
             }
         }
@@ -902,7 +906,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
 
     private static ChannelItemResult GetReleaseDetail(string folderId)
     {
-        // REL::<scopeHash>::<marker>::<kind>::<guid>::<b64 name>
+        // REL::<scopeHash>::<marker>::<kind>::<guid>::<b64 name>::<b64 cover>
         var parts = folderId.Split(Sep);
         if (parts.Length < 5)
         {
@@ -912,16 +916,18 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
         var kind = string.Equals(parts[3], "tv", StringComparison.Ordinal) ? "tv" : "movie";
         var guid = parts[4];
         var name = parts.Length >= 6 ? parts[5] : Encode(guid);
+        var cover = parts.Length >= 7 ? Decode(parts[6]) : string.Empty;
 
         // A playable clip: pressing the native PLAY button (Fire TV etc.) starts the download and
         // plays a short confirmation video (see GetChannelItemMediaInfo). Favoriting still works.
         var child = new ChannelItemInfo
         {
-            Id = string.Join(Sep, GrabPrefix.TrimEnd(':'), kind, guid, name),
+            Id = string.Join(Sep, GrabPrefix.TrimEnd(':'), kind, guid, name, Encode(cover)),
             Name = "\u2B07 Start download",
             Type = ChannelItemType.Media,
             ContentType = ChannelMediaContentType.Clip,
             MediaType = ChannelMediaType.Video,
+            ImageUrl = string.IsNullOrEmpty(cover) ? null : cover,
             Overview = "Press Play to send this release to your download client (SABnzbd). A short confirmation clip plays, and the progress appears in the Downloads folder. Marking as favorite (\u2764) works too."
         };
         child.ProviderIds["TreasureMaps"] = guid;

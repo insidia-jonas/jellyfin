@@ -111,7 +111,7 @@
             status.className = 'tmRelStatus';
             status.style.marginLeft = '.8em';
             btn.addEventListener('click', function () {
-                grab(item.ProviderIds.TreasureMaps, item.ProviderIds.TreasureMapsKind || 'movie', item.Name, btn, status);
+                grab(item.ProviderIds.TreasureMaps, item.ProviderIds.TreasureMapsKind || 'movie', item.Name, btn, status, null, item.Id, item.ImageTags && item.ImageTags.Primary);
             });
             buttons.appendChild(btn);
             buttons.appendChild(status);
@@ -142,7 +142,7 @@
         btn.className = 'tmDl';
         btn.textContent = '\u2B07 Download';
         btn.addEventListener('click', function () {
-            grab(release.ProviderIds.TreasureMaps, release.ProviderIds.TreasureMapsKind || 'movie', release.Name, btn, status, row);
+            grab(release.ProviderIds.TreasureMaps, release.ProviderIds.TreasureMapsKind || 'movie', release.Name, btn, status, row, release.Id, release.ImageTags && release.ImageTags.Primary);
         });
 
         row.appendChild(name);
@@ -151,11 +151,16 @@
         return row;
     }
 
-    function grab(guid, kind, name, btn, statusEl, row) {
+    function grab(guid, kind, name, btn, statusEl, row, itemId, imageTag) {
         btn.disabled = true;
         statusEl.textContent = 'Starting\u2026';
+        var params = { type: kind, name: name };
+        if (itemId && imageTag) {
+            // The item's poster URL, so the Downloads folder tile shows the cover.
+            params.poster = api().getUrl('Items/' + itemId + '/Images/Primary', { tag: imageTag });
+        }
         api().fetch({
-            url: api().getUrl('TreasureMaps/Releases/' + guid + '/Grab', { type: kind, name: name }),
+            url: api().getUrl('TreasureMaps/Releases/' + guid + '/Grab', params),
             type: 'POST',
             dataType: 'json'
         }).then(function (res) {
