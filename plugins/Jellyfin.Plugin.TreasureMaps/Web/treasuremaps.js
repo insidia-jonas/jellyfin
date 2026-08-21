@@ -127,6 +127,12 @@
         name.className = 'tmRelName';
         name.textContent = release.Name || '';
         name.title = release.Name || '';
+        name.style.cursor = 'pointer';
+        // Clicking the name opens the release itself (with its native "Start download" entry),
+        // mirroring the tile navigation that TV clients use.
+        name.addEventListener('click', function () {
+            location.hash = '#/list?parentId=' + release.Id + '&serverId=' + api().serverId();
+        });
 
         var status = document.createElement('div');
         status.className = 'tmRelStatus';
