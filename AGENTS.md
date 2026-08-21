@@ -218,6 +218,13 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   re-fetch. Rapidly toggling the language filter on/off within one session can briefly show
   stale items (shared ids get removed/re-added across cache generations) until the channel fully
   refreshes.
+- "Treasure Glass" theme: a macOS-like glassmorphism skin ships as an embedded resource
+  (`Theme/glass.css`). `POST TreasureMaps/Theme/Apply` (config-page button) installs it into the
+  server's branding Custom CSS inside a `/* TREASURE-GLASS-BEGIN/END */` marker block (existing
+  custom CSS outside the block is preserved; `Theme/Remove` strips it). Custom CSS only affects
+  WEB clients — native apps (Fire TV, mobile) ignore it. When editing the theme, verify selectors
+  against the built jellyfin-web (`.skinHeader`, `.cardBox`, `.defaultCardBackground*`,
+  `.actionSheet`, ...) and re-apply via the endpoint; clients need a hard reload.
 - Demonstrating the UI requires the separate `jellyfin-web` client (Node >= 24): build its
   `dist` and start the server with `dotnet run --project Jellyfin.Server --webdir <dist>`
   instead of `--nowebclient`.
