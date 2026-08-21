@@ -32,7 +32,12 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
     private const string ReleasePrefix = "REL::";
     private const string GrabPrefix = "grab::";
     private const string Sep = "::";
-    private const int BrowseFetchLimit = 80;
+
+    // The API times out above ~100 results per request, so bigger lists are fetched in pages.
+    private const int PageSize = 100;
+    private const int CategoryPages = 2;
+    private const int FindPages = 3;
+    private const int RootLatestCount = 24;
 
     private readonly TreasureMapsApiClient _client;
     private readonly XrelClient _xrel;
@@ -67,7 +72,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             var c = Config;
             return string.Join(
                 '|',
-                "15",
+                "16",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -116,7 +121,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
 
             if (string.IsNullOrEmpty(folderId))
             {
-                return GetRootFolders();
+                return await GetRootAsync(cancellationToken).ConfigureAwait(false);
             }
 
             // A title card (GRP) opens into the individual releases behind that movie/show.
@@ -154,27 +159,27 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
 
             if (string.Equals(folderId, "movies", StringComparison.Ordinal))
             {
-                var movies = await _client.SearchMoviesAsync(null, null, BrowseFetchLimit, cancellationToken).ConfigureAwait(false);
-                return BuildGroupCards(movies?.Items);
+                var movies = await FetchPagesAsync("movie", null, null, null, CategoryPages, cancellationToken).ConfigureAwait(false);
+                return BuildGroupCards(movies, folderId);
             }
 
             if (string.Equals(folderId, "tv", StringComparison.Ordinal))
             {
-                var tv = await _client.SearchTvAsync(null, BrowseFetchLimit, cancellationToken).ConfigureAwait(false);
-                return BuildGroupCards(tv?.Items);
+                var tv = await FetchPagesAsync("tv", null, null, null, CategoryPages, cancellationToken).ConfigureAwait(false);
+                return BuildGroupCards(tv, folderId);
             }
 
             // German rows, mirroring the website's "Movies - DE" / "TV - DE" category blocks.
             if (string.Equals(folderId, "movies-de", StringComparison.Ordinal))
             {
-                var moviesDe = await _client.SearchMoviesAsync(null, null, TreasureMapsApiClient.GermanMovieCategories, BrowseFetchLimit, cancellationToken).ConfigureAwait(false);
-                return BuildGroupCards(moviesDe?.Items);
+                var moviesDe = await FetchPagesAsync("movie", null, null, TreasureMapsApiClient.GermanMovieCategories, CategoryPages, cancellationToken).ConfigureAwait(false);
+                return BuildGroupCards(moviesDe, folderId);
             }
 
             if (string.Equals(folderId, "tv-de", StringComparison.Ordinal))
             {
-                var tvDe = await _client.SearchTvAsync(null, TreasureMapsApiClient.GermanTvCategories, BrowseFetchLimit, cancellationToken).ConfigureAwait(false);
-                return BuildGroupCards(tvDe?.Items);
+                var tvDe = await FetchPagesAsync("tv", null, null, TreasureMapsApiClient.GermanTvCategories, CategoryPages, cancellationToken).ConfigureAwait(false);
+                return BuildGroupCards(tvDe, folderId);
             }
 
             if (string.Equals(folderId, "genres", StringComparison.Ordinal))
@@ -194,8 +199,8 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
 
             if (folderId.StartsWith(GenrePrefix, StringComparison.Ordinal))
             {
-                var byGenre = await _client.SearchMoviesAsync(null, folderId[GenrePrefix.Length..], BrowseFetchLimit, cancellationToken).ConfigureAwait(false);
-                return BuildGroupCards(byGenre?.Items);
+                var byGenre = await FetchPagesAsync("movie", null, folderId[GenrePrefix.Length..], null, CategoryPages, cancellationToken).ConfigureAwait(false);
+                return BuildGroupCards(byGenre, folderId);
             }
 
             return new ChannelItemResult();
@@ -207,7 +212,12 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
         }
     }
 
-    private static ChannelItemResult GetRootFolders()
+    /// <summary>
+    /// Builds the channel root: the category folders followed by the most recently added titles
+    /// (mixed movies + TV, one poster card per title), so opening the channel immediately shows
+    /// content instead of a bare folder list.
+    /// </summary>
+    private async Task<ChannelItemResult> GetRootAsync(CancellationToken cancellationToken)
     {
         var items = new List<ChannelItemInfo>
         {
@@ -220,7 +230,43 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             Folder("find", "Find A\u2013Z")
         };
 
+        try
+        {
+            var moviesTask = _client.SearchMoviesAsync(null, null, null, PageSize, 0, cancellationToken);
+            var tvTask = _client.SearchTvAsync(null, null, PageSize, 0, cancellationToken);
+            var both = await Task.WhenAll(moviesTask, tvTask).ConfigureAwait(false);
+
+            var releases = (both[0]?.Items ?? Array.Empty<Release>())
+                .Concat(both[1]?.Items ?? Array.Empty<Release>())
+                .ToList();
+
+            items.AddRange(BuildGroupCards(releases, "root").Items.Take(RootLatestCount));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load recently added titles for the channel root");
+        }
+
         return Result(items);
+    }
+
+    /// <summary>
+    /// Fetches multiple result pages (the API caps a single request at ~100 items) and
+    /// concatenates them, newest first.
+    /// </summary>
+    private async Task<IReadOnlyList<Release>> FetchPagesAsync(string kind, string? query, string? genre, string? categories, int pages, CancellationToken cancellationToken)
+    {
+        var tasks = new List<Task<ReleaseListResponse?>>(pages);
+        for (var page = 0; page < pages; page++)
+        {
+            var offset = page * PageSize;
+            tasks.Add(string.Equals(kind, "tv", StringComparison.Ordinal)
+                ? _client.SearchTvAsync(query, categories, PageSize, offset, cancellationToken)
+                : _client.SearchMoviesAsync(query, genre, categories, PageSize, offset, cancellationToken));
+        }
+
+        var responses = await Task.WhenAll(tasks).ConfigureAwait(false);
+        return responses.SelectMany(r => r?.Items ?? (IReadOnlyList<Release>)Array.Empty<Release>()).ToList();
     }
 
     private static ChannelItemResult TrendingSubFolders()
@@ -241,17 +287,19 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
     {
         // Live search against the indexer, then keep only titles whose (article-stripped) name
         // starts with the chosen letter/digit — a TV-friendly way to look up a specific title.
+        // A single-letter query is a broad substring search, so several pages are fetched and
+        // prefix-filtered to fill the letter folder with the most recently added matches.
         var q = string.Equals(token, "0-9", StringComparison.Ordinal) ? null : token;
-        var moviesTask = _client.SearchMoviesAsync(q, null, BrowseFetchLimit, cancellationToken);
-        var tvTask = _client.SearchTvAsync(q, BrowseFetchLimit, cancellationToken);
+        var moviesTask = FetchPagesAsync("movie", q, null, null, FindPages, cancellationToken);
+        var tvTask = FetchPagesAsync("tv", q, null, null, FindPages, cancellationToken);
         var both = await Task.WhenAll(moviesTask, tvTask).ConfigureAwait(false);
 
-        var releases = (both[0]?.Items ?? Array.Empty<Release>())
-            .Concat(both[1]?.Items ?? Array.Empty<Release>())
+        var releases = both[0]
+            .Concat(both[1])
             .Where(r => StartsWithToken(ResolveTitle(r), token))
             .ToList();
 
-        return BuildGroupCards(releases);
+        return BuildGroupCards(releases, FindPrefix + token);
     }
 
     private static string ResolveTitle(Release release)
@@ -290,12 +338,16 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
     }
 
     /// <summary>
-    /// Builds one poster card per movie/show (grouping the releases behind it).
+    /// Builds one poster card per movie/show (grouping the releases behind it). The scope is
+    /// folded into each card id so the same title appearing in several folders (root, Movies,
+    /// Movies (DE), a letter, ...) yields distinct channel items — otherwise Jellyfin reparents
+    /// the shared item and the other folders appear empty.
     /// </summary>
-    private ChannelItemResult BuildGroupCards(IReadOnlyList<Release>? releases)
+    private ChannelItemResult BuildGroupCards(IReadOnlyList<Release>? releases, string scope)
     {
         var prefs = GetLanguagePreferences();
         var marker = ShortHash(DataVersion);
+        var scopeHash = ShortHash(scope);
 
         // Apply the language/rating filter (ToChannelItem returns null when filtered out) and keep
         // the best language rank per title so preferred-language titles sort first.
@@ -332,7 +384,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             // exact same poster on every release tile (covers can differ between releases).
             var card = new ChannelItemInfo
             {
-                Id = string.Join(Sep, GroupPrefix.TrimEnd(':'), marker, group.Kind, Encode(group.Key), Encode(group.Title), Encode(group.Cover ?? string.Empty)),
+                Id = string.Join(Sep, GroupPrefix.TrimEnd(':'), scopeHash, marker, group.Kind, Encode(group.Key), Encode(group.Title), Encode(group.Cover ?? string.Empty)),
                 Name = group.Title,
                 Type = ChannelItemType.Folder,
                 FolderType = ChannelFolderType.Container,
@@ -360,20 +412,21 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
     /// </summary>
     private async Task<ChannelItemResult> OpenGroupAsync(string groupId, CancellationToken cancellationToken)
     {
+        // GRP::<scopeHash>::<marker>::<kind>::<key>::<title>::<cover>
         var parts = groupId.Split(Sep);
-        if (parts.Length < 5)
+        if (parts.Length < 6)
         {
             return new ChannelItemResult();
         }
 
-        var kind = parts[2];
-        var key = Decode(parts[3]);
-        var title = Decode(parts[4]);
-        var cover = parts.Length >= 6 ? Decode(parts[5]) : string.Empty;
+        var kind = parts[3];
+        var key = Decode(parts[4]);
+        var title = Decode(parts[5]);
+        var cover = parts.Length >= 7 ? Decode(parts[6]) : string.Empty;
 
         var response = string.Equals(kind, "tv", StringComparison.Ordinal)
-            ? await _client.SearchTvAsync(title, BrowseFetchLimit, cancellationToken).ConfigureAwait(false)
-            : await _client.SearchMoviesAsync(title, null, BrowseFetchLimit, cancellationToken).ConfigureAwait(false);
+            ? await _client.SearchTvAsync(title, PageSize, cancellationToken).ConfigureAwait(false)
+            : await _client.SearchMoviesAsync(title, null, PageSize, cancellationToken).ConfigureAwait(false);
 
         var all = response?.Items ?? Array.Empty<Release>();
         var matching = all.Where(r => string.Equals(ReleaseGrouper.KeyOf(r), key, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -482,8 +535,8 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
 
         try
         {
-            var movies = await _client.SearchMoviesAsync(null, null, BrowseFetchLimit, cancellationToken).ConfigureAwait(false);
-            return BuildGroupCards(movies?.Items).Items;
+            var movies = await _client.SearchMoviesAsync(null, null, PageSize, cancellationToken).ConfigureAwait(false);
+            return BuildGroupCards(movies?.Items, "latest").Items;
         }
         catch (Exception ex)
         {
@@ -503,7 +556,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
 
         var enriched = await Task.WhenAll(items.Select(it => EnrichTrendingAsync(it, kind, cancellationToken))).ConfigureAwait(false);
         var releases = enriched.Where(r => r is not null).Select(r => r!).ToList();
-        return BuildGroupCards(releases);
+        return BuildGroupCards(releases, "trending-" + kind);
     }
 
     private async Task<Release?> EnrichTrendingAsync(Release item, string kind, CancellationToken cancellationToken)
@@ -547,15 +600,13 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
 
     private async Task<ChannelItemResult> GetGenreFoldersAsync(CancellationToken cancellationToken)
     {
+        // The indexer's caps expose thousands of raw library tags (incl. adult ones); only the
+        // curated common-genre whitelist is surfaced here.
         var caps = await _client.GetCapsAsync(cancellationToken).ConfigureAwait(false);
-        var items = new List<ChannelItemInfo>();
-        if (caps?.Genres is not null)
-        {
-            foreach (var genre in caps.Genres.Where(g => !string.IsNullOrWhiteSpace(g.Name)))
-            {
-                items.Add(Folder(GenrePrefix + genre.Name, genre.Name!));
-            }
-        }
+        var available = (caps?.Genres ?? new List<CapsNamedItem>()).Select(g => g.Name);
+        var items = CommonGenres.FilterAvailable(available)
+            .Select(name => Folder(GenrePrefix + name, name))
+            .ToList();
 
         return Result(items);
     }

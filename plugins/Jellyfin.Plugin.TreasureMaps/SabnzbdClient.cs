@@ -132,6 +132,44 @@ public class SabnzbdClient
     }
 
     /// <summary>
+    /// Gets SABnzbd's completed-downloads base folder (<c>misc.complete_dir</c>), used to resolve
+    /// relative category folders into absolute library paths. Returns null when unavailable.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The completed-downloads directory, or null.</returns>
+    public async Task<string?> GetCompleteDirAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var client = _httpClientFactory.CreateClient();
+            var url = BuildApiUrl(new Dictionary<string, string?>
+            {
+                ["mode"] = "get_config",
+                ["section"] = "misc"
+            });
+
+            using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("config", out var config)
+                && config.TryGetProperty("misc", out var misc)
+                && misc.TryGetProperty("complete_dir", out var dir)
+                && dir.ValueKind == JsonValueKind.String)
+            {
+                var value = dir.GetString();
+                return string.IsNullOrWhiteSpace(value) ? null : value;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not read SABnzbd complete_dir");
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Gets the currently configured SABnzbd category names.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>

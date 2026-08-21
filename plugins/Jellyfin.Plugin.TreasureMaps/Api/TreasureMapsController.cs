@@ -6,6 +6,9 @@ using System.Net.Mime;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.TreasureMaps.ReleaseNaming;
+using MediaBrowser.Controller.Library;
+using MediaBrowser.Model.Configuration;
+using MediaBrowser.Model.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -26,6 +29,7 @@ public class TreasureMapsController : ControllerBase
     private readonly TreasureMapsApiClient _client;
     private readonly SabnzbdClient _sabnzbd;
     private readonly Subtitles.OpenSubtitlesClient _openSubtitles;
+    private readonly ILibraryManager _libraryManager;
     private readonly ILogger<TreasureMapsController> _logger;
 
     /// <summary>
@@ -34,12 +38,14 @@ public class TreasureMapsController : ControllerBase
     /// <param name="client">The Treasure-Maps API client.</param>
     /// <param name="sabnzbd">The SABnzbd client.</param>
     /// <param name="openSubtitles">The OpenSubtitles client.</param>
+    /// <param name="libraryManager">The library manager.</param>
     /// <param name="logger">The logger.</param>
-    public TreasureMapsController(TreasureMapsApiClient client, SabnzbdClient sabnzbd, Subtitles.OpenSubtitlesClient openSubtitles, ILogger<TreasureMapsController> logger)
+    public TreasureMapsController(TreasureMapsApiClient client, SabnzbdClient sabnzbd, Subtitles.OpenSubtitlesClient openSubtitles, ILibraryManager libraryManager, ILogger<TreasureMapsController> logger)
     {
         _client = client;
         _sabnzbd = sabnzbd;
         _openSubtitles = openSubtitles;
+        _libraryManager = libraryManager;
         _logger = logger;
     }
 
@@ -167,6 +173,107 @@ public class TreasureMapsController : ControllerBase
     }
 
     /// <summary>
+    /// Creates (or completes) the Jellyfin media libraries for the download folders, so grabbed
+    /// movies and series show up in the top menu under "Movies" / "TV Shows" once SABnzbd has
+    /// finished downloading them.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The result of the setup.</returns>
+    [HttpPost("Libraries/Setup")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> SetupLibraries(CancellationToken cancellationToken)
+    {
+        var config = Plugin.Instance?.Configuration ?? new Configuration.PluginConfiguration();
+
+        // Category folders may be relative to SABnzbd's completed-downloads directory.
+        var completeDir = SabnzbdClient.IsConfigured
+            ? await _sabnzbd.GetCompleteDirAsync(cancellationToken).ConfigureAwait(false)
+            : null;
+
+        var moviesPath = ResolveDownloadFolder(config.SabnzbdMovieFolder, config.SabnzbdMovieCategory, completeDir);
+        var tvPath = ResolveDownloadFolder(config.SabnzbdTvFolder, config.SabnzbdTvCategory, completeDir);
+        if (moviesPath is null && tvPath is null)
+        {
+            return Ok(new { ok = false, message = "Configure the SABnzbd movie/TV folders (absolute paths) or connect SABnzbd first." });
+        }
+
+        var results = new List<object>();
+        try
+        {
+            if (moviesPath is not null)
+            {
+                var status = await EnsureLibraryAsync("Movies", CollectionTypeOptions.movies, moviesPath).ConfigureAwait(false);
+                results.Add(new { library = "Movies", path = moviesPath, status });
+            }
+
+            if (tvPath is not null)
+            {
+                var status = await EnsureLibraryAsync("TV Shows", CollectionTypeOptions.tvshows, tvPath).ConfigureAwait(false);
+                results.Add(new { library = "TV Shows", path = tvPath, status });
+            }
+
+            return Ok(new { ok = true, libraries = results });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Library setup failed");
+            return Ok(new { ok = false, message = ex.Message, libraries = results });
+        }
+    }
+
+    private static string? ResolveDownloadFolder(string? folder, string? category, string? completeDir)
+    {
+        var value = !string.IsNullOrWhiteSpace(folder) ? folder : category;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        if (Path.IsPathRooted(value))
+        {
+            return value;
+        }
+
+        return string.IsNullOrWhiteSpace(completeDir) ? null : Path.Combine(completeDir, value);
+    }
+
+    private async Task<string> EnsureLibraryAsync(string name, CollectionTypeOptions collectionType, string path)
+    {
+        try
+        {
+            Directory.CreateDirectory(path);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not create library folder {Path}", path);
+        }
+
+        var existing = _libraryManager.GetVirtualFolders()
+            .FirstOrDefault(v => string.Equals(v.Name, name, StringComparison.OrdinalIgnoreCase));
+
+        if (existing is null)
+        {
+            var options = new LibraryOptions
+            {
+                PathInfos = new[] { new MediaPathInfo(path) },
+                EnableRealtimeMonitor = true
+            };
+            await _libraryManager.AddVirtualFolder(name, collectionType, options, true).ConfigureAwait(false);
+            _logger.LogInformation("Created Jellyfin library '{Name}' -> {Path}", name, path);
+            return "created";
+        }
+
+        if (existing.Locations?.Any(l => string.Equals(l, path, StringComparison.OrdinalIgnoreCase)) == true)
+        {
+            return "already configured";
+        }
+
+        _libraryManager.AddMediaPath(name, new MediaPathInfo(path));
+        _logger.LogInformation("Added {Path} to existing Jellyfin library '{Name}'", path, name);
+        return "path added";
+    }
+
+    /// <summary>
     /// Searches Treasure-Maps for the Browse &amp; Grab page.
     /// </summary>
     /// <param name="type">The media type to search: <c>movie</c> or <c>tv</c>.</param>
@@ -254,25 +361,11 @@ public class TreasureMapsController : ControllerBase
 
         try
         {
+            // The indexer exposes thousands of niche genres (incl. adult tags); only the curated
+            // common-genre whitelist is surfaced.
             var caps = await _client.GetCapsAsync(cancellationToken).ConfigureAwait(false);
-            var available = new HashSet<string>(
-                (caps?.Genres ?? Enumerable.Empty<Api.CapsNamedItem>())
-                    .Select(g => g.Name)
-                    .Where(n => !string.IsNullOrWhiteSpace(n))!,
-                StringComparer.OrdinalIgnoreCase);
-
-            // The indexer exposes thousands of niche genres; surface a clean, common subset for the selector.
-            var common = new[]
-            {
-                "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary", "Drama",
-                "Family", "Fantasy", "History", "Horror", "Music", "Musical", "Mystery",
-                "Romance", "Science Fiction", "Sci-Fi", "Thriller", "War", "Western"
-            };
-            var genres = common.Where(available.Contains).ToList();
-            if (genres.Count == 0)
-            {
-                genres = available.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).Take(30).ToList();
-            }
+            var genres = Channels.CommonGenres.FilterAvailable(
+                (caps?.Genres ?? Enumerable.Empty<Api.CapsNamedItem>()).Select(g => g.Name));
 
             return Ok(new { ok = true, genres });
         }

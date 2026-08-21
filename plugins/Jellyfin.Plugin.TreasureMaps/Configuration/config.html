@@ -136,6 +136,8 @@
                         <button is="emby-button" type="button" id="testSabnzbd" class="raised block"><span>Save &amp; test SABnzbd</span></button>
                         <button is="emby-button" type="button" id="setupSabnzbd" class="raised block"><span>Set up SABnzbd categories</span></button>
                         <div class="fieldDescription" style="margin-top:.35em;">Creates/updates the <code>movies</code> and <code>tv</code> categories with the folders above directly in SABnzbd (needs the SABnzbd <strong>full</strong> API key).</div>
+                        <button is="emby-button" type="button" id="setupLibraries" class="raised block"><span>Create media libraries (Movies / TV Shows)</span></button>
+                        <div class="fieldDescription" style="margin-top:.35em;">Creates Jellyfin libraries pointing at the download folders above, so finished downloads appear in the top menu under <strong>Movies</strong> / <strong>TV Shows</strong>.</div>
                         <div id="sabResult" class="fieldDescription" style="margin-top:0.5em;"></div>
                     </div>
                     <div class="inputContainer inputContainer-withDescription">
@@ -312,6 +314,37 @@
                                 Dashboard.hideLoadingMsg();
                                 resultEl.style.color = 'red';
                                 resultEl.textContent = 'SABnzbd setup request failed.';
+                            });
+                        });
+                    });
+                });
+
+            document.querySelector('#setupLibraries')
+                .addEventListener('click', function () {
+                    var resultEl = document.querySelector('#sabResult');
+                    resultEl.textContent = 'Saving and creating libraries...';
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(TreasureMapsConfig.pluginId).then(function (config) {
+                        ApiClient.updatePluginConfiguration(TreasureMapsConfig.pluginId, readFormInto(config)).then(function () {
+                            ApiClient.fetch({
+                                url: ApiClient.getUrl('TreasureMaps/Libraries/Setup'),
+                                type: 'POST',
+                                dataType: 'json',
+                                headers: { accept: 'application/json' }
+                            }).then(function (res) {
+                                Dashboard.hideLoadingMsg();
+                                if (res && res.ok) {
+                                    var libs = (res.libraries || []).map(function (l) { return l.library + ' → ' + l.path + ' (' + l.status + ')'; }).join(', ');
+                                    resultEl.style.color = 'green';
+                                    resultEl.textContent = 'Libraries ready: ' + libs;
+                                } else {
+                                    resultEl.style.color = 'red';
+                                    resultEl.textContent = 'Library setup failed: ' + ((res && res.message) || 'unknown error');
+                                }
+                            }, function () {
+                                Dashboard.hideLoadingMsg();
+                                resultEl.style.color = 'red';
+                                resultEl.textContent = 'Library setup request failed.';
                             });
                         });
                     });

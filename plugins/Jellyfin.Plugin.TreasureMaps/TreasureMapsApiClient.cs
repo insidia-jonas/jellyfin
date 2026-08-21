@@ -20,6 +20,13 @@ public class TreasureMapsApiClient
 {
     private static readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
 
+    // Short-lived in-memory response cache keyed by request URL. Channel navigation re-fetches the
+    // same lists constantly (root -> category -> back), and the indexer is slow (~2-5s per search
+    // page) and rate-limits rapid calls, so caching makes browsing feel instant instead of static.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTimeOffset Expires, object Value)> _cache = new();
+    private static readonly TimeSpan SearchCacheTtl = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan CapsCacheTtl = TimeSpan.FromHours(1);
+
     // Treasure-Maps category ids (movies/TV incl. language variants). Without a category the
     // /movie endpoint returns unrelated results (even books) with no movie metadata.
     // The x100 block is the German ("DE") variant, mirroring the website's Movies-DE / TV-DE rows.
@@ -64,7 +71,7 @@ public class TreasureMapsApiClient
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The release list response.</returns>
     public Task<ReleaseListResponse?> SearchMoviesAsync(string? query, string? genre, int limit, CancellationToken cancellationToken)
-        => SearchMoviesAsync(query, genre, null, limit, cancellationToken);
+        => SearchMoviesAsync(query, genre, null, limit, 0, cancellationToken);
 
     /// <summary>
     /// Searches for movie releases within specific categories.
@@ -72,10 +79,11 @@ public class TreasureMapsApiClient
     /// <param name="query">Free-text query, may be null.</param>
     /// <param name="genre">Genre filter, may be null.</param>
     /// <param name="categories">Category ids to search (null for all movie categories).</param>
-    /// <param name="limit">Maximum number of results.</param>
+    /// <param name="limit">Maximum number of results (the API times out above ~100).</param>
+    /// <param name="offset">Result offset for paging.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The release list response.</returns>
-    public Task<ReleaseListResponse?> SearchMoviesAsync(string? query, string? genre, string? categories, int limit, CancellationToken cancellationToken)
+    public Task<ReleaseListResponse?> SearchMoviesAsync(string? query, string? genre, string? categories, int limit, int offset, CancellationToken cancellationToken)
     {
         var parameters = new Dictionary<string, string?>
         {
@@ -83,10 +91,11 @@ public class TreasureMapsApiClient
             ["genre"] = genre,
             ["cat"] = string.IsNullOrWhiteSpace(categories) ? MovieCategories : categories,
             ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
+            ["offset"] = offset > 0 ? offset.ToString(CultureInfo.InvariantCulture) : null,
             ["sort"] = "posted_desc",
             ["extended"] = "1"
         };
-        return GetJsonAsync<ReleaseListResponse>("movie", parameters, cancellationToken);
+        return GetJsonAsync<ReleaseListResponse>("movie", parameters, SearchCacheTtl, cancellationToken);
     }
 
     /// <summary>
@@ -97,27 +106,29 @@ public class TreasureMapsApiClient
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The release list response.</returns>
     public Task<ReleaseListResponse?> SearchTvAsync(string? query, int limit, CancellationToken cancellationToken)
-        => SearchTvAsync(query, null, limit, cancellationToken);
+        => SearchTvAsync(query, null, limit, 0, cancellationToken);
 
     /// <summary>
     /// Searches for TV releases within specific categories.
     /// </summary>
     /// <param name="query">Free-text query, may be null.</param>
     /// <param name="categories">Category ids to search (null for all TV categories).</param>
-    /// <param name="limit">Maximum number of results.</param>
+    /// <param name="limit">Maximum number of results (the API times out above ~100).</param>
+    /// <param name="offset">Result offset for paging.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The release list response.</returns>
-    public Task<ReleaseListResponse?> SearchTvAsync(string? query, string? categories, int limit, CancellationToken cancellationToken)
+    public Task<ReleaseListResponse?> SearchTvAsync(string? query, string? categories, int limit, int offset, CancellationToken cancellationToken)
     {
         var parameters = new Dictionary<string, string?>
         {
             ["q"] = string.IsNullOrWhiteSpace(query) ? null : query,
             ["cat"] = string.IsNullOrWhiteSpace(categories) ? TvCategories : categories,
             ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
+            ["offset"] = offset > 0 ? offset.ToString(CultureInfo.InvariantCulture) : null,
             ["sort"] = "posted_desc",
             ["extended"] = "1"
         };
-        return GetJsonAsync<ReleaseListResponse>("tv", parameters, cancellationToken);
+        return GetJsonAsync<ReleaseListResponse>("tv", parameters, SearchCacheTtl, cancellationToken);
     }
 
     /// <summary>
@@ -143,7 +154,7 @@ public class TreasureMapsApiClient
             ["type"] = type,
             ["limit"] = limit.ToString(CultureInfo.InvariantCulture)
         };
-        return GetJsonAsync<ReleaseListResponse>("trending", parameters, cancellationToken);
+        return GetJsonAsync<ReleaseListResponse>("trending", parameters, SearchCacheTtl, cancellationToken);
     }
 
     /// <summary>
@@ -152,7 +163,7 @@ public class TreasureMapsApiClient
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The capabilities response.</returns>
     public Task<CapsResponse?> GetCapsAsync(CancellationToken cancellationToken)
-        => GetJsonAsync<CapsResponse>("caps", null, cancellationToken);
+        => GetJsonAsync<CapsResponse>("caps", null, CapsCacheTtl, cancellationToken);
 
     /// <summary>
     /// Gets information about the current user (used to validate the configuration).
@@ -161,7 +172,7 @@ public class TreasureMapsApiClient
     /// <returns>The user info.</returns>
     public async Task<UserInfo?> GetUserAsync(CancellationToken cancellationToken)
     {
-        var response = await GetJsonAsync<UserInfoResponse>("user", null, cancellationToken).ConfigureAwait(false);
+        var response = await GetJsonAsync<UserInfoResponse>("user", null, TimeSpan.Zero, cancellationToken).ConfigureAwait(false);
         return response?.User;
     }
 
@@ -180,20 +191,41 @@ public class TreasureMapsApiClient
         return await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<T?> GetJsonAsync<T>(string path, Dictionary<string, string?>? parameters, CancellationToken cancellationToken)
+    private async Task<T?> GetJsonAsync<T>(string path, Dictionary<string, string?>? parameters, TimeSpan cacheTtl, CancellationToken cancellationToken)
+        where T : class
     {
         if (!IsConfigured)
         {
             throw new InvalidOperationException("Treasure-Maps plugin is not configured (missing Base URL or API key).");
         }
 
-        using var client = CreateClient();
         var url = BuildUrl(path, parameters);
+        if (cacheTtl > TimeSpan.Zero
+            && _cache.TryGetValue(url, out var cached)
+            && cached.Expires > DateTimeOffset.UtcNow
+            && cached.Value is T hit)
+        {
+            return hit;
+        }
+
+        using var client = CreateClient();
         _logger.LogDebug("Treasure-Maps request: {Url}", url);
 
         using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<T>(_jsonOptions, cancellationToken).ConfigureAwait(false);
+        var result = await response.Content.ReadFromJsonAsync<T>(_jsonOptions, cancellationToken).ConfigureAwait(false);
+
+        if (cacheTtl > TimeSpan.Zero && result is not null)
+        {
+            if (_cache.Count > 500)
+            {
+                _cache.Clear();
+            }
+
+            _cache[url] = (DateTimeOffset.UtcNow.Add(cacheTtl), result);
+        }
+
+        return result;
     }
 
     private HttpClient CreateClient()
