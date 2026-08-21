@@ -28,6 +28,11 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
 {
     private const string GenrePrefix = "genre:";
     private const string FindPrefix = "find:";
+
+    // Generation prefix for category-folder ids. Bumping it (c2-, c3-, ...) forces Jellyfin to
+    // create fresh folder entities — needed once because the old entities had collage images
+    // (child posters) baked in by the folder image provider, making categories look like movies.
+    private const string FolderIdPrefix = "c2-";
     private const string GroupPrefix = "GRP::";
     private const string ReleasePrefix = "REL::";
     private const string GrabPrefix = "grab::";
@@ -72,7 +77,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             var c = Config;
             return string.Join(
                 '|',
-                "24",
+                "25",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -118,6 +123,10 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
         try
         {
             var folderId = query.FolderId ?? string.Empty;
+            if (folderId.StartsWith(FolderIdPrefix, StringComparison.Ordinal))
+            {
+                folderId = folderId[FolderIdPrefix.Length..];
+            }
 
             if (string.IsNullOrEmpty(folderId))
             {
@@ -585,7 +594,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
 
     private static ChannelItemInfo Folder(string id, string name, int order = 0) => new ChannelItemInfo
     {
-        Id = id,
+        Id = FolderIdPrefix + id,
         Name = name,
         Type = ChannelItemType.Folder,
         FolderType = ChannelFolderType.Container,
