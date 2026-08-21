@@ -110,15 +110,22 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   completed folders — point the Jellyfin Movies/Shows libraries at those folders and everything sorts
   itself. NOTE: this dashboard page is **admin-web only**; it is NOT reachable on TV/mobile client apps.
 - TV/mobile clients (e.g. Fire TV) see ONLY Libraries, **Channels**, and global Search — never plugin
-  dashboard pages. So the Fire-TV-facing surface is the **channel** (`TreasureMapsChannel`): its
-  folders (Trending/Movies/TV/Browse-by-genre) are the browsable poster grid, and the download action
-  is favouriting (❤) an item (`GrabOnFavoriteService`), because Jellyfin channels can't host custom
-  buttons. Releases are metadata-only `ChannelItemType.Media` cards with **no stream**, so pressing
-  **Play** on a client shows a playback error — that is expected; use ❤ to grab. `IDisableMediaSourceDisplay`
-  hides the versions/sources picker to make them read as catalog cards. Global search only finds channel
-  items that have already been browsed (Jellyfin syncs channel items to the DB on browse; ~3h cache);
-  there is no live in-channel text-search hook in the channel API (`ISearchableChannel`/`CanSearch` are
-  unused in this Jellyfin version).
+  dashboard pages. So the Fire-TV-facing surface is the **channel** (`TreasureMapsChannel`): its root
+  folders are `Trending / Movies / TV Shows / Browse by genre / Find A–Z` (poster-tile grids).
+- Release tiles are `ChannelItemType.Folder` (NOT playable media) on purpose: a playable item shows a
+  **Play** button that errors (no stream exists). As folders they have no Play button; opening a
+  release folder returns a single "↓ Download – mark as favorite" entry, and the actual download is
+  triggered by **favouriting (❤)** the tile or that entry (`GrabOnFavoriteService`, keyed on
+  `ProviderIds["TreasureMaps"]` / `["TreasureMapsKind"]`). Favouriting works on folder channel items
+  (their `ProviderIds` are persisted). NOTE: the grab does a live NZB download from the indexer, so it
+  can take ~10–15s after favouriting before it appears in SABnzbd — don't judge it as failed after only
+  a few seconds. If you change the item type in `ReleaseMapper`, **bump `DataVersion`** or Jellyfin
+  reuses the cached entities.
+- `Find A–Z` (`SearchByLetterAsync`) is the TV-friendly search: letter folders `0-9,A–Z`, each runs a
+  live indexer query (movies + TV, in parallel) and keeps titles whose article-stripped name starts
+  with that letter. This is the only in-channel "search" — Jellyfin's channel API has no text-search
+  hook (`ISearchableChannel`/`CanSearch` are unused here). Global search additionally finds channel
+  items that have already been browsed (they get synced to the DB; ~3h cache).
 - Release-name parsing: `ReleaseNameParser` extracts scene attributes from the release/dirname
   (resolution, source BluRay/WEB/CAM/TELESYNC/…, codec, HDR, `DL` dual-language, detected
   languages, group) and — for theatrical rips — the audio source `MIC` (microphone, worse) vs
