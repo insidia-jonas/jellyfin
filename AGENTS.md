@@ -111,12 +111,21 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   itself. NOTE: this dashboard page is **admin-web only**; it is NOT reachable on TV/mobile client apps.
 - TV/mobile clients (e.g. Fire TV) see ONLY Libraries, **Channels**, and global Search — never plugin
   dashboard pages. So the Fire-TV-facing surface is the **channel** (`TreasureMapsChannel`): its root
-  folders are `Trending / Movies / TV Shows / Browse by genre / Find A–Z`.
+  folders are `Trending / Movies / TV Shows / Movies (DE) / TV Shows (DE) / Browse by genre / Find A–Z`.
+  The DE rows mirror the website's language blocks: the indexer's `x100` category block is German
+  (`cat=2100` movies, `cat=5100` TV — constants `GermanMovieCategories`/`GermanTvCategories` on the
+  API client; `SearchMoviesAsync`/`SearchTvAsync` take an optional category override). The cat filter
+  is loose: a few cross-listed non-DE releases can appear in the DE rows (API-side behavior).
 - Two-level, website-like layout: a category (Movies/TV/genre/letter/trending) shows **one poster
   card per title** (grouped by tmdb/imdb/normalized-title via `ReleaseGrouper`, id prefix `GRP::`),
   NOT one card per release. Opening a title card re-fetches that title's releases (`q=<title>`,
   filtered to the group key) and lists the **individual releases/qualities** as tiles (id prefix
-  `REL::`, name = scene release name so qualities are told apart, capped to `ResultLimit`).
+  `REL::`, capped to `ResultLimit`, sorted language-rank then quality-score). Tile names are
+  **quality-badge labels** built by `ReleaseMapper.BuildQualityLabel` (`1080p · BluRay · AVC ·
+  German · DL · 21.25 GB · [GROUP]`, falling back to the raw scene name when nothing parses); the
+  full scene name stays in the tile overview (`Release: ...`). Covers are **unified**: the card's
+  poster URL is base64-encoded into the `GRP::` id and re-applied to every release tile, so the card
+  and its releases always show the same artwork (individual releases can carry different covers).
 - Release tiles are `ChannelItemType.Folder` (NOT playable media) on purpose: a playable item shows a
   **Play** button that errors (no stream exists). As folders they have no Play button; opening a
   release tile returns a single "↓ Download – mark as favorite" entry, and the actual download is
