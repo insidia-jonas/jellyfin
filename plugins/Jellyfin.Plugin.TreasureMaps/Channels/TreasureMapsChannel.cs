@@ -549,10 +549,41 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             Protocol = MediaBrowser.Model.MediaInfo.MediaProtocol.File,
             Container = "mp4",
             IsRemote = false,
+            VideoType = VideoType.VideoFile,
             SupportsDirectPlay = true,
             SupportsDirectStream = true,
             SupportsTranscoding = true,
-            RunTimeTicks = TimeSpan.FromSeconds(6).Ticks
+            Bitrate = 150000,
+            RunTimeTicks = TimeSpan.FromSeconds(6).Ticks,
+            // Declared stream info lets clients direct-play the clip (h264/aac in mp4 plays
+            // natively everywhere incl. Fire TV); without it the transcode path is hit.
+            MediaStreams = new List<MediaStream>
+            {
+                new MediaStream
+                {
+                    Type = MediaStreamType.Video,
+                    Index = 0,
+                    Codec = "h264",
+                    Profile = "High",
+                    Level = 31,
+                    Width = 1280,
+                    Height = 720,
+                    RealFrameRate = 24,
+                    AverageFrameRate = 24,
+                    BitRate = 120000,
+                    IsDefault = true
+                },
+                new MediaStream
+                {
+                    Type = MediaStreamType.Audio,
+                    Index = 1,
+                    Codec = "aac",
+                    Channels = 2,
+                    SampleRate = 44100,
+                    BitRate = 32000,
+                    IsDefault = true
+                }
+            }
         };
 
         return Task.FromResult<IEnumerable<MediaSourceInfo>>(new[] { source });
