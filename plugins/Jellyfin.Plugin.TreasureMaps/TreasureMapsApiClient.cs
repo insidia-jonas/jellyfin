@@ -160,6 +160,27 @@ public class TreasureMapsApiClient
     }
 
     /// <summary>
+    /// Gets one of the website's TMDB spotlight feeds (popular / trending day / trending week /
+    /// top rated / now playing-on air), containing only titles that have releases on the indexer.
+    /// </summary>
+    /// <param name="type">The media type (<c>movie</c> or <c>tv</c>).</param>
+    /// <param name="feed">The feed number (1=popular, 2=trending today, 3=trending week, 4=top rated, 5=now playing/on air).</param>
+    /// <param name="limit">Maximum number of results.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The release list response.</returns>
+    public Task<ReleaseListResponse?> GetSpotlightAsync(string type, int feed, int limit, CancellationToken cancellationToken)
+    {
+        var parameters = new Dictionary<string, string?>
+        {
+            ["type"] = type,
+            ["feed"] = feed.ToString(CultureInfo.InvariantCulture),
+            ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
+            ["extended"] = "1"
+        };
+        return GetJsonAsync<ReleaseListResponse>("spotlight", parameters, TimeSpan.FromMinutes(30), cancellationToken);
+    }
+
+    /// <summary>
     /// Gets the indexer capabilities (categories and genres).
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>

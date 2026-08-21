@@ -29,6 +29,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
 {
     private const string GenrePrefix = "genre:";
     private const string FindPrefix = "find:";
+    private const string FeedPrefix = "tmfeed:";
 
     // Generation prefix for category-folder ids. Bumping it (c2-, c3-, ...) forces Jellyfin to
     // create fresh folder entities — needed once because the old entities had collage images
@@ -101,7 +102,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             var c = Config;
             return string.Join(
                 '|',
-                "28",
+                "29",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -197,12 +198,17 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
 
             if (string.Equals(folderId, "trending-movie", StringComparison.Ordinal))
             {
-                return await GetTrendingGroupsAsync("movie", cancellationToken).ConfigureAwait(false);
+                return GetSpotlightFeedFolders("movie");
             }
 
             if (string.Equals(folderId, "trending-tv", StringComparison.Ordinal))
             {
-                return await GetTrendingGroupsAsync("tv", cancellationToken).ConfigureAwait(false);
+                return GetSpotlightFeedFolders("tv");
+            }
+
+            if (folderId.StartsWith(FeedPrefix, StringComparison.Ordinal))
+            {
+                return await GetSpotlightFeedAsync(folderId, cancellationToken).ConfigureAwait(false);
             }
 
             if (string.Equals(folderId, "movies", StringComparison.Ordinal))
@@ -971,17 +977,42 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
     }
 
     /// <summary>
-    /// Builds the Trending Movies / Trending TV rows. The /trending feed only carries an imdb id
-    /// (no covers), so each item is enriched via a title lookup to pull the poster + metadata.
+    /// Lists the website's TMDB spotlight feed rows for movies or TV (same rows as on the
+    /// Treasure-Maps homepage: popular, trending today/this week, top rated, in cinema/on air).
     /// </summary>
-    private async Task<ChannelItemResult> GetTrendingGroupsAsync(string kind, CancellationToken cancellationToken)
+    private static ChannelItemResult GetSpotlightFeedFolders(string kind)
     {
-        var response = await _client.GetTrendingAsync(kind, 15, cancellationToken).ConfigureAwait(false);
+        var names = string.Equals(kind, "tv", StringComparison.Ordinal)
+            ? new[] { "Beliebte Serien", "Trending Heute", "Trending Diese Woche", "Top Rated Serien", "Aktuell im TV" }
+            : new[] { "Beliebt auf TMDB", "Trending Heute", "Trending Diese Woche", "Top Rated", "Jetzt im Kino" };
+
+        var items = new List<ChannelItemInfo>(names.Length);
+        for (var feed = 1; feed <= names.Length; feed++)
+        {
+            items.Add(Folder(FeedPrefix + kind + ":" + feed.ToString(System.Globalization.CultureInfo.InvariantCulture), names[feed - 1], feed - 1));
+        }
+
+        return Result(items);
+    }
+
+    /// <summary>
+    /// Builds one spotlight feed row: fetches the feed (titles that have releases), enriches each
+    /// item with poster/metadata (the feed only carries an imdb id, no covers) and groups them
+    /// into one card per title.
+    /// </summary>
+    private async Task<ChannelItemResult> GetSpotlightFeedAsync(string folderId, CancellationToken cancellationToken)
+    {
+        // tmfeed:<kind>:<feed>
+        var parts = folderId.Split(':');
+        var kind = parts.Length > 1 && string.Equals(parts[1], "tv", StringComparison.Ordinal) ? "tv" : "movie";
+        var feed = parts.Length > 2 && int.TryParse(parts[2], out var f) ? f : 1;
+
+        var response = await _client.GetSpotlightAsync(kind, feed, 30, cancellationToken).ConfigureAwait(false);
         var items = response?.Items ?? Array.Empty<Release>();
 
         var enriched = await Task.WhenAll(items.Select(it => EnrichTrendingAsync(it, kind, cancellationToken))).ConfigureAwait(false);
         var releases = enriched.Where(r => r is not null).Select(r => r!).ToList();
-        return BuildGroupCards(releases, "trending-" + kind);
+        return BuildGroupCards(releases, folderId);
     }
 
     private async Task<Release?> EnrichTrendingAsync(Release item, string kind, CancellationToken cancellationToken)
