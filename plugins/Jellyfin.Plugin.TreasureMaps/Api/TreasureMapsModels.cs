@@ -83,6 +83,22 @@ public class Release
     /// <summary>Gets or sets the related links.</summary>
     [JsonPropertyName("links")]
     public ReleaseLinks? Links { get; set; }
+
+    /// <summary>Gets or sets the indexer category (used to infer movie vs TV for raw feeds).</summary>
+    [JsonPropertyName("category")]
+    public ReleaseCategory? Category { get; set; }
+}
+
+/// <summary>The indexer category of a release.</summary>
+public class ReleaseCategory
+{
+    /// <summary>Gets or sets the category id.</summary>
+    [JsonPropertyName("id")]
+    public int Id { get; set; }
+
+    /// <summary>Gets or sets the category name (e.g. "Movies - DE &gt; HD").</summary>
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
 }
 
 /// <summary>TV metadata for a release.</summary>
@@ -215,6 +231,7 @@ public class CapsNamedItem
 {
     /// <summary>Gets or sets the id.</summary>
     [JsonPropertyName("id")]
+    [JsonConverter(typeof(FlexibleStringConverter))]
     public string? Id { get; set; }
 
     /// <summary>Gets or sets the display name.</summary>

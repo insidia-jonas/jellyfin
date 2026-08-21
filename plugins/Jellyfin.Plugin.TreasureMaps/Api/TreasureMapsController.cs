@@ -175,35 +175,55 @@ public class TreasureMapsController : ControllerBase
     /// <returns>A lightweight list of releases for the UI.</returns>
     [HttpGet("Search")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<IActionResult> Search([FromQuery] string type, [FromQuery] string? q, CancellationToken cancellationToken)
+    public async Task<IActionResult> Search([FromQuery] string type, [FromQuery] string? q, [FromQuery] string? genre, CancellationToken cancellationToken)
     {
         if (!TreasureMapsApiClient.IsConfigured)
         {
             return Ok(new { ok = false, message = "Configure the Treasure-Maps connection first.", items = Array.Empty<object>() });
         }
 
-        var isTv = string.Equals(type, "tv", StringComparison.OrdinalIgnoreCase);
+        var kind = (type ?? "movie").ToLowerInvariant();
         var limit = Plugin.Instance?.Configuration.ResultLimit ?? 60;
         try
         {
-            var response = isTv
-                ? await _client.SearchTvAsync(q, limit, cancellationToken).ConfigureAwait(false)
-                : await _client.SearchMoviesAsync(q, null, limit, cancellationToken).ConfigureAwait(false);
+            var response = kind switch
+            {
+                "trending" => await _client.GetTrendingAsync(limit, cancellationToken).ConfigureAwait(false),
+                "tv" => await _client.SearchTvAsync(q, limit, cancellationToken).ConfigureAwait(false),
+                _ => await _client.SearchMoviesAsync(q, genre, limit, cancellationToken).ConfigureAwait(false)
+            };
 
             var items = (response?.Items ?? Enumerable.Empty<Release>())
                 .Where(r => !string.IsNullOrWhiteSpace(r.Guid))
                 .Select(r =>
                 {
                     var parsed = ReleaseNameParser.Parse(r.Title);
+                    var isTvItem = kind switch
+                    {
+                        "tv" => true,
+                        "movie" => false,
+                        _ => r.Tv is not null && r.Movie is null
+                            || (r.Movie is null && (r.Category?.Name?.Contains("TV", StringComparison.OrdinalIgnoreCase) ?? false))
+                    };
                     var title = r.Movie?.Title ?? r.Tv?.Title ?? r.Title;
+                    var ratingStr = r.Movie?.Rating;
+                    double? rating = double.TryParse(ratingStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var rv) ? rv : null;
+                    var year = r.Movie?.Year ?? r.Tv?.FirstAired;
+                    if (year is { Length: > 4 })
+                    {
+                        year = year[..4];
+                    }
+
                     return new
                     {
                         guid = r.Guid,
                         title,
                         scene = r.Title,
-                        year = r.Movie?.Year ?? r.Tv?.FirstAired,
+                        year,
+                        rating,
                         poster = r.Images?.Cover,
-                        type = isTv ? "tv" : "movie",
+                        type = isTvItem ? "tv" : "movie",
+                        genres = r.Movie?.Genres ?? new System.Collections.Generic.List<string>(),
                         quality = string.Join(" · ", parsed.DisplayTags)
                     };
                 })
@@ -215,6 +235,51 @@ public class TreasureMapsController : ControllerBase
         {
             _logger.LogWarning(ex, "Treasure-Maps search failed");
             return Ok(new { ok = false, message = ex.Message, items = Array.Empty<object>() });
+        }
+    }
+
+    /// <summary>
+    /// Returns the indexer's genres (for the Browse page genre selector).
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The list of genre names.</returns>
+    [HttpGet("Genres")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> Genres(CancellationToken cancellationToken)
+    {
+        if (!TreasureMapsApiClient.IsConfigured)
+        {
+            return Ok(new { ok = false, genres = Array.Empty<string>() });
+        }
+
+        try
+        {
+            var caps = await _client.GetCapsAsync(cancellationToken).ConfigureAwait(false);
+            var available = new HashSet<string>(
+                (caps?.Genres ?? Enumerable.Empty<Api.CapsNamedItem>())
+                    .Select(g => g.Name)
+                    .Where(n => !string.IsNullOrWhiteSpace(n))!,
+                StringComparer.OrdinalIgnoreCase);
+
+            // The indexer exposes thousands of niche genres; surface a clean, common subset for the selector.
+            var common = new[]
+            {
+                "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary", "Drama",
+                "Family", "Fantasy", "History", "Horror", "Music", "Musical", "Mystery",
+                "Romance", "Science Fiction", "Sci-Fi", "Thriller", "War", "Western"
+            };
+            var genres = common.Where(available.Contains).ToList();
+            if (genres.Count == 0)
+            {
+                genres = available.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).Take(30).ToList();
+            }
+
+            return Ok(new { ok = true, genres });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Treasure-Maps caps failed");
+            return Ok(new { ok = false, genres = Array.Empty<string>() });
         }
     }
 

@@ -4,36 +4,89 @@
     <title>Treasure-Maps · Browse &amp; Grab</title>
 </head>
 <body>
-    <div id="TreasureMapsBrowsePage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select">
+    <div id="TreasureMapsBrowsePage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-button">
+        <style>
+            .tmWrap { max-width: 1400px; margin: 0 auto; }
+            .tmToolbar { display: flex; flex-wrap: wrap; gap: .6em; align-items: center; margin: .5em 0 1.2em; }
+            .tmTabs { display: flex; gap: .35em; }
+            .tmTab {
+                padding: .5em 1em; border-radius: 999px; cursor: pointer; border: 1px solid rgba(255,255,255,.18);
+                background: transparent; color: inherit; font-weight: 600; font-size: .95em;
+            }
+            .tmTab.active { background: #00a4dc; border-color: #00a4dc; color: #fff; }
+            .tmSpacer { flex: 1; }
+            .tmSearch { display: flex; gap: .4em; align-items: center; }
+            .tmSearch input, .tmGenre select {
+                background: rgba(255,255,255,.06); color: inherit; border: 1px solid rgba(255,255,255,.18);
+                border-radius: 6px; padding: .5em .7em; min-width: 160px;
+            }
+            .tmBtn {
+                background: #00a4dc; color: #fff; border: none; border-radius: 6px; padding: .55em .9em;
+                cursor: pointer; font-weight: 600;
+            }
+            .tmBtn:disabled { opacity: .6; cursor: default; }
+            .tmStatus { margin: .3em 0 1em; opacity: .8; }
+            .tmGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1em; align-items: start; }
+            .tmCard { position: relative; min-width: 0; overflow: hidden; }
+            .tmPoster {
+                position: relative; width: 100%; aspect-ratio: 2/3; border-radius: 8px; overflow: hidden;
+                background: linear-gradient(135deg,#1b2733,#0d1218); box-shadow: 0 2px 8px rgba(0,0,0,.4);
+            }
+            .tmPoster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+            .tmNoImg { display:flex; align-items:center; justify-content:center; height:100%; opacity:.35; font-size:2.4em; }
+            .tmRating {
+                position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,.72); color: #ffd54a;
+                padding: 2px 7px; border-radius: 999px; font-size: .8em; font-weight: 700;
+            }
+            .tmBadge {
+                position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,.72); color: #eee;
+                padding: 2px 7px; border-radius: 999px; font-size: .72em; text-transform: uppercase;
+            }
+            .tmOverlay {
+                position: absolute; inset: 0; display: flex; align-items: flex-end; justify-content: center;
+                padding: .6em; opacity: 0; transition: opacity .15s; background: linear-gradient(transparent, rgba(0,0,0,.75));
+            }
+            .tmPoster:hover .tmOverlay, .tmCard.grabbed .tmOverlay { opacity: 1; }
+            .tmGrab {
+                width: 100%; background: #00a4dc; color: #fff; border: none; border-radius: 6px; padding: .5em;
+                cursor: pointer; font-weight: 700;
+            }
+            .tmGrab.done { background: #3a9a4b; }
+            .tmGrab:disabled { opacity: .7; cursor: default; }
+            .tmTitle {
+                margin: .5em 0 .1em; font-weight: 600; line-height: 1.2; overflow-wrap: anywhere; word-break: break-word;
+                display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+            }
+            .tmMeta { opacity: .6; font-size: .82em; overflow-wrap: anywhere; word-break: break-word; }
+        </style>
         <div data-role="content">
-            <div class="content-primary">
-                <h1>Treasure-Maps · Browse &amp; Grab</h1>
-                <p class="fieldDescription" style="margin-bottom:1em;">
-                    Search the indexer, then press <strong>Grab</strong> on a title. The plugin sends it to SABnzbd with
-                    the matching category (movies vs. series), so it lands in the right folder automatically — no manual sorting.
-                </p>
+            <div class="content-primary tmWrap">
+                <h1>Treasure-Maps</h1>
 
-                <div style="display:flex; gap:0.5em; align-items:flex-end; flex-wrap:wrap; margin-bottom:1em;">
-                    <div class="selectContainer" style="min-width:140px;">
-                        <select is="emby-select" id="searchType" label="Type">
-                            <option value="movie">Movies</option>
-                            <option value="tv">TV Shows</option>
-                        </select>
+                <div class="tmToolbar">
+                    <div class="tmTabs">
+                        <button class="tmTab active" data-type="trending">Trending</button>
+                        <button class="tmTab" data-type="movie">Movies</button>
+                        <button class="tmTab" data-type="tv">TV Shows</button>
                     </div>
-                    <div class="inputContainer" style="flex:1; min-width:220px; margin-bottom:0;">
-                        <input is="emby-input" type="text" id="searchQuery" label="Search (leave empty for latest)" />
+                    <div class="tmGenre" id="tmGenreWrap" style="display:none;">
+                        <select id="tmGenre"><option value="">All genres</option></select>
                     </div>
-                    <button is="emby-button" type="button" id="searchButton" class="raised button-submit"><span>Search</span></button>
+                    <div class="tmSpacer"></div>
+                    <div class="tmSearch">
+                        <input type="text" id="tmQuery" placeholder="Search…" />
+                        <button class="tmBtn" id="tmSearchBtn">Search</button>
+                    </div>
                 </div>
 
-                <div id="searchStatus" class="fieldDescription" style="margin-bottom:1em;"></div>
-                <div id="results"></div>
+                <div class="tmStatus" id="tmStatus"></div>
+                <div class="tmGrid" id="tmGrid"></div>
             </div>
         </div>
 
         <script type="text/javascript">
             (function () {
-                var pluginId = "e2c9a6f4-8b1d-4f3a-9c2e-7a5b6d4c3e21";
+                var state = { type: 'trending', genre: '', q: '' };
 
                 function esc(s) {
                     return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) {
@@ -41,100 +94,109 @@
                     });
                 }
 
-                function render(items, type) {
-                    var container = document.querySelector('#results');
-                    if (!items || !items.length) {
-                        container.innerHTML = '<p class="fieldDescription">No results.</p>';
-                        return;
-                    }
-                    container.innerHTML = items.map(function (i) {
-                        var poster = i.poster
-                            ? '<img src="' + esc(i.poster) + '" style="width:92px;height:138px;object-fit:cover;border-radius:4px;flex:0 0 auto;" onerror="this.style.visibility=\'hidden\'" />'
-                            : '<div style="width:92px;height:138px;background:#333;border-radius:4px;flex:0 0 auto;"></div>';
-                        return '<div class="listItem" style="display:flex;gap:1em;align-items:flex-start;padding:0.75em 0;border-bottom:1px solid rgba(255,255,255,0.08);">'
-                            + poster
-                            + '<div style="flex:1;min-width:0;">'
-                            + '<div style="font-weight:600;">' + esc(i.title) + (i.year ? ' (' + esc(i.year) + ')' : '') + '</div>'
-                            + '<div class="fieldDescription" style="margin:.25em 0;">' + esc(i.quality || '') + '</div>'
-                            + '<div class="fieldDescription" style="opacity:.7;word-break:break-all;">' + esc(i.scene || '') + '</div>'
-                            + '</div>'
-                            + '<button is="emby-button" type="button" class="raised button-submit grabBtn" '
-                            + 'data-guid="' + esc(i.guid) + '" data-type="' + esc(type) + '" data-name="' + esc(i.scene) + '">'
-                            + '<span>Grab</span></button>'
-                            + '</div>';
-                    }).join('');
+                function card(i) {
+                    var poster = i.poster
+                        ? '<img loading="lazy" src="' + esc(i.poster) + '" onerror="this.parentNode.classList.add(\'tmFail\');this.remove();" />'
+                        : '<div class="tmNoImg">&#127916;</div>';
+                    var rating = (i.rating ? '<div class="tmRating">&#9733; ' + Number(i.rating).toFixed(1) + '</div>' : '');
+                    var badge = '<div class="tmBadge">' + (i.type === 'tv' ? 'TV' : 'Movie') + '</div>';
+                    var meta = [i.quality].filter(Boolean).join(' · ');
+                    return '<div class="tmCard" data-guid="' + esc(i.guid) + '" data-type="' + esc(i.type) + '" data-name="' + esc(i.scene) + '">'
+                        + '<div class="tmPoster">' + poster + rating + badge
+                        + '<div class="tmOverlay"><button class="tmGrab">&#11015; Grab</button></div>'
+                        + '</div>'
+                        + '<div class="tmTitle">' + esc(i.title) + (i.year ? ' <span class="tmMeta">(' + esc(i.year) + ')</span>' : '') + '</div>'
+                        + '<div class="tmMeta">' + esc(meta) + '</div>'
+                        + '</div>';
+                }
 
-                    Array.prototype.forEach.call(container.querySelectorAll('.grabBtn'), function (btn) {
-                        btn.addEventListener('click', function () { grab(btn); });
+                function bindGrab() {
+                    Array.prototype.forEach.call(document.querySelectorAll('#tmGrid .tmGrab'), function (btn) {
+                        btn.addEventListener('click', function () {
+                            var el = btn.closest('.tmCard');
+                            var guid = el.getAttribute('data-guid');
+                            var type = el.getAttribute('data-type');
+                            var name = el.getAttribute('data-name');
+                            btn.disabled = true; btn.innerHTML = 'Grabbing…';
+                            ApiClient.fetch({
+                                url: ApiClient.getUrl('TreasureMaps/Releases/' + encodeURIComponent(guid) + '/Grab'
+                                    + '?type=' + encodeURIComponent(type) + '&name=' + encodeURIComponent(name)),
+                                type: 'POST', dataType: 'json', headers: { accept: 'application/json' }
+                            }).then(function (res) {
+                                if (res && res.ok) {
+                                    el.classList.add('grabbed'); btn.classList.add('done');
+                                    btn.innerHTML = '&#10003; ' + (res.category ? res.category : 'queued');
+                                } else {
+                                    btn.disabled = false; btn.innerHTML = '&#11015; Grab';
+                                    Dashboard.alert({ title: 'Grab failed', message: (res && res.message) || 'Unknown error' });
+                                }
+                            }, function () {
+                                btn.disabled = false; btn.innerHTML = '&#11015; Grab';
+                                Dashboard.alert({ title: 'Grab failed', message: 'Request failed.' });
+                            });
+                        });
                     });
                 }
 
-                function grab(btn) {
-                    var guid = btn.getAttribute('data-guid');
-                    var type = btn.getAttribute('data-type');
-                    var name = btn.getAttribute('data-name');
-                    var span = btn.querySelector('span');
-                    var original = span.textContent;
-                    span.textContent = 'Grabbing…';
-                    btn.disabled = true;
-                    ApiClient.fetch({
-                        url: ApiClient.getUrl('TreasureMaps/Releases/' + encodeURIComponent(guid) + '/Grab'
-                            + '?type=' + encodeURIComponent(type) + '&name=' + encodeURIComponent(name)),
-                        type: 'POST',
-                        dataType: 'json',
-                        headers: { accept: 'application/json' }
-                    }).then(function (res) {
-                        if (res && res.ok) {
-                            var where = res.target === 'sabnzbd'
-                                ? 'SABnzbd (category "' + (res.category || '') + '")'
-                                : 'drop folder';
-                            span.textContent = '✓ Sent to ' + where;
-                            Dashboard.alert({ title: 'Grabbed', message: 'Sent to ' + where + '.' });
-                        } else {
-                            span.textContent = original;
-                            btn.disabled = false;
-                            Dashboard.alert({ title: 'Grab failed', message: (res && res.message) || 'Unknown error' });
-                        }
-                    }, function () {
-                        span.textContent = original;
-                        btn.disabled = false;
-                        Dashboard.alert({ title: 'Grab failed', message: 'Request failed.' });
-                    });
-                }
-
-                function search() {
-                    var type = document.querySelector('#searchType').value;
-                    var q = document.querySelector('#searchQuery').value.trim();
-                    var status = document.querySelector('#searchStatus');
-                    status.textContent = 'Searching…';
-                    document.querySelector('#results').innerHTML = '';
+                function load() {
+                    var status = document.querySelector('#tmStatus');
+                    var grid = document.querySelector('#tmGrid');
+                    status.textContent = 'Loading…'; grid.innerHTML = '';
                     Dashboard.showLoadingMsg();
-                    ApiClient.fetch({
-                        url: ApiClient.getUrl('TreasureMaps/Search?type=' + encodeURIComponent(type) + '&q=' + encodeURIComponent(q)),
-                        type: 'GET',
-                        dataType: 'json',
-                        headers: { accept: 'application/json' }
-                    }).then(function (res) {
-                        Dashboard.hideLoadingMsg();
-                        if (res && res.ok) {
-                            status.textContent = (res.items ? res.items.length : 0) + ' result(s).';
-                            render(res.items, type);
-                        } else {
-                            status.textContent = (res && res.message) || 'Search failed.';
-                        }
-                    }, function () {
-                        Dashboard.hideLoadingMsg();
-                        status.textContent = 'Search request failed.';
+                    var url = 'TreasureMaps/Search?type=' + encodeURIComponent(state.type)
+                        + '&q=' + encodeURIComponent(state.q) + '&genre=' + encodeURIComponent(state.genre);
+                    ApiClient.fetch({ url: ApiClient.getUrl(url), type: 'GET', dataType: 'json', headers: { accept: 'application/json' } })
+                        .then(function (res) {
+                            Dashboard.hideLoadingMsg();
+                            if (res && res.ok) {
+                                var items = res.items || [];
+                                status.textContent = items.length + ' result(s).';
+                                grid.innerHTML = items.map(card).join('');
+                                bindGrab();
+                            } else {
+                                status.textContent = (res && res.message) || 'Failed to load.';
+                            }
+                        }, function () { Dashboard.hideLoadingMsg(); status.textContent = 'Request failed.'; });
+                }
+
+                function loadGenres() {
+                    ApiClient.fetch({ url: ApiClient.getUrl('TreasureMaps/Genres'), type: 'GET', dataType: 'json', headers: { accept: 'application/json' } })
+                        .then(function (res) {
+                            if (res && res.ok && res.genres && res.genres.length) {
+                                var sel = document.querySelector('#tmGenre');
+                                res.genres.forEach(function (g) {
+                                    var o = document.createElement('option'); o.value = g; o.textContent = g; sel.appendChild(o);
+                                });
+                            }
+                        }, function () {});
+                }
+
+                function setType(t) {
+                    state.type = t; state.genre = '';
+                    Array.prototype.forEach.call(document.querySelectorAll('.tmTab'), function (b) {
+                        b.classList.toggle('active', b.getAttribute('data-type') === t);
                     });
+                    document.querySelector('#tmGenreWrap').style.display = (t === 'movie') ? '' : 'none';
+                    document.querySelector('#tmGenre').value = '';
+                    load();
                 }
 
                 var page = document.querySelector('#TreasureMapsBrowsePage');
                 page.addEventListener('pageshow', function () {
-                    document.querySelector('#searchStatus').textContent = '';
+                    loadGenres();
+                    setType('trending');
                 });
-                document.querySelector('#searchButton').addEventListener('click', search);
-                document.querySelector('#searchQuery').addEventListener('keydown', function (e) {
-                    if (e.key === 'Enter') { search(); }
+                Array.prototype.forEach.call(document.querySelectorAll('.tmTab'), function (b) {
+                    b.addEventListener('click', function () { setType(b.getAttribute('data-type')); });
+                });
+                document.querySelector('#tmGenre').addEventListener('change', function () {
+                    state.genre = this.value; load();
+                });
+                document.querySelector('#tmSearchBtn').addEventListener('click', function () {
+                    state.q = document.querySelector('#tmQuery').value.trim(); load();
+                });
+                document.querySelector('#tmQuery').addEventListener('keydown', function (e) {
+                    if (e.key === 'Enter') { state.q = this.value.trim(); load(); }
                 });
             })();
         </script>
