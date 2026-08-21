@@ -72,7 +72,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             var c = Config;
             return string.Join(
                 '|',
-                "18",
+                "19",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -410,22 +410,46 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
 
             // The card's cover URL travels inside the id so that opening the card can show the
             // exact same poster on every release tile (covers can differ between releases).
+            // FolderType BoxSet makes clients open a DETAILS page (plot, rating, genres, cast,
+            // IMDb link) with the releases listed below, instead of a bare children list.
             var card = new ChannelItemInfo
             {
                 Id = string.Join(Sep, GroupPrefix.TrimEnd(':'), scopeHash, marker, group.Kind, Encode(group.Key), Encode(group.Title), Encode(group.Cover ?? string.Empty)),
                 Name = group.Title,
                 Type = ChannelItemType.Folder,
-                FolderType = ChannelFolderType.Container,
+                FolderType = ChannelFolderType.BoxSet,
                 ImageUrl = group.Cover,
                 ProductionYear = group.Year,
-                CommunityRating = group.Rating.HasValue ? (float)group.Rating.Value : null,
-                Overview = count + (count == 1 ? " release available." : " releases available.")
-                    + " Open to choose a quality, then mark it as a favorite (\u2764) to download."
+                CommunityRating = group.Rating.HasValue ? (float)group.Rating.Value : null
             };
+
+            var hint = count + (count == 1 ? " release available." : " releases available.")
+                + " Mark a release below as a favorite (\u2764) to download it.";
+            card.Overview = string.IsNullOrWhiteSpace(group.Plot) ? hint : group.Plot + "\n\n" + hint;
+            if (!string.IsNullOrWhiteSpace(group.Tagline))
+            {
+                card.Overview = group.Tagline + "\n\n" + card.Overview;
+            }
 
             if (group.Genres.Count > 0)
             {
                 card.Genres = group.Genres.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            }
+
+            foreach (var actor in group.Actors.Take(10))
+            {
+                card.People.Add(new MediaBrowser.Controller.Entities.PersonInfo { Name = actor, Type = Jellyfin.Data.Enums.PersonKind.Actor });
+            }
+
+            // External ids give the details page its IMDb/TMDB links.
+            if (!string.IsNullOrWhiteSpace(group.Imdb))
+            {
+                card.ProviderIds["Imdb"] = group.Imdb!;
+            }
+
+            if (!string.IsNullOrWhiteSpace(group.Tmdb))
+            {
+                card.ProviderIds["Tmdb"] = group.Tmdb!;
             }
 
             card.Tags.Add(count == 1 ? "1 release" : count + " releases");
@@ -491,11 +515,13 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             {
                 var kind = item.ProviderIds.TryGetValue("TreasureMapsKind", out var k) && !string.IsNullOrEmpty(k) ? k : "movie";
 
-                // Inside a title card, name the tile by its quality badges (resolution, source,
-                // codec, language, size, group) so the qualities are told apart at a glance. The
-                // full scene name stays visible in the tile's overview ("Release: ...").
+                // Inside a title card, name the tile by its audio-language flags plus quality
+                // badges (resolution, source, codec, language, size, group) so the qualities are
+                // told apart at a glance. The full scene name stays in the tile's overview.
                 var parsed = ReleaseNameParser.Parse(release.Title);
-                item.Name = ReleaseMapper.BuildQualityLabel(release);
+                var flags = ReleaseMapper.LanguageFlags(release);
+                var label = ReleaseMapper.BuildQualityLabel(release);
+                item.Name = string.IsNullOrEmpty(flags) ? label : flags + " " + label;
 
                 // All tiles of a title share the card's poster so the card and its releases look alike.
                 if (!string.IsNullOrWhiteSpace(groupCover))

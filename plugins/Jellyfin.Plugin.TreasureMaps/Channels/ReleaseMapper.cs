@@ -256,6 +256,46 @@ public static class ReleaseMapper
     }
 
     /// <summary>
+    /// Builds a short flag-emoji prefix for the audio languages of a release (from the API's
+    /// audio_languages and/or the scene name), e.g. <c>🇩🇪</c> for a German release.
+    /// Returns an empty string when no language could be detected.
+    /// </summary>
+    /// <param name="release">The release.</param>
+    /// <returns>The flag prefix (up to three flags), never null.</returns>
+    public static string LanguageFlags(Release release)
+    {
+        var parsed = ReleaseNameParser.Parse(release.Title);
+        var languages = (release.AudioLanguages ?? Enumerable.Empty<string>()).Concat(parsed.Languages);
+
+        var flags = new List<string>();
+        foreach (var language in languages)
+        {
+            var flag = FlagFor(language);
+            if (flag is not null && !flags.Contains(flag))
+            {
+                flags.Add(flag);
+            }
+        }
+
+        return string.Concat(flags.Take(3));
+    }
+
+    private static string? FlagFor(string language) => language.Trim().ToLowerInvariant() switch
+    {
+        "de" or "ger" or "deu" or "german" or "deutsch" => "\U0001F1E9\U0001F1EA",
+        "en" or "eng" or "english" => "\U0001F1EC\U0001F1E7",
+        "fr" or "fre" or "fra" or "french" => "\U0001F1EB\U0001F1F7",
+        "es" or "spa" or "spanish" => "\U0001F1EA\U0001F1F8",
+        "it" or "ita" or "italian" => "\U0001F1EE\U0001F1F9",
+        "nl" or "dut" or "nld" or "dutch" => "\U0001F1F3\U0001F1F1",
+        "ru" or "rus" or "russian" => "\U0001F1F7\U0001F1FA",
+        "ja" or "jpn" or "japanese" => "\U0001F1EF\U0001F1F5",
+        "ko" or "kor" or "korean" => "\U0001F1F0\U0001F1F7",
+        "multi" or "mul" => "\U0001F310",
+        _ => null
+    };
+
+    /// <summary>
     /// Formats a byte count as a human-readable size.
     /// </summary>
     /// <param name="bytes">The number of bytes.</param>

@@ -122,6 +122,10 @@ public class ReleaseTv
     [JsonPropertyName("first_aired")]
     [JsonConverter(typeof(FlexibleStringConverter))]
     public string? FirstAired { get; set; }
+
+    /// <summary>Gets or sets the series overview/description.</summary>
+    [JsonPropertyName("overview")]
+    public string? Overview { get; set; }
 }
 
 /// <summary>External identifiers for a release.</summary>

@@ -33,6 +33,21 @@ public sealed class ReleaseGroup
     /// <summary>Gets or sets the community rating.</summary>
     public double? Rating { get; set; }
 
+    /// <summary>Gets or sets the plot/description.</summary>
+    public string? Plot { get; set; }
+
+    /// <summary>Gets or sets the tagline.</summary>
+    public string? Tagline { get; set; }
+
+    /// <summary>Gets or sets the IMDb id.</summary>
+    public string? Imdb { get; set; }
+
+    /// <summary>Gets or sets the TMDB id.</summary>
+    public string? Tmdb { get; set; }
+
+    /// <summary>Gets the actors.</summary>
+    public List<string> Actors { get; } = new();
+
     /// <summary>Gets the genres.</summary>
     public List<string> Genres { get; } = new();
 
@@ -97,6 +112,15 @@ public static class ReleaseGrouper
             if (group.Genres.Count == 0 && release.Movie?.Genres is { Count: > 0 } genres)
             {
                 group.Genres.AddRange(genres);
+            }
+
+            group.Plot ??= release.Movie?.Plot ?? release.Tv?.Overview;
+            group.Tagline ??= release.Movie?.Tagline;
+            group.Imdb ??= release.Ids?.Imdb ?? release.Tv?.Imdb;
+            group.Tmdb ??= release.Ids?.Tmdb ?? release.Tv?.Tmdb;
+            if (group.Actors.Count == 0 && release.Movie?.Actors is { Count: > 0 } actors)
+            {
+                group.Actors.AddRange(actors);
             }
         }
 

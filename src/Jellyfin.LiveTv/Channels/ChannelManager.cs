@@ -971,6 +971,7 @@ namespace Jellyfin.LiveTv.Channels
                     ChannelFolderType.PhotoAlbum => GetItemById<PhotoAlbum>(info.Id, channelProvider.Name, out isNew),
                     ChannelFolderType.Series => GetItemById<Series>(info.Id, channelProvider.Name, out isNew),
                     ChannelFolderType.Season => GetItemById<Season>(info.Id, channelProvider.Name, out isNew),
+                    ChannelFolderType.BoxSet => GetItemById<MediaBrowser.Controller.Entities.Movies.BoxSet>(info.Id, channelProvider.Name, out isNew),
                     _ => GetItemById<Folder>(info.Id, channelProvider.Name, out isNew)
                 };
             }
