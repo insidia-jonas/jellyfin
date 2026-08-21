@@ -111,16 +111,27 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   itself. NOTE: this dashboard page is **admin-web only**; it is NOT reachable on TV/mobile client apps.
 - TV/mobile clients (e.g. Fire TV) see ONLY Libraries, **Channels**, and global Search — never plugin
   dashboard pages. So the Fire-TV-facing surface is the **channel** (`TreasureMapsChannel`): its root
-  folders are `Trending / Movies / TV Shows / Browse by genre / Find A–Z` (poster-tile grids).
+  folders are `Trending / Movies / TV Shows / Browse by genre / Find A–Z`.
+- Two-level, website-like layout: a category (Movies/TV/genre/letter/trending) shows **one poster
+  card per title** (grouped by tmdb/imdb/normalized-title via `ReleaseGrouper`, id prefix `GRP::`),
+  NOT one card per release. Opening a title card re-fetches that title's releases (`q=<title>`,
+  filtered to the group key) and lists the **individual releases/qualities** as tiles (id prefix
+  `REL::`, name = scene release name so qualities are told apart, capped to `ResultLimit`).
 - Release tiles are `ChannelItemType.Folder` (NOT playable media) on purpose: a playable item shows a
   **Play** button that errors (no stream exists). As folders they have no Play button; opening a
-  release folder returns a single "↓ Download – mark as favorite" entry, and the actual download is
+  release tile returns a single "↓ Download – mark as favorite" entry, and the actual download is
   triggered by **favouriting (❤)** the tile or that entry (`GrabOnFavoriteService`, keyed on
   `ProviderIds["TreasureMaps"]` / `["TreasureMapsKind"]`). Favouriting works on folder channel items
   (their `ProviderIds` are persisted). NOTE: the grab does a live NZB download from the indexer, so it
   can take ~10–15s after favouriting before it appears in SABnzbd — don't judge it as failed after only
-  a few seconds. If you change the item type in `ReleaseMapper`, **bump `DataVersion`** or Jellyfin
-  reuses the cached entities.
+  a few seconds. If you change item ids/type/naming in the channel, **bump `DataVersion`** or Jellyfin
+  reuses the cached entities (this bit us: name changes didn't show until the version was bumped).
+- Trending: `Trending` splits into `Movies` and `TV Shows` (`/trending?type=movie|tv`). The trending
+  feed only carries an `imdb` id and NO cover, so each item is enriched with a `q=<title>` lookup
+  (matched by imdb) to pull the poster/metadata. Cover URLs cannot be synthesized (TV uses an internal
+  id). API gotchas: `imdbid`/`tmdbid` filters return 0 (broken) — use `q=<title>`; `/tv` is only
+  partially enriched; single-letter `q` is a broad substring search (hence Find A–Z prefix-filters
+  client-side). Rapid API calls get rate-limited (degraded/empty JSON), so space out manual probing.
 - `Find A–Z` (`SearchByLetterAsync`) is the TV-friendly search: letter folders `0-9,A–Z`, each runs a
   live indexer query (movies + TV, in parallel) and keeps titles whose article-stripped name starts
   with that letter. This is the only in-channel "search" — Jellyfin's channel API has no text-search
