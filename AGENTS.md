@@ -147,11 +147,22 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   NOT one card per release. Opening a title card re-fetches that title's releases (`q=<title>`,
   filtered to the group key) and lists the **individual releases/qualities** as tiles (id prefix
   `REL::`, capped to `ResultLimit`, sorted language-rank then quality-score). Tile names are
-  **quality-badge labels** built by `ReleaseMapper.BuildQualityLabel` (`1080p · BluRay · AVC ·
-  German · DL · 21.25 GB · [GROUP]`, falling back to the raw scene name when nothing parses); the
-  full scene name stays in the tile overview (`Release: ...`). Covers are **unified**: the card's
-  poster URL is base64-encoded into the `GRP::` id and re-applied to every release tile, so the card
-  and its releases always show the same artwork (individual releases can carry different covers).
+  **language-flag + quality-badge labels** (`ReleaseMapper.LanguageFlags` + `BuildQualityLabel`,
+  e.g. `🇬🇧🇩🇪 1080p · BluRay · AVC · German · DL · 21.25 GB · [GROUP]`, falling back to the raw
+  scene name when nothing parses); the full scene name stays in the tile overview (`Release: ...`).
+  Covers are **unified**: the card's poster URL is base64-encoded into the `GRP::` id and re-applied
+  to every release tile, so the card and its releases always show the same artwork.
+- Title cards are `ChannelFolderType.BoxSet` so clients open a **details page** (poster, tagline +
+  plot, rating, genres, cast, IMDb link) with the releases listed below. This needed three tiny
+  **server** patches (this fork): `ChannelFolderType.BoxSet` + ChannelManager mapping,
+  `GetClientTypeName` not masking channel BoxSets as `ChannelFolderItem` (else clients route to the
+  bare list view), and `ImdbExternalId` supporting BoxSet. GOTCHAS: (1) ChannelManager must NOT
+  queue a scraper refresh for channel box sets or the TMDB box-set provider renames them to
+  "... Collection" (patched); (2) the indexer returns bare numeric IMDb ids — normalize to `tt...`
+  (`ReleaseMapper.NormalizeImdbId`) or the IMDb links break; don't put a TMDB id on the cards (it
+  renders a wrong /collection/ link); (3) on web, the poster hover play-overlay of a BoxSet card
+  can trigger a harmless "no media source" error (BoxSets are considered playable client-side) —
+  the details page itself hides play/shuffle because nothing in the collection is playable.
 - Release tiles are `ChannelItemType.Folder` (NOT playable media) on purpose: a playable item shows a
   **Play** button that errors (no stream exists). As folders they have no Play button; opening a
   release tile returns a single "↓ Download – mark as favorite" entry, and the actual download is
