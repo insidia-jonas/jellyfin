@@ -18,8 +18,11 @@ namespace Jellyfin.Plugin.TreasureMaps.Channels;
 /// <summary>
 /// Exposes a Treasure-Maps indexer as a browsable Jellyfin channel
 /// (Trending feed and browse-by-genre), with rich movie cards.
+/// Implements <see cref="IDisableMediaSourceDisplay"/> so releases are shown as catalog
+/// cards (no "versions/sources" picker) on TV clients such as Fire TV — you grab them by
+/// marking them as a favorite (heart) rather than pressing play.
 /// </summary>
-public class TreasureMapsChannel : IChannel, ISupportsLatestMedia
+public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMediaSourceDisplay
 {
     private const string GenrePrefix = "genre:";
 
