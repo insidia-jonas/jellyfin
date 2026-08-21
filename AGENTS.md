@@ -123,8 +123,12 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   `DateCreated` on reused channel items.
 - The indexer goes FULLY down at times (whole site 503 "No healthy origin available") and also
   rate-limits. The API client serves expired cache entries as a fallback when a request fails
-  (stale-while-error), so browsing keeps working during outages once caches are warm; category
-  folder tiles may show a child's poster (Jellyfin folder image inheritance) — harmless.
+  (stale-while-error), so browsing keeps working during outages once caches are warm.
+- Category tiles must stay uniform (plain colored tiles): Jellyfin's `FolderImageProvider` used to
+  compose folder images from child posters, making half the category tiles look like movie cards.
+  Channel-sourced folders are excluded from that provider (server patch), and the category folder
+  ids carry a generation prefix (`c2-`, stripped in `GetChannelItems`) that was bumped once to
+  discard the poster-baked entities. If category tiles ever show posters again, bump the prefix.
 - Top-menu ordering is a per-user preference (`OrderedViews`), not sortable server-wide.
   `POST TreasureMaps/Menu/MoveChannelLast` (config-page button "Move Treasure-Maps to the end of
   the menu") rewrites every user's ordered views so the channel comes after the media libraries.
