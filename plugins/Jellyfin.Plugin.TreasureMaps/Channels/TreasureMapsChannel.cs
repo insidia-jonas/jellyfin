@@ -72,7 +72,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             var c = Config;
             return string.Join(
                 '|',
-                "23",
+                "24",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -121,7 +121,12 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
 
             if (string.IsNullOrEmpty(folderId))
             {
-                return await GetRootAsync(cancellationToken).ConfigureAwait(false);
+                return GetRoot();
+            }
+
+            if (string.Equals(folderId, "new", StringComparison.Ordinal))
+            {
+                return await GetRecentlyAddedAsync(cancellationToken).ConfigureAwait(false);
             }
 
             // A title card (GRP) opens into the individual releases behind that movie/show.
@@ -216,44 +221,43 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
     }
 
     /// <summary>
-    /// Builds the channel root: the category folders followed by the most recently added titles
-    /// (mixed movies + TV, one poster card per title), so opening the channel immediately shows
-    /// content instead of a bare folder list.
+    /// Builds the channel root. It contains ONLY category folders on purpose: clients offer many
+    /// sort modes (name, date added, random, ...) and any grid that mixes category folders with
+    /// title cards will scatter the folders between the posters under some of them. The recently
+    /// added titles live behind the "Recently added" folder (and in the home-screen Latest row).
     /// </summary>
-    private async Task<ChannelItemResult> GetRootAsync(CancellationToken cancellationToken)
+    private static ChannelItemResult GetRoot()
     {
-        // Jellyfin sorts a channel folder strictly by (name-derived) SortName, and the title cards
-        // are folders too, so without a marker the category folders would be scattered
-        // alphabetically between the movie posters. The "# " prefix sorts before digits and
-        // letters, so the categories always form one block at the top of the view.
         var items = new List<ChannelItemInfo>
         {
-            Folder("trending", "# Trending", 0),
-            Folder("movies", "# Movies", 1),
-            Folder("tv", "# TV Shows", 2),
-            Folder("movies-de", "# Movies (DE)", 3),
-            Folder("tv-de", "# TV Shows (DE)", 4),
-            Folder("genres", "# Browse by genre", 5),
-            Folder("find", "# Find A\u2013Z", 6)
+            Folder("new", "Recently added", 0),
+            Folder("trending", "Trending", 1),
+            Folder("movies", "Movies", 2),
+            Folder("tv", "TV Shows", 3),
+            Folder("movies-de", "Movies (DE)", 4),
+            Folder("tv-de", "TV Shows (DE)", 5),
+            Folder("genres", "Browse by genre", 6),
+            Folder("find", "Find A\u2013Z", 7)
         };
 
-        try
-        {
-            var moviesTask = _client.SearchMoviesAsync(null, null, null, PageSize, 0, cancellationToken);
-            var tvTask = _client.SearchTvAsync(null, null, PageSize, 0, cancellationToken);
-            var both = await Task.WhenAll(moviesTask, tvTask).ConfigureAwait(false);
+        return Result(items);
+    }
 
-            var releases = (both[0]?.Items ?? Array.Empty<Release>())
-                .Concat(both[1]?.Items ?? Array.Empty<Release>())
-                .ToList();
+    /// <summary>
+    /// Builds the "Recently added" view: the newest movie + TV titles, one poster card per title.
+    /// </summary>
+    private async Task<ChannelItemResult> GetRecentlyAddedAsync(CancellationToken cancellationToken)
+    {
+        var moviesTask = _client.SearchMoviesAsync(null, null, null, PageSize, 0, cancellationToken);
+        var tvTask = _client.SearchTvAsync(null, null, PageSize, 0, cancellationToken);
+        var both = await Task.WhenAll(moviesTask, tvTask).ConfigureAwait(false);
 
-            items.AddRange(BuildGroupCards(releases, "root").Items.Take(RootLatestCount));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to load recently added titles for the channel root");
-        }
+        var releases = (both[0]?.Items ?? Array.Empty<Release>())
+            .Concat(both[1]?.Items ?? Array.Empty<Release>())
+            .ToList();
 
+        var cards = BuildGroupCards(releases, "new");
+        var items = cards.Items.Take(RootLatestCount).ToList();
         return Result(items);
     }
 
