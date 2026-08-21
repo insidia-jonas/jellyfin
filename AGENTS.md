@@ -229,6 +229,20 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   reason is prepended to the card overview ("✨ ..."). Recommendations are cached per user+history
   hash (`ForYouCacheHours`, default 6h) so browsing doesn't burn tokens. `GET TreasureMaps/Ai/Test`
   validates the key with a tiny prompt. Channel query's `UserId` provides per-user personalization.
+- FIRE TV / native clients (the user's PRIMARY device): no injected JS/CSS there — everything
+  must work via standard APIs. The native download flow is **play-to-download**: the grab entry
+  below a release is a playable clip (`grab::<kind>::<guid>::<b64 name>`, type Media/Clip). The
+  channel implements `IRequiresMediaInfoCallback`: starting playback kicks off the SABnzbd grab in
+  the background (shared `GrabService`, session-deduplicated, also used by favorite + API paths)
+  and returns a bundled 6s "Download started ✓" mp4 (embedded resource, extracted to tmp,
+  `MediaProtocol.File`). CRITICAL: the `MediaSourceInfo` must declare `MediaStreams` (h264/aac) or
+  clients hit the transcode/HLS path and fail with a fatal player error.
+- Download status for TV: the channel root has a **Downloads** folder listing the SABnzbd queue
+  (progress/speed/ETA in names+overviews) and recent history (✓/✗). Jellyfin caches channel
+  folders for 3h, so the channel implements `IHasCacheKey` with a 2-minute time bucket — keeps the
+  view fresh while the plugin's in-memory API caches protect the indexer. Folder names on reused
+  ids update because ChannelManager updates container-folder names (and this fork also updates
+  DateCreated).
 - Client script injection (web only): `WebScriptInjector` inserts
   `<script plugin="TreasureMaps" defer src="/TreasureMaps/ClientScript">` into the web client's
   `index.html` at startup (marker-guarded, same pattern as Intro Skipper; served anonymously by
