@@ -191,6 +191,79 @@ public class SabnzbdClient
             ?? new List<string>();
     }
 
+    /// <summary>
+    /// Gets the combined download status: active queue slots (with progress/speed/ETA) and the
+    /// most recent history entries (completed/failed), for the client-side status display.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The overall speed and the download entries.</returns>
+    public async Task<(string? Speed, IReadOnlyList<SabDownloadStatus> Items)> GetDownloadStatusAsync(CancellationToken cancellationToken)
+    {
+        using var client = _httpClientFactory.CreateClient();
+
+        var items = new List<SabDownloadStatus>();
+        string? speed = null;
+
+        var queueUrl = BuildApiUrl(new Dictionary<string, string?> { ["mode"] = "queue" });
+        using (var response = await client.GetAsync(queueUrl, cancellationToken).ConfigureAwait(false))
+        {
+            response.EnsureSuccessStatusCode();
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("queue", out var queue))
+            {
+                speed = queue.TryGetProperty("speed", out var s) ? s.GetString() : null;
+                if (queue.TryGetProperty("slots", out var slots) && slots.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var slot in slots.EnumerateArray())
+                    {
+                        items.Add(new SabDownloadStatus
+                        {
+                            Id = GetString(slot, "nzo_id"),
+                            Name = GetString(slot, "filename"),
+                            Status = GetString(slot, "status") ?? "Downloading",
+                            Percent = double.TryParse(GetString(slot, "percentage"), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var p) ? p : 0,
+                            TimeLeft = GetString(slot, "timeleft"),
+                            SizeMb = GetString(slot, "mb"),
+                            LeftMb = GetString(slot, "mbleft")
+                        });
+                    }
+                }
+            }
+        }
+
+        var historyUrl = BuildApiUrl(new Dictionary<string, string?> { ["mode"] = "history", ["limit"] = "30" });
+        using (var response = await client.GetAsync(historyUrl, cancellationToken).ConfigureAwait(false))
+        {
+            response.EnsureSuccessStatusCode();
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("history", out var history)
+                && history.TryGetProperty("slots", out var slots)
+                && slots.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var slot in slots.EnumerateArray())
+                {
+                    items.Add(new SabDownloadStatus
+                    {
+                        Id = GetString(slot, "nzo_id"),
+                        Name = GetString(slot, "name"),
+                        Status = GetString(slot, "status") ?? "Completed",
+                        Percent = 100,
+                        FailMessage = GetString(slot, "fail_message")
+                    });
+                }
+            }
+        }
+
+        return (speed, items);
+    }
+
+    private static string? GetString(JsonElement element, string property)
+        => element.TryGetProperty(property, out var value)
+            ? value.ValueKind == JsonValueKind.String ? value.GetString() : value.ToString()
+            : null;
+
     private static string BuildApiUrl(Dictionary<string, string?> parameters)
     {
         var baseUrl = Config.SabnzbdUrl.TrimEnd('/') + "/api";
@@ -209,6 +282,36 @@ public class SabnzbdClient
     {
         var invalid = System.IO.Path.GetInvalidFileNameChars();
         return new string(name.Select(c => invalid.Contains(c) ? '_' : c).ToArray());
+    }
+
+    /// <summary>
+    /// One SABnzbd download entry (queue or history) for the status display.
+    /// </summary>
+    public sealed class SabDownloadStatus
+    {
+        /// <summary>Gets or sets the SABnzbd job id (nzo id).</summary>
+        public string? Id { get; set; }
+
+        /// <summary>Gets or sets the job name.</summary>
+        public string? Name { get; set; }
+
+        /// <summary>Gets or sets the status (Downloading, Queued, Completed, Failed, ...).</summary>
+        public string? Status { get; set; }
+
+        /// <summary>Gets or sets the progress percentage (0-100).</summary>
+        public double Percent { get; set; }
+
+        /// <summary>Gets or sets the remaining time (HH:MM:SS).</summary>
+        public string? TimeLeft { get; set; }
+
+        /// <summary>Gets or sets the total size in MB.</summary>
+        public string? SizeMb { get; set; }
+
+        /// <summary>Gets or sets the remaining size in MB.</summary>
+        public string? LeftMb { get; set; }
+
+        /// <summary>Gets or sets the failure message, if any.</summary>
+        public string? FailMessage { get; set; }
     }
 
     private sealed class SabVersionResponse

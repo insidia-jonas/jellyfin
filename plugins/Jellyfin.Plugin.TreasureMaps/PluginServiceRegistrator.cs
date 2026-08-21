@@ -22,5 +22,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<IChannel, TreasureMapsChannel>();
         serviceCollection.AddSingleton<MediaBrowser.Controller.Subtitles.ISubtitleProvider, Subtitles.OpenSubtitlesProvider>();
         serviceCollection.AddHostedService<GrabOnFavoriteService>();
+        serviceCollection.AddHostedService<WebScriptInjector>();
+        serviceCollection.AddHostedService<PeopleImageService>();
     }
 }

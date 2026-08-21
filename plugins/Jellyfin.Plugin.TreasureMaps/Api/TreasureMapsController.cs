@@ -397,6 +397,93 @@ public class TreasureMapsController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Serves the client-side enhancement script (release list with download buttons and live
+    /// SABnzbd status). Anonymous because it is referenced from index.html before login; it
+    /// contains no secrets, and every API call it makes runs with the logged-in user's token.
+    /// </summary>
+    /// <returns>The JavaScript file.</returns>
+    [HttpGet("ClientScript")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult ClientScript()
+    {
+        var stream = GetType().Assembly.GetManifestResourceStream("Jellyfin.Plugin.TreasureMaps.Web.treasuremaps.js");
+        if (stream is null)
+        {
+            return NotFound();
+        }
+
+        return File(stream, "application/javascript");
+    }
+
+    /// <summary>
+    /// Gets the current SABnzbd download status (active queue with progress/speed/ETA plus the
+    /// most recent completed/failed jobs), used by the client script for live status display.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The download status.</returns>
+    [HttpGet("Downloads/Status")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> DownloadStatus(CancellationToken cancellationToken)
+    {
+        if (!SabnzbdClient.IsConfigured)
+        {
+            return Ok(new { ok = false, message = "SABnzbd is not configured.", items = Array.Empty<object>() });
+        }
+
+        try
+        {
+            var (speed, items) = await _sabnzbd.GetDownloadStatusAsync(cancellationToken).ConfigureAwait(false);
+            return Ok(new
+            {
+                ok = true,
+                speed,
+                items = items.Select(i => new
+                {
+                    id = i.Id,
+                    name = i.Name,
+                    status = i.Status,
+                    percent = i.Percent,
+                    timeLeft = i.TimeLeft,
+                    sizeMb = i.SizeMb,
+                    leftMb = i.LeftMb,
+                    failMessage = i.FailMessage
+                })
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read the SABnzbd download status");
+            return Ok(new { ok = false, message = ex.Message, items = Array.Empty<object>() });
+        }
+    }
+
+    /// <summary>
+    /// Queues a metadata+image refresh for every person that has no primary image yet, so actor
+    /// photos (from TMDB, matched by name) appear on the details pages.
+    /// </summary>
+    /// <param name="providerManager">The provider manager.</param>
+    /// <param name="fileSystem">The file system.</param>
+    /// <returns>The number of queued refreshes.</returns>
+    [HttpPost("People/RefreshImages")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult RefreshPeopleImages(
+        [FromServices] MediaBrowser.Controller.Providers.IProviderManager providerManager,
+        [FromServices] MediaBrowser.Model.IO.IFileSystem fileSystem)
+    {
+        try
+        {
+            var queued = PeopleImageService.QueueMissingPeopleImages(_libraryManager, providerManager, fileSystem, _logger, 500);
+            return Ok(new { ok = true, queued });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to queue people image refreshes");
+            return Ok(new { ok = false, message = ex.Message });
+        }
+    }
+
     private const string ThemeBegin = "/* TREASURE-GLASS-BEGIN */";
     private const string ThemeEnd = "/* TREASURE-GLASS-END */";
 
