@@ -1006,27 +1006,16 @@ namespace Jellyfin.LiveTv.Channels
 
             if (isNew)
             {
-                item.Name = info.Name;
-                item.Genres = info.Genres.ToArray();
-                item.Studios = info.Studios.ToArray();
-                item.CommunityRating = info.CommunityRating;
-                item.Overview = info.Overview;
-                item.IndexNumber = info.IndexNumber;
-                item.ParentIndexNumber = info.ParentIndexNumber;
-                item.PremiereDate = info.PremiereDate;
-                item.ProductionYear = info.ProductionYear;
-                item.ProviderIds = info.ProviderIds;
-                item.OfficialRating = info.OfficialRating;
+                ApplyChannelItemMetadata(item, info, isNew: true);
                 item.DateCreated = info.DateCreated ?? DateTime.UtcNow;
-                item.Tags = info.Tags.ToArray();
-                item.OriginalTitle = info.OriginalTitle;
             }
-            else if (info.Type == ChannelItemType.Folder && info.FolderType == ChannelFolderType.Container)
+            else
             {
-                // At least update names of container folders
-                if (item.Name != info.Name)
+                // Channel items use static external ids, so they are almost never "new" again.
+                // TV clients (Fire TV) keep showing the first cached name/overview/poster unless
+                // we copy provider-supplied metadata onto the reused entity.
+                if (ApplyChannelItemMetadata(item, info, isNew: false))
                 {
-                    item.Name = info.Name;
                     forceUpdate = true;
                 }
             }
@@ -1150,15 +1139,15 @@ namespace Jellyfin.LiveTv.Channels
             if (isNew)
             {
                 _libraryManager.CreateItem(item, parentFolder);
-
-                if (info.People is not null && info.People.Count > 0)
-                {
-                    await _libraryManager.UpdatePeopleAsync(item, info.People, cancellationToken).ConfigureAwait(false);
-                }
             }
             else if (forceUpdate)
             {
                 await item.UpdateToRepositoryAsync(ItemUpdateType.None, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (info.People is not null && info.People.Count > 0 && (isNew || forceUpdate || item is MediaBrowser.Controller.Entities.Movies.BoxSet))
+            {
+                await _libraryManager.UpdatePeopleAsync(item, info.People, cancellationToken).ConfigureAwait(false);
             }
 
             if ((isNew || forceUpdate) && info.Type == ChannelItemType.Media)
@@ -1183,6 +1172,104 @@ namespace Jellyfin.LiveTv.Channels
             }
 
             return item;
+        }
+
+        private static bool ApplyChannelItemMetadata(BaseItem item, ChannelItemInfo info, bool isNew)
+        {
+            var changed = isNew;
+
+            if (isNew || !string.Equals(item.Name, info.Name, StringComparison.Ordinal))
+            {
+                item.Name = info.Name;
+                changed = true;
+            }
+
+            if (isNew || !string.Equals(item.Overview, info.Overview, StringComparison.Ordinal))
+            {
+                item.Overview = info.Overview;
+                changed = true;
+            }
+
+            if (isNew || item.CommunityRating != info.CommunityRating)
+            {
+                item.CommunityRating = info.CommunityRating;
+                changed = true;
+            }
+
+            if (isNew || item.ProductionYear != info.ProductionYear)
+            {
+                item.ProductionYear = info.ProductionYear;
+                changed = true;
+            }
+
+            if (isNew || item.PremiereDate != info.PremiereDate)
+            {
+                item.PremiereDate = info.PremiereDate;
+                changed = true;
+            }
+
+            if (isNew || item.IndexNumber != info.IndexNumber)
+            {
+                item.IndexNumber = info.IndexNumber;
+                changed = true;
+            }
+
+            if (isNew || item.ParentIndexNumber != info.ParentIndexNumber)
+            {
+                item.ParentIndexNumber = info.ParentIndexNumber;
+                changed = true;
+            }
+
+            if (isNew || !string.Equals(item.OfficialRating, info.OfficialRating, StringComparison.Ordinal))
+            {
+                item.OfficialRating = info.OfficialRating;
+                changed = true;
+            }
+
+            if (isNew || !string.Equals(item.OriginalTitle, info.OriginalTitle, StringComparison.Ordinal))
+            {
+                item.OriginalTitle = info.OriginalTitle;
+                changed = true;
+            }
+
+            if (isNew || !(item.Genres ?? Array.Empty<string>()).SequenceEqual(info.Genres))
+            {
+                item.Genres = info.Genres.ToArray();
+                changed = true;
+            }
+
+            if (isNew || !(item.Tags ?? Array.Empty<string>()).SequenceEqual(info.Tags))
+            {
+                item.Tags = info.Tags.ToArray();
+                changed = true;
+            }
+
+            if (isNew)
+            {
+                item.Studios = info.Studios.ToArray();
+                item.ProviderIds = info.ProviderIds;
+            }
+            else
+            {
+                foreach (var pair in info.ProviderIds)
+                {
+                    if (!item.ProviderIds.TryGetValue(pair.Key, out var existing)
+                        || !string.Equals(existing, pair.Value, StringComparison.Ordinal))
+                    {
+                        item.SetProviderId(pair.Key, pair.Value);
+                        changed = true;
+                    }
+                }
+            }
+
+            if (!string.IsNullOrEmpty(info.SortName)
+                && !string.Equals(item.ForcedSortName, info.SortName, StringComparison.Ordinal))
+            {
+                item.ForcedSortName = info.SortName;
+                changed = true;
+            }
+
+            return changed;
         }
 
         internal IChannel GetChannelProvider(Channel channel)

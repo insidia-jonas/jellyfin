@@ -34,7 +34,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
     // Generation prefix for category-folder ids. Bumping it (c2-, c3-, ...) forces Jellyfin to
     // create fresh folder entities — needed once because the old entities had collage images
     // (child posters) baked in by the folder image provider, making categories look like movies.
-    private const string FolderIdPrefix = "c2-";
+    private const string FolderIdPrefix = "c3-";
     private const string GroupPrefix = "GRP::";
     private const string ReleasePrefix = "REL::";
     private const string GrabPrefix = "grab::";
@@ -102,7 +102,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             var c = Config;
             return string.Join(
                 '|',
-                "30",
+                "31",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -136,11 +136,24 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
     public bool IsEnabledFor(string userId) => TreasureMapsApiClient.IsConfigured;
 
     /// <inheritdoc />
-    public IEnumerable<ImageType> GetSupportedChannelImages() => Array.Empty<ImageType>();
+    public IEnumerable<ImageType> GetSupportedChannelImages() => new[] { ImageType.Primary, ImageType.Thumb };
 
     /// <inheritdoc />
     public Task<DynamicImageResponse> GetChannelImage(ImageType type, CancellationToken cancellationToken)
-        => Task.FromResult(new DynamicImageResponse { HasImage = false });
+    {
+        var path = ChannelArtwork.GetPosterPath("channel", "Treasure-Maps");
+        if (string.IsNullOrEmpty(path))
+        {
+            return Task.FromResult(new DynamicImageResponse { HasImage = false });
+        }
+
+        return Task.FromResult(new DynamicImageResponse
+        {
+            HasImage = true,
+            Path = path,
+            Protocol = MediaBrowser.Model.MediaInfo.MediaProtocol.File
+        });
+    }
 
     /// <inheritdoc />
     public async Task<ChannelItemResult> GetChannelItems(InternalChannelItemQuery query, CancellationToken cancellationToken)
@@ -779,10 +792,14 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             {
                 Id = string.Join(Sep, GroupPrefix.TrimEnd(':'), scopeHash, marker, group.Kind, Encode(group.Key), Encode(group.Title), Encode(group.Cover ?? string.Empty)),
                 Name = group.Title,
+                OriginalTitle = group.Title,
+                SortName = ChannelPresentation.TitleSortName(group.Posted, group.Title),
                 Type = ChannelItemType.Folder,
                 FolderType = ChannelFolderType.BoxSet,
+                ContentType = string.Equals(group.Kind, "tv", StringComparison.Ordinal) ? ChannelMediaContentType.TvExtra : ChannelMediaContentType.Movie,
                 ImageUrl = group.Cover,
                 ProductionYear = group.Year,
+                PremiereDate = group.Year is >= 1900 and <= 2100 ? new DateTime(group.Year.Value, 1, 1) : null,
                 CommunityRating = group.Rating.HasValue ? (float)group.Rating.Value : null,
                 // Real posted date so the client's "Date added" sort shows the newest titles
                 // first (and never above the future-pinned category folders).
@@ -959,9 +976,12 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
     {
         Id = FolderIdPrefix + id,
         Name = name,
+        SortName = ChannelPresentation.FolderSortName(order, name),
         Type = ChannelItemType.Folder,
         FolderType = ChannelFolderType.Container,
-        DateCreated = _folderPinBase.AddMinutes(-order)
+        DateCreated = _folderPinBase.AddMinutes(-order),
+        ImageUrl = ChannelArtwork.GetPosterPath(id, name),
+        Overview = name
     };
 
     /// <inheritdoc />

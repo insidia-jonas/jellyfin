@@ -128,7 +128,12 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   many sort modes (name, date added, random, release date, ...) and ANY grid that mixes category
   folders with title cards will scatter the folders between the posters under some of them (name
   prefixes only win the name sort, DateCreated pinning only the date sort, random defeats both).
-  The recent titles live behind `Recently added`; the home screen keeps its Latest row. Folders
+  Fire TV looks empty/unsorted without extra work: the Android TV client cannot run
+  `treasuremaps.js`, category folders used to have no `ImageUrl` (plain tiles), and ChannelManager
+  only copied overview/rating/year/people/provider ids when the item was **new** — reused BoxSets
+  stayed blank. This fork now applies that metadata on reuse, folders get generated posters, the
+  channel has a Primary image, and `ChannelItemInfo.SortName` is written to `ForcedSortName`
+  (folders `00-`, `01-`…; titles inverted-date so name sort is newest-first). Folders
   carry far-future staggered `DateCreated` (2099 minus index minutes) and cards/tiles the real
   `posted_at`, so "Date added" sorts sensibly. GOTCHA: category folders have static external ids,
   so their entities are reused forever — ChannelManager was patched (this fork) to update
@@ -139,8 +144,10 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
 - Category tiles must stay uniform (plain colored tiles): Jellyfin's `FolderImageProvider` used to
   compose folder images from child posters, making half the category tiles look like movie cards.
   Channel-sourced folders are excluded from that provider (server patch), and the category folder
-  ids carry a generation prefix (`c2-`, stripped in `GetChannelItems`) that was bumped once to
-  discard the poster-baked entities. If category tiles ever show posters again, bump the prefix.
+  ids carry a generation prefix (`c3-`, stripped in `GetChannelItems`) that is bumped when the
+  folder entities must be recreated (old collage images, then missing images). Category folders
+  now set `ImageUrl` to a generated poster (`ChannelArtwork`) so Fire TV is not a grid of empty
+  blue tiles; the channel itself implements `GetChannelImage`. If tiles look stale, bump the prefix.
 - Top-menu ordering is a per-user preference (`OrderedViews`), not sortable server-wide.
   `POST TreasureMaps/Menu/MoveChannelLast` (config-page button "Move Treasure-Maps to the end of
   the menu") rewrites every user's ordered views so the channel comes after the media libraries.

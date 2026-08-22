@@ -28,6 +28,8 @@ namespace MediaBrowser.Controller.Channels
 
         public string Name { get; set; }
 
+        public string SortName { get; set; }
+
         public string SeriesName { get; set; }
 
         public string Id { get; set; }
