@@ -84,11 +84,18 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   then IMDb id / query, ranked by hash-match then download count. Search needs the OpenSubtitles API
   key; downloading needs the account login (username/password). Config + "test" button on the plugin
   config page.
-- Pi deployment: `scripts/pi/build-jellyfin12.sh` builds this repo's Jellyfin 12 (.NET 10) server +
-  the plugin on aarch64/Debian. A fresh Jellyfin 12 DB initialises fine from zero (an earlier
-  __EFMigrationsHistory crash was a corrupted partial data-dir, not a real bug); do not wipe a
-  data-dir partially. The web client (jellyfin-web) is arch-independent; the script can build it
-  (Node >= 24) or take a prebuilt `dist` via `WEB_DIST`.
+- Pi deployment: `scripts/pi/full-redeploy.sh` is the one-shot for a Raspberry Pi — it stops
+  `jellyfin` / `jellyfin12`, deletes every known old Treasure-Maps plugin dir and channel cache,
+  checks out `BRANCH` (default `cursor/set-up-dev-environment-0947`), publishes Jellyfin 12,
+  installs the plugin + `meta.json`, builds or reuses jellyfin-web, writes
+  `/etc/systemd/system/jellyfin12.service`, and starts it. Users/libraries/plugin config in
+  `DATA_DIR` are kept unless you pass `--wipe-data`. `--remove-apt` purges the Debian packages.
+  `--skip-web` / `WEB_DIST=` avoid the heavy webpack build on a small Pi. `--remove-only` stops
+  after cleanup. `--dry-run` prints actions. `SKIP_STOP=1` skips killing running processes
+  (for tests). `scripts/pi/build-jellyfin12.sh` is the older
+  build-only helper (no uninstall, no systemd). A fresh Jellyfin 12 DB initialises fine from
+  zero (an earlier __EFMigrationsHistory crash was a corrupted partial data-dir, not a real
+  bug); do not wipe a data-dir partially.
 - SABnzbd self-configuration: the config page's "Set up SABnzbd categories" button
   (`POST TreasureMaps/Sabnzbd/Setup`) creates/updates the `movies` and `tv` categories with their
   download folders in SABnzbd via `mode=set_config&section=categories` (`SabnzbdMovieFolder` /

@@ -7,6 +7,10 @@
 #   chmod +x scripts/pi/build-jellyfin12.sh
 #   ./scripts/pi/build-jellyfin12.sh
 #
+# To replace an older install (stop services, delete the old plugin/channel cache,
+# rebuild, install the systemd unit and start), use scripts/pi/full-redeploy.sh
+# instead.
+#
 # Options (environment variables):
 #   OUT_DIR    Output directory              (default: $HOME/jellyfin12)
 #   DATA_DIR   Jellyfin data directory       (default: $OUT_DIR/data)
