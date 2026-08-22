@@ -264,7 +264,7 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   script passes a `poster` param). Registry is per-session: jobs grabbed before a server restart
   fall back to text tiles until they age out of the SABnzbd history.
 - Client script injection (web only): `WebScriptInjector` inserts
-  `<script plugin="TreasureMaps" defer src="/TreasureMaps/ClientScript">` into the web client's
+  `<script plugin="TreasureMaps" defer src="/TreasureMaps/ClientScript?v=2">` into the web client's
   `index.html` at startup (marker-guarded, same pattern as Intro Skipper; served anonymously by
   `GET TreasureMaps/ClientScript` from `Web/treasuremaps.js`). Rebuilding jellyfin-web replaces
   index.html — the injection re-applies on the next server start. The script: (1) replaces the
@@ -273,7 +273,10 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   `GET TreasureMaps/Downloads/Status` (SABnzbd queue+history: percent/speed/ETA/completed/failed)
   every 3s and shows per-row live status, matching jobs by nzo id (from the grab response) with a
   normalized-name fallback, (3) adds a Download button on release tile pages, (4) hides hover play
-  overlays on channel pages.
+  overlays on channel pages. Release rows wrap on narrow viewports (`overflow-wrap:anywhere`,
+  stacked name + Download below 700px) so phones do not ellipsis the quality label. Bump `?v=`
+  on the script src when changing the JS so phones do not keep a cached copy; the injector
+  replaces a stale tag.
 - Actor photos: channel items add People by NAME only and nothing refreshes them (the
   "Refresh People" task only validates/deletes). `PeopleImageService` queues full metadata+image
   refreshes for imageless persons every 12h (TMDB resolves them by name search);

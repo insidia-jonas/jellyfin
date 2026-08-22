@@ -20,7 +20,8 @@ namespace Jellyfin.Plugin.TreasureMaps;
 /// </summary>
 public class WebScriptInjector : IHostedService
 {
-    private const string ScriptTag = "<script plugin=\"TreasureMaps\" defer src=\"/TreasureMaps/ClientScript\"></script>";
+    private const string ScriptMarker = "plugin=\"TreasureMaps\"";
+    private const string ScriptTag = "<script plugin=\"TreasureMaps\" defer src=\"/TreasureMaps/ClientScript?v=2\"></script>";
 
     private readonly IApplicationPaths _appPaths;
     private readonly ILogger<WebScriptInjector> _logger;
@@ -49,19 +50,18 @@ public class WebScriptInjector : IHostedService
             }
 
             var html = await File.ReadAllTextAsync(indexPath, cancellationToken).ConfigureAwait(false);
-            if (html.Contains("plugin=\"TreasureMaps\"", StringComparison.Ordinal))
+            var updated = ApplyScriptTag(html);
+            if (updated is null)
             {
                 return;
             }
 
-            var closing = html.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);
-            if (closing < 0)
+            if (string.Equals(updated, html, StringComparison.Ordinal))
             {
-                _logger.LogWarning("Could not find </body> in index.html; client script not injected");
                 return;
             }
 
-            await File.WriteAllTextAsync(indexPath, html[..closing] + ScriptTag + html[closing..], cancellationToken).ConfigureAwait(false);
+            await File.WriteAllTextAsync(indexPath, updated, cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("Injected the Treasure-Maps client script into {Path}", indexPath);
         }
         catch (Exception ex)
@@ -72,6 +72,37 @@ public class WebScriptInjector : IHostedService
 
     /// <inheritdoc />
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <summary>
+    /// Inserts or replaces the Treasure-Maps script tag. Returns the original HTML when
+    /// <c>&lt;/body&gt;</c> is missing, or the already-current HTML when the tag is up to date.
+    /// </summary>
+    /// <param name="html">The index.html contents.</param>
+    /// <returns>The updated HTML, or null when it cannot be patched.</returns>
+    public static string? ApplyScriptTag(string html)
+    {
+        if (html.Contains(ScriptTag, StringComparison.Ordinal))
+        {
+            return html;
+        }
+
+        var existing = System.Text.RegularExpressions.Regex.Match(
+            html,
+            "<script[^>]*" + ScriptMarker + "[^>]*>\\s*</script>",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (existing.Success)
+        {
+            return html[..existing.Index] + ScriptTag + html[(existing.Index + existing.Length)..];
+        }
+
+        var closing = html.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);
+        if (closing < 0)
+        {
+            return null;
+        }
+
+        return html[..closing] + ScriptTag + html[closing..];
+    }
 }
 
 /// <summary>

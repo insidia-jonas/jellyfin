@@ -484,6 +484,7 @@ public class TreasureMapsController : ControllerBase
             return NotFound();
         }
 
+        Response.Headers.CacheControl = "no-cache";
         return File(stream, "application/javascript");
     }
 

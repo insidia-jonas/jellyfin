@@ -12,15 +12,26 @@
     var style = document.createElement('style');
     style.textContent =
         '.tmChannelPage .cardOverlayFab-primary{display:none!important}' +
-        '#tmReleases{margin:1.2em 0}' +
-        '#tmReleases .tmRelRow{display:flex;align-items:center;gap:.9em;padding:.55em .9em;margin:.3em 0;' +
-        'border-radius:12px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1)}' +
+        '#tmReleases{margin:1.2em 0;max-width:100%;box-sizing:border-box}' +
+        '#tmReleases .tmRelRow{display:flex;flex-wrap:wrap;align-items:flex-start;gap:.55em .75em;' +
+        'padding:.65em .8em;margin:.35em 0;border-radius:12px;background:rgba(255,255,255,.07);' +
+        'border:1px solid rgba(255,255,255,.1);box-sizing:border-box;max-width:100%}' +
         '#tmReleases .tmRelRow:hover{background:rgba(255,255,255,.12)}' +
-        '#tmReleases .tmRelName{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-        '#tmReleases .tmRelStatus{flex:0 0 auto;font-size:.9em;opacity:.9;min-width:11em;text-align:right}' +
+        '#tmReleases .tmRelName{flex:1 1 12rem;min-width:0;white-space:normal;overflow:visible;' +
+        'overflow-wrap:anywhere;word-break:break-word;line-height:1.35}' +
+        '#tmReleases .tmRelMeta{display:flex;flex:0 1 auto;flex-wrap:wrap;align-items:center;gap:.55em;' +
+        'margin-left:auto;max-width:100%}' +
+        '#tmReleases .tmRelStatus{flex:1 1 auto;font-size:.9em;opacity:.9;min-width:0;text-align:right}' +
+        '#tmReleases .tmRelStatus:empty{display:none}' +
         '#tmReleases .tmDl{flex:0 0 auto;border:none;border-radius:999px;padding:.45em 1.1em;cursor:pointer;' +
-        'background:#0a84ff;color:#fff;font-weight:600;font-family:inherit}' +
+        'background:#0a84ff;color:#fff;font-weight:600;font-family:inherit;white-space:nowrap}' +
         '#tmReleases .tmDl:disabled{background:rgba(255,255,255,.18);cursor:default}' +
+        '@media (max-width:700px){' +
+        '#tmReleases .tmRelRow{flex-direction:column;align-items:stretch}' +
+        '#tmReleases .tmRelName{flex:1 1 auto}' +
+        '#tmReleases .tmRelMeta{margin-left:0;width:100%;justify-content:space-between}' +
+        '#tmReleases .tmRelStatus{text-align:left}' +
+        '}' +
         '.tmDetailDl{margin-left:.4em}';
     document.head.appendChild(style);
 
@@ -145,9 +156,13 @@
             grab(release.ProviderIds.TreasureMaps, release.ProviderIds.TreasureMapsKind || 'movie', release.Name, btn, status, row, release.Id, release.ImageTags && release.ImageTags.Primary);
         });
 
+        var meta = document.createElement('div');
+        meta.className = 'tmRelMeta';
+        meta.appendChild(status);
+        meta.appendChild(btn);
+
         row.appendChild(name);
-        row.appendChild(status);
-        row.appendChild(btn);
+        row.appendChild(meta);
         return row;
     }
 
