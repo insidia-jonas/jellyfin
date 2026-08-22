@@ -23,7 +23,13 @@ class StreamResolverTest {
                     "SupportsDirectPlay": true,
                     "SupportsDirectStream": true,
                     "DirectStreamUrl": "/Videos/movie-1/stream.mkv?static=true",
-                    "TranscodingUrl": "/videos/movie-1/master.m3u8"
+                    "TranscodingUrl": "/videos/movie-1/master.m3u8",
+                    "DefaultAudioStreamIndex": 1,
+                    "MediaStreams": [
+                      {"Index":0,"Type":"Video","Codec":"hevc"},
+                      {"Index":1,"Type":"Audio","Language":"eng","DisplayTitle":"English","IsDefault":true},
+                      {"Index":2,"Type":"Subtitle","Language":"ger","DisplayTitle":"German","DeliveryMethod":"External","DeliveryUrl":"/Videos/movie-1/source-1/Subtitles/2/Stream.vtt"}
+                    ]
                   }]
                 }
             """.trimIndent()
@@ -55,6 +61,10 @@ class StreamResolverTest {
             assertTrue(resolved.url.contains("api_key=secret-token"))
             assertTrue(capturedBody.contains("\"EnableDirectPlay\":true"))
             assertTrue(capturedBody.contains("DeviceProfile"))
+            assertEquals(1, resolved.audioTracks.size)
+            assertEquals(1, resolved.subtitleTracks.size)
+            assertEquals("German", resolved.subtitleTracks[0].displayTitle)
+            assertEquals(1, resolved.selectedAudioIndex)
         } finally {
             server.stop(0)
         }

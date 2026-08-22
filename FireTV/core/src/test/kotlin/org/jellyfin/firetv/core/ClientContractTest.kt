@@ -42,6 +42,16 @@ class DownloadRequestsTest {
     }
 
     @Test
+    fun `reads access token from a wrapped download envelope`() {
+        val parsed = DownloadRequests.parseDetailed(
+            """{"accessToken":"tok","files":[{"url":"http://s/Items/1/Download","filename":"Movie.mkv","title":"Movie"}]}""",
+        )
+        assertEquals("tok", parsed.accessToken)
+        assertEquals(1, parsed.files.size)
+        assertEquals("Movie.mkv", parsed.files[0].filename)
+    }
+
+    @Test
     fun `rejects non http urls and strips path traversal`() {
         assertTrue(DownloadRequests.parse("""{"url":"file:///etc/passwd"}""").isEmpty())
         assertEquals("movie.mkv", DownloadRequests.safeFilename("../../movie.mkv"))
@@ -88,5 +98,14 @@ class ArtworkUrlTest {
     fun `leaves already small images alone`() {
         val original = "http://s:8096/Items/1/Images/Primary?maxWidth=400"
         assertFalse(ArtworkUrl.shouldDownscale(original))
+    }
+
+    @Test
+    fun `caps backdrops higher than posters`() {
+        val original = "http://s:8096/Items/1/Images/Backdrop?maxWidth=3840"
+        assertTrue(ArtworkUrl.shouldDownscale(original))
+        val resized = ArtworkUrl.downscale(original)
+        assertTrue(resized.contains("maxWidth=1280"))
+        assertFalse(resized.contains("maxWidth=3840"))
     }
 }

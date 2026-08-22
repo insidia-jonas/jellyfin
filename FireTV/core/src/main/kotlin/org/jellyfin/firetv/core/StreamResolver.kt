@@ -1,14 +1,5 @@
 package org.jellyfin.firetv.core
 
-import java.net.HttpURLConnection
-import java.net.URL
-import java.security.SecureRandom
-import java.security.cert.X509Certificate
-import javax.net.ssl.HostnameVerifier
-import javax.net.ssl.HttpsURLConnection
-import javax.net.ssl.SSLContext
-import javax.net.ssl.X509TrustManager
-
 data class ResolvedPlayback(
     val url: String,
     val title: String,
@@ -24,6 +15,10 @@ data class ResolvedPlayback(
     val deviceName: String,
     val appName: String,
     val appVersion: String,
+    val audioTracks: List<MediaTrack> = emptyList(),
+    val subtitleTracks: List<MediaTrack> = emptyList(),
+    val selectedAudioIndex: Int? = null,
+    val selectedSubtitleIndex: Int? = null,
 )
 
 /**
@@ -31,7 +26,12 @@ data class ResolvedPlayback(
  * never hands ExoPlayer a server filesystem path or an unauthenticated URL.
  */
 object StreamResolver {
-    fun resolve(payload: String, ignoreSslErrors: Boolean): ResolvedPlayback {
+    fun resolve(
+        payload: String,
+        ignoreSslErrors: Boolean,
+        audioStreamIndex: Int? = null,
+        subtitleStreamIndex: Int? = null,
+    ): ResolvedPlayback {
         val itemId = PlaybackPayload.itemId(payload) ?: error("No items to play")
         val title = PlaybackPayload.itemName(payload)
         val server = PlaybackPayload.serverAddress(payload) ?: error("Missing server address")
@@ -44,11 +44,25 @@ object StreamResolver {
         val deviceName = jsonStringField(payload, "deviceName")?.ifBlank { null } ?: "Fire TV"
         val appName = jsonStringField(payload, "appName")?.ifBlank { null } ?: FireTvClient.APP_NAME
         val appVersion = jsonStringField(payload, "appVersion")?.ifBlank { null } ?: FireTvClient.APP_VERSION
+        val audioIndex = audioStreamIndex ?: jsonLongField(payload, "audioStreamIndex")?.toInt()
+        val subtitleIndex = subtitleStreamIndex ?: jsonLongField(payload, "subtitleStreamIndex")?.toInt()
 
-        val body = buildPlaybackInfoBody(payload, userId, startTicks, mediaSourceId)
+        val body = buildPlaybackInfoBody(userId, startTicks, mediaSourceId, audioIndex, subtitleIndex)
         val infoUrl = "$server/Items/$itemId/PlaybackInfo?userId=$userId"
-        val response = postJson(infoUrl, body, payload, ignoreSslErrors)
-        val sources = jsonArrayObjects(response, "MediaSources")
+        val response = JellyfinHttp.post(
+            url = infoUrl,
+            body = body,
+            accessToken = token,
+            ignoreSslErrors = ignoreSslErrors,
+            deviceId = deviceId,
+            deviceName = deviceName,
+            appName = appName,
+            appVersion = appVersion,
+        )
+        require(response.code in 200..299) {
+            "PlaybackInfo failed HTTP ${response.code} ${response.body.take(240)}"
+        }
+        val sources = jsonArrayObjects(response.body, "MediaSources")
         require(sources.isNotEmpty()) { "Server returned no media sources" }
         val source = pickSource(sources, mediaSourceId)
         val urls = MediaSourceUrls(
@@ -65,12 +79,19 @@ object StreamResolver {
             !urls.transcodingUrl.isNullOrBlank() && playUrl.contains(urls.transcodingUrl!!) -> "Transcode"
             else -> "DirectStream"
         }
+        val tracks = MediaTracks.fromMediaSource(source)
+        val defaultAudio = audioIndex
+            ?: jsonLongField(source, "DefaultAudioStreamIndex")?.toInt()
+            ?: MediaTracks.audio(tracks).firstOrNull { it.isDefault }?.index
+            ?: MediaTracks.audio(tracks).firstOrNull()?.index
+        val defaultSubtitle = subtitleIndex
+            ?: jsonLongField(source, "DefaultSubtitleStreamIndex")?.toInt()
         return ResolvedPlayback(
             url = authed,
             title = title,
             itemId = itemId,
             mediaSourceId = jsonStringField(source, "Id") ?: mediaSourceId,
-            playSessionId = jsonStringField(response, "PlaySessionId"),
+            playSessionId = jsonStringField(response.body, "PlaySessionId"),
             startPositionMs = startTicks / 10_000L,
             playMethod = playMethod,
             serverAddress = server,
@@ -80,6 +101,10 @@ object StreamResolver {
             deviceName = deviceName,
             appName = appName,
             appVersion = appVersion,
+            audioTracks = MediaTracks.audio(tracks),
+            subtitleTracks = MediaTracks.subtitles(tracks),
+            selectedAudioIndex = defaultAudio,
+            selectedSubtitleIndex = defaultSubtitle,
         )
     }
 
@@ -91,10 +116,11 @@ object StreamResolver {
     }
 
     private fun buildPlaybackInfoBody(
-        payload: String,
         userId: String,
         startTicks: Long,
         mediaSourceId: String?,
+        audioStreamIndex: Int?,
+        subtitleStreamIndex: Int?,
     ): String {
         return buildString {
             append('{')
@@ -105,10 +131,10 @@ object StreamResolver {
             append("\"EnableDirectPlay\":true,")
             append("\"EnableDirectStream\":true,")
             append("\"EnableTranscoding\":true,")
-            jsonLongField(payload, "audioStreamIndex")?.let {
+            audioStreamIndex?.let {
                 append("\"AudioStreamIndex\":").append(it).append(',')
             }
-            jsonLongField(payload, "subtitleStreamIndex")?.let {
+            subtitleStreamIndex?.let {
                 append("\"SubtitleStreamIndex\":").append(it).append(',')
             }
             if (!mediaSourceId.isNullOrBlank()) {
@@ -117,53 +143,6 @@ object StreamResolver {
             append("\"DeviceProfile\":").append(DEVICE_PROFILE)
             append('}')
         }
-    }
-
-    private fun postJson(url: String, json: String, auth: String, ignoreSslErrors: Boolean): String {
-        val connection = URL(url).openConnection() as HttpURLConnection
-        connection.connectTimeout = 12_000
-        connection.readTimeout = 20_000
-        connection.requestMethod = "POST"
-        connection.doOutput = true
-        connection.setRequestProperty("Content-Type", "application/json")
-        connection.setRequestProperty("Accept", "application/json")
-        connection.setRequestProperty("Authorization", authorization(auth))
-        val token = PlaybackPayload.accessToken(auth)
-        if (token.isNotBlank()) {
-            connection.setRequestProperty("X-Emby-Token", token)
-        }
-        if (ignoreSslErrors && connection is HttpsURLConnection) {
-            trustAll(connection)
-        }
-        connection.outputStream.use { it.write(json.toByteArray(Charsets.UTF_8)) }
-        val code = connection.responseCode
-        val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-        val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-        connection.disconnect()
-        require(code in 200..299) { "PlaybackInfo failed HTTP $code ${body.take(240)}" }
-        return body
-    }
-
-    private fun authorization(auth: String): String {
-        val token = PlaybackPayload.accessToken(auth)
-        val tokenPart = if (token.isNotBlank()) ", Token=\"$token\"" else ""
-        val appName = jsonStringField(auth, "appName") ?: FireTvClient.APP_NAME
-        val deviceName = jsonStringField(auth, "deviceName") ?: "Fire TV"
-        val deviceId = jsonStringField(auth, "deviceId").orEmpty()
-        val appVersion = jsonStringField(auth, "appVersion") ?: FireTvClient.APP_VERSION
-        return "MediaBrowser Client=\"$appName\", Device=\"$deviceName\", DeviceId=\"$deviceId\", Version=\"$appVersion\"$tokenPart"
-    }
-
-    private fun trustAll(connection: HttpsURLConnection) {
-        val trustManager = object : X509TrustManager {
-            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = Unit
-            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) = Unit
-            override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
-        }
-        val context = SSLContext.getInstance("TLS")
-        context.init(null, arrayOf(trustManager), SecureRandom())
-        connection.sslSocketFactory = context.socketFactory
-        connection.hostnameVerifier = HostnameVerifier { _, _ -> true }
     }
 
     private val DEVICE_PROFILE = """
@@ -180,7 +159,11 @@ object StreamResolver {
           "SubtitleProfiles": [
             {"Format":"vtt","Method":"External"},
             {"Format":"srt","Method":"External"},
-            {"Format":"ass","Method":"Encode"}
+            {"Format":"subrip","Method":"External"},
+            {"Format":"ttml","Method":"External"},
+            {"Format":"ass","Method":"External"},
+            {"Format":"ssa","Method":"Encode"},
+            {"Format":"pgssub","Method":"Encode"}
           ]
         }
     """.trimIndent()

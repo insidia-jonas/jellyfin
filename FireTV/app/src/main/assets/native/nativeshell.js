@@ -48,9 +48,18 @@
         var style = document.createElement("style");
         style.id = "firetv-perf-css";
         style.textContent = [
-            "html,body{width:100%!important;height:100%!important;overflow:hidden!important;}",
-            ".layout-tv .backdrop-container,.layout-tv .backgroundContainer{",
-            "  filter:none!important;transform:none!important;",
+            "html,body{width:100%!important;height:100%!important;overflow:hidden!important;background:#0B0E14!important;}",
+            ".layout-tv .backdrop-container,.layout-tv .backgroundContainer,.layout-tv .backdropContainer{",
+            "  filter:none!important;transform:none!important;background:#0B0E14!important;",
+            "}",
+            ".layout-tv .backdropContainer .backdropImage,.layout-tv .backgroundContainer .backdropImage{",
+            "  opacity:.16!important;filter:none!important;",
+            "}",
+            ".layout-tv .card,.layout-tv .cardBox,.layout-tv .emby-button,.layout-tv .listItem{",
+            "  transition:transform .12s ease-out,box-shadow .12s ease-out!important;",
+            "}",
+            ".layout-tv .card:focus,.layout-tv .card:focus .cardBox,.layout-tv .emby-button:focus,.layout-tv .listItem:focus{",
+            "  outline:none!important;box-shadow:0 0 0 3px #00A4DC!important;",
             "}",
             "video,audio[controls]{display:none!important;width:0!important;height:0!important;}"
         ].join("");
@@ -93,14 +102,129 @@
         }, true);
     }
 
+    function maxEdgeFor(url) {
+        if (/\/Images\/(Backdrop|Thumb|Banner)/i.test(url)) {
+            return 1280;
+        }
+        if (/\/Images\/(Logo|Art)(\/|$|\?)/i.test(url)) {
+            return 480;
+        }
+        return 720;
+    }
+
+    function rewriteArtwork(url) {
+        if (typeof url !== "string") {
+            return url;
+        }
+        if (url.indexOf("/Items/") === -1 || url.indexOf("/Images/") === -1) {
+            return url;
+        }
+        if (url.indexOf("/web/") !== -1) {
+            return url;
+        }
+        var hash = "";
+        var hashAt = url.indexOf("#");
+        if (hashAt !== -1) {
+            hash = url.slice(hashAt);
+            url = url.slice(0, hashAt);
+        }
+        var parts = url.split("?");
+        var base = parts[0];
+        var kept = [];
+        var query = parts[1] || "";
+        if (query) {
+            query.split("&").forEach(function (part) {
+                if (!part) {
+                    return;
+                }
+                var name = part.split("=")[0].toLowerCase();
+                if (name === "maxwidth" || name === "maxheight" || name === "fillwidth" || name === "fillheight" || name === "quality") {
+                    return;
+                }
+                kept.push(part);
+            });
+        }
+        kept.push("maxWidth=" + maxEdgeFor(url));
+        kept.push("quality=70");
+        return base + "?" + kept.join("&") + hash;
+    }
+
+    function patchArtwork() {
+        if (window.__firetvArtworkPatched) {
+            return;
+        }
+        window.__firetvArtworkPatched = true;
+        var proto = window.HTMLImageElement && window.HTMLImageElement.prototype;
+        if (proto) {
+            var desc = Object.getOwnPropertyDescriptor(proto, "src");
+            if (desc && desc.set) {
+                Object.defineProperty(proto, "src", {
+                    configurable: true,
+                    enumerable: desc.enumerable,
+                    get: desc.get,
+                    set: function (value) {
+                        desc.set.call(this, rewriteArtwork(value));
+                    }
+                });
+            }
+        }
+        var wraps = 0;
+        var timer = setInterval(function () {
+            var api = window.ApiClient;
+            wraps += 1;
+            if (api && !api.__firetvWrapped) {
+                api.__firetvWrapped = true;
+                ["getScaledImageUrl", "getImageUrl"].forEach(function (name) {
+                    var orig = api[name];
+                    if (typeof orig === "function") {
+                        api[name] = function () {
+                            return rewriteArtwork(orig.apply(this, arguments));
+                        };
+                    }
+                });
+            }
+            if ((api && api.__firetvWrapped) || wraps > 80) {
+                clearInterval(timer);
+            }
+        }, 250);
+    }
+
+    window.FireTvCanExit = function () {
+        try {
+            var blocking = document.querySelectorAll(".dialog, .actionSheet, .dialogContainer");
+            for (var i = 0; i < blocking.length; i++) {
+                if (blocking[i].offsetParent !== null) {
+                    return false;
+                }
+            }
+            if (document.querySelector(".mainDrawer-open, .drawer-open")) {
+                return false;
+            }
+            var hash = String(location.hash || "").toLowerCase();
+            if (hash.indexOf("details") !== -1 || hash.indexOf("item") !== -1 || hash.indexOf("wizard") !== -1) {
+                return false;
+            }
+            if (!hash || hash === "#" || hash === "#/" || hash.indexOf("home") !== -1) {
+                return true;
+            }
+            if (document.querySelector(".homeSectionsContainer, .homePage")) {
+                return true;
+            }
+        } catch (e) { /* ignore */ }
+        return false;
+    };
+
     window.FireTvGuard = function () {
         forceTvViewport();
         injectPerformanceCss();
         patchHtml5Media();
+        patchArtwork();
     };
 
     forceTvViewport();
+    injectPerformanceCss();
     patchHtml5Media();
+    patchArtwork();
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", window.FireTvGuard);
     } else {
@@ -123,7 +247,7 @@
             deviceId: "firetv-web",
             deviceName: "Fire TV",
             appName: "Jellyfin Fire TV",
-            appVersion: "1.2.1"
+            appVersion: "1.3.0"
         };
     }
 
@@ -199,7 +323,7 @@
             { Format: "srt", Method: "External" },
             { Format: "ttml", Method: "External" },
             { Format: "subrip", Method: "External" },
-            { Format: "ass", Method: "Encode" },
+            { Format: "ass", Method: "External" },
             { Format: "ssa", Method: "Encode" },
             { Format: "pgssub", Method: "Encode" }
         ],
@@ -361,10 +485,18 @@
     FireTvExoPlayerPlugin.prototype.nextTrack = function () { };
     FireTvExoPlayerPlugin.prototype.previousTrack = function () { };
     FireTvExoPlayerPlugin.prototype.canSetAudioStreamIndex = function () {
-        return false;
+        return true;
     };
-    FireTvExoPlayerPlugin.prototype.setAudioStreamIndex = function () { };
-    FireTvExoPlayerPlugin.prototype.setSubtitleStreamIndex = function () { };
+    FireTvExoPlayerPlugin.prototype.setAudioStreamIndex = function (index) {
+        if (window.NativePlayer && window.NativePlayer.setAudioStreamIndex) {
+            window.NativePlayer.setAudioStreamIndex(index);
+        }
+    };
+    FireTvExoPlayerPlugin.prototype.setSubtitleStreamIndex = function (index) {
+        if (window.NativePlayer && window.NativePlayer.setSubtitleStreamIndex) {
+            window.NativePlayer.setSubtitleStreamIndex(index);
+        }
+    };
     FireTvExoPlayerPlugin.prototype.changeAudioStream = function () {
         return Promise.resolve();
     };
@@ -397,7 +529,31 @@
         if (!window.NativeInterface) {
             return;
         }
-        var payload = typeof info === "string" ? info : JSON.stringify(info || {});
+        var token = "";
+        try {
+            token = window.ApiClient && window.ApiClient.accessToken ? window.ApiClient.accessToken() : "";
+        } catch (e) {
+            token = "";
+        }
+        var payload;
+        if (typeof info === "string") {
+            payload = info;
+            try {
+                var parsed = JSON.parse(info);
+                if (parsed && typeof parsed === "object" && !parsed.accessToken && token) {
+                    parsed.accessToken = token;
+                    payload = JSON.stringify(parsed);
+                }
+            } catch (e) { /* keep original string */ }
+        } else if (Array.isArray(info)) {
+            payload = JSON.stringify({ files: info, accessToken: token });
+        } else {
+            var body = info || {};
+            if (!body.accessToken && token) {
+                body.accessToken = token;
+            }
+            payload = JSON.stringify(body);
+        }
         if (window.NativeInterface.downloadFiles) {
             window.NativeInterface.downloadFiles(payload);
         }

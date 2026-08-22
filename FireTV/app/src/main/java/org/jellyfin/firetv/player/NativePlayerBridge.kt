@@ -64,4 +64,14 @@ class NativePlayerBridge(
     fun setVolume(volume: Int) {
         host.runOnHost { PlayerCommands.setVolume(volume) }
     }
+
+    @JavascriptInterface
+    fun setAudioStreamIndex(index: Int) {
+        host.runOnHost { PlayerCommands.setAudioStreamIndex(index) }
+    }
+
+    @JavascriptInterface
+    fun setSubtitleStreamIndex(index: Int) {
+        host.runOnHost { PlayerCommands.setSubtitleStreamIndex(index) }
+    }
 }

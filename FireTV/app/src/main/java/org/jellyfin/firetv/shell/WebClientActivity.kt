@@ -1,10 +1,9 @@
 package org.jellyfin.firetv.shell
 
 import android.annotation.SuppressLint
-import android.app.DownloadManager
-import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.View
 import android.webkit.CookieManager
@@ -26,6 +25,8 @@ import org.jellyfin.firetv.connect.ConnectActivity
 import org.jellyfin.firetv.core.FireTvClient
 import org.jellyfin.firetv.core.ServerUrl
 import org.jellyfin.firetv.databinding.ActivityWebClientBinding
+import org.jellyfin.firetv.databinding.ItemDownloadBinding
+import org.jellyfin.firetv.download.DownloadIndex
 import org.jellyfin.firetv.download.FileDownloader
 import org.jellyfin.firetv.player.NativePlayerBridge
 import org.jellyfin.firetv.player.PlayerActivity
@@ -39,6 +40,16 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
     private lateinit var mediaSession: PlaybackMediaSession
     private var ignoreSsl: Boolean = false
     private lateinit var nativeshellJs: String
+    private var lastBackAt: Long = 0L
+    private val refreshDownloads = object : Runnable {
+        override fun run() {
+            if (!::binding.isInitialized || !binding.downloadsOverlay.isVisible) {
+                return
+            }
+            renderDownloads()
+            binding.downloadsOverlay.postDelayed(this, 1_000)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,7 +73,7 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
         binding.retryButton.setOnClickListener { loadWebClient() }
         binding.errorChangeServerButton.setOnClickListener { openServerSelection() }
         binding.menuReload.setOnClickListener {
-            hideMenu()
+            hideOverlays()
             binding.webView.reload()
         }
         binding.menuChangeServer.setOnClickListener { openServerSelection() }
@@ -70,20 +81,22 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
             hideMenu()
             openDownloadManager()
         }
+        binding.menuCloseDownloads.setOnClickListener { hideDownloads() }
         binding.menuExit.setOnClickListener { finishAffinity() }
 
         onBackPressedDispatcher.addCallback(
             this,
             object : OnBackPressedCallback(true) {
                 override fun handleOnBackPressed() {
+                    if (binding.downloadsOverlay.isVisible) {
+                        hideDownloads()
+                        return
+                    }
                     if (binding.menuOverlay.isVisible) {
                         hideMenu()
                         return
                     }
-                    binding.webView.evaluateJavascript(
-                        "window.FireTvRemote&&window.FireTvRemote.send('Escape')",
-                        null,
-                    )
+                    handleWebBack()
                 }
             },
         )
@@ -100,13 +113,14 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
         binding.webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             binding.webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
+            @Suppress("DEPRECATION")
+            binding.webView.settings.safeBrowsingEnabled = false
         }
 
         binding.webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
             javaScriptCanOpenWindowsAutomatically = false
-            // Require a gesture for HTML5 so Amazon WebView cannot autoplay MKV.
             mediaPlaybackRequiresUserGesture = true
             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
             allowFileAccess = false
@@ -146,7 +160,6 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
         )
         binding.webView.webChromeClient = object : WebChromeClient() {
             override fun onShowCustomView(view: View, callback: CustomViewCallback) {
-                // HTML5 fullscreen freezes Fire TV on container formats. ExoPlayer owns video.
                 callback.onCustomViewHidden()
             }
 
@@ -187,7 +200,11 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN && event.keyCode == KeyEvent.KEYCODE_MENU) {
-            toggleMenu()
+            if (binding.downloadsOverlay.isVisible) {
+                hideDownloads()
+            } else {
+                toggleMenu()
+            }
             return true
         }
         val script = RemoteKeyDispatcher.javascriptFor(event)
@@ -196,6 +213,22 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
             return true
         }
         return super.dispatchKeyEvent(event)
+    }
+
+    private fun handleWebBack() {
+        binding.webView.evaluateJavascript(
+            "window.FireTvRemote&&window.FireTvRemote.send('Escape');!!(window.FireTvCanExit&&window.FireTvCanExit())",
+        ) { result ->
+            if (result == "true") {
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastBackAt < 2_200) {
+                    finishAffinity()
+                } else {
+                    lastBackAt = now
+                    Toast.makeText(this, R.string.press_back_again, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     private fun toggleMenu() {
@@ -210,6 +243,40 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
     private fun hideMenu() {
         binding.menuOverlay.isVisible = false
         binding.webView.requestFocus()
+    }
+
+    private fun hideDownloads() {
+        binding.downloadsOverlay.removeCallbacks(refreshDownloads)
+        binding.downloadsOverlay.isVisible = false
+        binding.webView.requestFocus()
+    }
+
+    private fun hideOverlays() {
+        hideMenu()
+        hideDownloads()
+    }
+
+    private fun renderDownloads() {
+        val rows = DownloadIndex.list(this)
+        binding.downloadsList.removeAllViews()
+        binding.downloadsEmpty.isVisible = rows.isEmpty()
+        rows.forEach { row ->
+            val item = ItemDownloadBinding.inflate(layoutInflater, binding.downloadsList, false)
+            item.downloadTitle.text = row.title
+            item.downloadStatus.text = when (row.status) {
+                DownloadIndex.Row.Status.RUNNING -> {
+                    val pct = row.progressPercent.coerceAtLeast(0)
+                    getString(R.string.download_status_running, pct)
+                }
+                DownloadIndex.Row.Status.PENDING -> getString(R.string.download_status_pending)
+                DownloadIndex.Row.Status.PAUSED -> getString(R.string.download_status_paused)
+                DownloadIndex.Row.Status.SUCCESS -> getString(R.string.download_status_success)
+                DownloadIndex.Row.Status.FAILED -> getString(R.string.download_status_failed)
+            }
+            item.downloadProgress.isIndeterminate = row.progressPercent < 0 && row.status == DownloadIndex.Row.Status.RUNNING
+            item.downloadProgress.progress = row.progressPercent.coerceAtLeast(0)
+            binding.downloadsList.addView(item.root)
+        }
     }
 
     override fun deviceInformation(): JSONObject {
@@ -227,9 +294,9 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
     override fun openServerSelection() {
         runOnUiThread {
             startActivity(
-                Intent(this, ConnectActivity::class.java).apply {
+                android.content.Intent(this, ConnectActivity::class.java).apply {
                     putExtra(ConnectActivity.EXTRA_CHANGE_SERVER, true)
-                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    flags = android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
                 },
             )
             finish()
@@ -243,7 +310,7 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
     override fun openUrl(url: String) {
         runOnUiThread {
             runCatching {
-                startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)))
+                startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)))
             }
         }
     }
@@ -269,7 +336,7 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
     override fun launchPlayer(payload: String) {
         runOnUiThread {
             startActivity(
-                Intent(this, PlayerActivity::class.java).apply {
+                android.content.Intent(this, PlayerActivity::class.java).apply {
                     putExtra(PlayerActivity.EXTRA_PAYLOAD, payload)
                     putExtra(PlayerActivity.EXTRA_IGNORE_SSL, ignoreSsl)
                 },
@@ -278,20 +345,23 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
     }
 
     override fun downloadFiles(json: String) {
-        val count = FileDownloader.enqueue(this, json)
-        val message = if (count > 0) {
-            resources.getQuantityString(R.plurals.download_started, count, count)
-        } else {
-            getString(R.string.download_failed)
+        val result = FileDownloader.enqueue(this, json)
+        val message = when {
+            result.started > 0 -> resources.getQuantityString(R.plurals.download_started, result.started, result.started)
+            result.duplicates > 0 -> getString(R.string.download_duplicate)
+            else -> getString(R.string.download_failed)
         }
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
 
     override fun openDownloadManager() {
-        runCatching {
-            startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        }.onFailure {
-            Toast.makeText(this, R.string.downloads_unavailable, Toast.LENGTH_LONG).show()
+        runOnUiThread {
+            hideMenu()
+            binding.downloadsOverlay.isVisible = true
+            renderDownloads()
+            binding.menuCloseDownloads.requestFocus()
+            binding.downloadsOverlay.removeCallbacks(refreshDownloads)
+            binding.downloadsOverlay.post(refreshDownloads)
         }
     }
 
@@ -300,6 +370,9 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
     }
 
     override fun onDestroy() {
+        if (::binding.isInitialized) {
+            binding.downloadsOverlay.removeCallbacks(refreshDownloads)
+        }
         if (::mediaSession.isInitialized) {
             mediaSession.release()
         }

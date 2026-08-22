@@ -14,6 +14,8 @@ object PlayerCommands {
         fun seekMs(positionMs: Long)
         fun setVolume(percent: Int)
         fun destroy()
+        fun setAudioStreamIndex(index: Int)
+        fun setSubtitleStreamIndex(index: Int)
     }
 
     fun pause() = listener?.pause()
@@ -22,4 +24,6 @@ object PlayerCommands {
     fun seekMs(positionMs: Long) = listener?.seekMs(positionMs)
     fun setVolume(percent: Int) = listener?.setVolume(percent)
     fun destroy() = listener?.destroy()
+    fun setAudioStreamIndex(index: Int) = listener?.setAudioStreamIndex(index)
+    fun setSubtitleStreamIndex(index: Int) = listener?.setSubtitleStreamIndex(index)
 }

@@ -23,7 +23,7 @@ function collectAuth() {
         deviceId: device.deviceId || "",
         deviceName: device.deviceName || "Fire TV",
         appName: device.appName || "Jellyfin Fire TV",
-        appVersion: device.appVersion || "1.2.1"
+        appVersion: device.appVersion || "1.3.0"
     };
 }
 
@@ -195,12 +195,20 @@ export class ExoPlayerPlugin {
     }
 
     canSetAudioStreamIndex() {
-        return false;
+        return true;
     }
 
-    setAudioStreamIndex() {}
+    setAudioStreamIndex(index) {
+        if (this._nativePlayer && this._nativePlayer.setAudioStreamIndex) {
+            this._nativePlayer.setAudioStreamIndex(index);
+        }
+    }
 
-    setSubtitleStreamIndex() {}
+    setSubtitleStreamIndex(index) {
+        if (this._nativePlayer && this._nativePlayer.setSubtitleStreamIndex) {
+            this._nativePlayer.setSubtitleStreamIndex(index);
+        }
+    }
 
     async changeAudioStream() {}
 

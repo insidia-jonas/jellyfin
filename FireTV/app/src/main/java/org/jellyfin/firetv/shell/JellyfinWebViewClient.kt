@@ -9,7 +9,6 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import org.jellyfin.firetv.core.ArtworkUrl
 import org.jellyfin.firetv.core.DisplayScale
 import org.jellyfin.firetv.core.NativeAsset
 import org.jellyfin.firetv.core.NativeShellInjector
@@ -58,9 +57,6 @@ class JellyfinWebViewClient(
             ResourceKind.isWebDocument(path)
         ) {
             return injectNativeShell(request)
-        }
-        if (request.method.equals("GET", ignoreCase = true) && ResourceKind.isArtwork(path)) {
-            return downscaleArtwork(request)
         }
         return null
     }
@@ -130,26 +126,6 @@ class JellyfinWebViewClient(
         }.getOrNull()
     }
 
-    private fun downscaleArtwork(request: WebResourceRequest): WebResourceResponse? {
-        val original = request.url.toString()
-        if (!ArtworkUrl.shouldDownscale(original)) {
-            return null
-        }
-        val resized = ArtworkUrl.downscale(original)
-        return runCatching {
-            val bytes = fetchBytes(request, resized) ?: return null
-            val mime = guessImageMime(resized, bytes)
-            WebResourceResponse(
-                mime,
-                null,
-                200,
-                "OK",
-                mapOf("Content-Type" to mime, "Cache-Control" to "max-age=86400"),
-                ByteArrayInputStream(bytes),
-            )
-        }.getOrNull()
-    }
-
     private fun fetchBytes(request: WebResourceRequest, url: String): ByteArray? {
         val connection = URL(url).openConnection() as HttpURLConnection
         connection.connectTimeout = 8_000
@@ -175,23 +151,6 @@ class JellyfinWebViewClient(
         } finally {
             connection.disconnect()
         }
-    }
-
-    private fun guessImageMime(url: String, bytes: ByteArray): String {
-        return when {
-            url.contains("format=webp", ignoreCase = true) || bytes.startsWith("RIFF") -> "image/webp"
-            bytes.size >= 3 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() -> "image/jpeg"
-            bytes.size >= 8 && bytes[0] == 0x89.toByte() -> "image/png"
-            else -> "image/jpeg"
-        }
-    }
-
-    private fun ByteArray.startsWith(ascii: String): Boolean {
-        val prefix = ascii.toByteArray(Charsets.US_ASCII)
-        if (size < prefix.size) {
-            return false
-        }
-        return prefix.indices.all { this[it] == prefix[it] }
     }
 
     private fun notFound(): WebResourceResponse {

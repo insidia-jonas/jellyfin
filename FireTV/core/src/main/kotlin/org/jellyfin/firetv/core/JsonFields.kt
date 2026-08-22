@@ -16,6 +16,19 @@ internal fun jsonLongField(json: String, key: String): Long? {
     return match.groupValues[1].toLongOrNull()
 }
 
+internal fun jsonDoubleField(json: String, key: String): Double? {
+    val match = Regex("\"${Regex.escape(key)}\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)").find(json) ?: return null
+    return match.groupValues[1].toDoubleOrNull()
+}
+
+internal fun jsonRootArrayObjects(json: String): List<String> {
+    val trimmed = json.trim()
+    if (!trimmed.startsWith("[")) {
+        return emptyList()
+    }
+    return jsonArrayObjects("{\"items\":$trimmed}", "items")
+}
+
 internal fun jsonStringArray(json: String, key: String): List<String> {
     val match = Regex("\"${Regex.escape(key)}\"\\s*:\\s*\\[").find(json) ?: return emptyList()
     val from = match.range.last + 1

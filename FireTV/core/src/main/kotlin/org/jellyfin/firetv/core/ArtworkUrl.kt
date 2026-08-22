@@ -7,8 +7,24 @@ import java.net.URI
  * for every card in the TV layout.
  */
 object ArtworkUrl {
-    const val MAX_EDGE_PX: Int = 720
+    const val POSTER_MAX_PX: Int = 720
+    const val BACKDROP_MAX_PX: Int = 1280
+    const val LOGO_MAX_PX: Int = 480
     const val QUALITY: Int = 70
+
+    @Deprecated("Use POSTER_MAX_PX", ReplaceWith("POSTER_MAX_PX"))
+    const val MAX_EDGE_PX: Int = POSTER_MAX_PX
+
+    fun maxEdge(url: String): Int {
+        val path = runCatching { URI(url).path }.getOrNull()?.lowercase() ?: return POSTER_MAX_PX
+        return when {
+            path.contains("/images/backdrop") ||
+                path.contains("/images/thumb") ||
+                path.contains("/images/banner") -> BACKDROP_MAX_PX
+            path.contains("/images/logo") || path.contains("/images/art") -> LOGO_MAX_PX
+            else -> POSTER_MAX_PX
+        }
+    }
 
     fun shouldDownscale(url: String): Boolean {
         val path = runCatching { URI(url).path }.getOrNull() ?: return false
@@ -16,7 +32,7 @@ object ArtworkUrl {
             return false
         }
         val requested = requestedEdge(url)
-        return requested == null || requested > MAX_EDGE_PX
+        return requested == null || requested > maxEdge(url)
     }
 
     fun downscale(url: String): String {
@@ -34,7 +50,7 @@ object ArtworkUrl {
                 kept += name to value
             }
         }
-        kept += "maxWidth" to MAX_EDGE_PX.toString()
+        kept += "maxWidth" to maxEdge(url).toString()
         kept += "quality" to QUALITY.toString()
         val newQuery = kept.joinToString("&") { (k, v) -> if (v.isEmpty()) k else "$k=$v" }
         val base = "${uri.scheme}://${uri.authority}${uri.path}"
