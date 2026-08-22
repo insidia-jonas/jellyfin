@@ -50,7 +50,15 @@
             android:name=".shell.WebClientActivity"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout"
             android:exported="false"
+            android:hardwareAccelerated="true"
             android:launchMode="singleTask"
+            android:screenOrientation="landscape" />
+
+        <activity
+            android:name=".player.PlayerActivity"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout"
+            android:exported="false"
+            android:launchMode="singleTop"
             android:screenOrientation="landscape" />
     </application>
 </manifest>

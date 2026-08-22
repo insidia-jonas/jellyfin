@@ -2,12 +2,12 @@
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="rectangle">
-            <solid android:color="@color/background" />
+            <solid android:color="#FF000B25" />
         </shape>
     </item>
     <item
-        android:width="72dp"
-        android:height="72dp"
+        android:width="96dp"
+        android:height="96dp"
         android:drawable="@drawable/ic_jellyfin"
         android:gravity="center" />
 </layer-list>

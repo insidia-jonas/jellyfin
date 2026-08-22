@@ -11,14 +11,14 @@
         android:layout_height="wrap_content"
         android:gravity="center_horizontal"
         android:orientation="vertical"
-        android:paddingStart="96dp"
-        android:paddingTop="36dp"
-        android:paddingEnd="96dp"
-        android:paddingBottom="36dp">
+        android:paddingStart="48dp"
+        android:paddingTop="28dp"
+        android:paddingEnd="48dp"
+        android:paddingBottom="28dp">
 
         <ImageView
-            android:layout_width="72dp"
-            android:layout_height="72dp"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
             android:contentDescription="@string/app_name"
             android:src="@drawable/ic_jellyfin" />
 
@@ -28,7 +28,7 @@
             android:layout_marginTop="16dp"
             android:text="@string/connect_title"
             android:textColor="@color/text_primary"
-            android:textSize="32sp"
+            android:textSize="26sp"
             android:textStyle="bold" />
 
         <TextView

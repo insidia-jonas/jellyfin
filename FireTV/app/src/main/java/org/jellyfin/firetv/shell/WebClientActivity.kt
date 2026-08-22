@@ -11,6 +11,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.widget.FrameLayout
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
@@ -25,6 +26,8 @@ import org.jellyfin.firetv.connect.ConnectActivity
 import org.jellyfin.firetv.core.FireTvClient
 import org.jellyfin.firetv.core.ServerUrl
 import org.jellyfin.firetv.databinding.ActivityWebClientBinding
+import org.jellyfin.firetv.player.NativePlayerBridge
+import org.jellyfin.firetv.player.PlayerActivity
 import org.jellyfin.firetv.prefs.AppPreferences
 import org.json.JSONObject
 
@@ -35,6 +38,8 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
     private lateinit var mediaSession: PlaybackMediaSession
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
+    private var ignoreSsl: Boolean = false
+    private lateinit var nativeshellJs: String
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,6 +53,10 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
         binding = ActivityWebClientBinding.inflate(layoutInflater)
         setContentView(binding.root)
         mediaSession = PlaybackMediaSession(this)
+        ignoreSsl = intent.getBooleanExtra(EXTRA_IGNORE_SSL, preferences.ignoreSslErrors)
+        nativeshellJs = runCatching {
+            assets.open("native/nativeshell.js").bufferedReader().use { it.readText() }
+        }.getOrDefault("")
         hideSystemBars()
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
@@ -88,6 +97,8 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
     private fun configureWebView() {
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(binding.webView, true)
+        WebViewDisplayFit.apply(binding.webView)
+        binding.webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
 
         binding.webView.settings.apply {
             javaScriptEnabled = true
@@ -95,8 +106,6 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
             javaScriptCanOpenWindowsAutomatically = true
             mediaPlaybackRequiresUserGesture = false
             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-            useWideViewPort = true
-            loadWithOverviewMode = true
             allowFileAccess = false
             allowContentAccess = false
             cacheMode = WebSettings.LOAD_DEFAULT
@@ -104,10 +113,11 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
         }
 
         binding.webView.addJavascriptInterface(NativeInterface(this), "NativeInterface")
+        binding.webView.addJavascriptInterface(NativePlayerBridge(this), "NativePlayer")
         binding.webView.webViewClient = JellyfinWebViewClient(
             context = this,
-            userAgent = binding.webView.settings.userAgentString,
-            ignoreSslErrors = intent.getBooleanExtra(EXTRA_IGNORE_SSL, preferences.ignoreSslErrors),
+            ignoreSslErrors = ignoreSsl,
+            nativeshellJs = nativeshellJs,
             callbacks = object : JellyfinWebViewClient.Callbacks {
                 override fun onPageReady() {
                     runOnUiThread {
@@ -119,6 +129,13 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
 
                 override fun onPageFailed() {
                     runOnUiThread { showError() }
+                }
+
+                override fun onRendererCrashed() {
+                    runOnUiThread {
+                        Toast.makeText(this@WebClientActivity, R.string.webview_recovered, Toast.LENGTH_LONG).show()
+                        recreate()
+                    }
                 }
             },
         )
@@ -155,11 +172,8 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
             return
         }
-        val script = runCatching {
-            assets.open("native/nativeshell.js").bufferedReader().use { it.readText() }
-        }.getOrNull() ?: return
         val origin = ServerUrl.origin(serverUrl)
-        WebViewCompat.addDocumentStartJavaScript(binding.webView, script, setOf(origin))
+        WebViewCompat.addDocumentStartJavaScript(binding.webView, nativeshellJs, setOf(origin))
     }
 
     private fun loadWebClient() {
@@ -264,6 +278,21 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
 
     override fun updateVolumeLevel(level: Int) = Unit
 
+    override fun launchPlayer(payload: String) {
+        runOnUiThread {
+            startActivity(
+                Intent(this, PlayerActivity::class.java).apply {
+                    putExtra(PlayerActivity.EXTRA_PAYLOAD, payload)
+                    putExtra(PlayerActivity.EXTRA_IGNORE_SSL, ignoreSsl)
+                },
+            )
+        }
+    }
+
+    override fun runOnHost(block: () -> Unit) {
+        runOnUiThread(block)
+    }
+
     override fun onDestroy() {
         if (::mediaSession.isInitialized) {
             mediaSession.release()
@@ -274,6 +303,7 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
                 stopLoading()
                 webChromeClient = null
                 removeJavascriptInterface("NativeInterface")
+                removeJavascriptInterface("NativePlayer")
                 destroy()
             }
         }

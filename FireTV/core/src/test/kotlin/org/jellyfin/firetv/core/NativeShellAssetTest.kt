@@ -10,9 +10,9 @@ class NativeShellAssetTest {
         val script = locateNativeShell().readText()
         assertTrue(script.contains("getDefaultLayout"))
         assertTrue(script.contains("return \"tv\""))
-        assertTrue(script.contains("htmlvideoautoplay"))
-        assertTrue(script.contains("getPlugins: function ()"))
-        assertTrue(script.contains("return []"))
+        assertTrue(script.contains("width=1920"))
+        assertTrue(script.contains("ExoPlayerPlugin"))
+        assertTrue(script.contains("localStorage.setItem(\"layout\", \"tv\")"))
     }
 
     private fun locateNativeShell(): File {

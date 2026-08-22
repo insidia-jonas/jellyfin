@@ -2,3 +2,6 @@
 -keepclassmembers class org.jellyfin.firetv.shell.NativeInterface {
     @android.webkit.JavascriptInterface <methods>;
 }
+-keepclassmembers class org.jellyfin.firetv.player.NativePlayerBridge {
+    @android.webkit.JavascriptInterface <methods>;
+}

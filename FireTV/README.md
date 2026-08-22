@@ -2,17 +2,20 @@
 
 Diese App zeigt **dieselbe vollständige Jellyfin-Web-Oberfläche** wie die [iOS-App](https://github.com/jellyfin/jellyfin-ios): Der Fire TV Stick lädt `jellyfin-web` vom Server in einer WebView und spricht mit dem Gerät über `NativeShell`.
 
-Das ist bewusst **kein** API-only-Client wie [jellyfin-androidtv](https://github.com/jellyfin/jellyfin-androidtv). Bibliothek, Dashboard, Plugins, Themes, Live-TV, Wiedergabeeinstellungen und der HTML5-Player kommen unverändert aus der Web-UI, die der Server ausliefert.
+Das ist bewusst **kein** API-only-Client wie [jellyfin-androidtv](https://github.com/jellyfin/jellyfin-androidtv). Bibliothek, Dashboard, Plugins, Themes und Live-TV kommen aus der Web-UI. **Film- und Serienwiedergabe** läuft über ExoPlayer (wie auf Android TV üblich), damit das Auswählen einer Fassung den Stick nicht einfriert. Die Oberfläche wird auf **1920×1080 CSS-Pixel** gelegt, unabhängig von der WebView-Dichte.
 
 ## English
 
-Fire TV client that hosts the full Jellyfin web UI (same architecture as the official iOS app: WebView + NativeShell). It does not rebuild the catalog from REST APIs the way the official Android TV app does.
+Fire TV client that hosts the full Jellyfin web UI (same architecture as the official iOS app: WebView + NativeShell). Video playback uses ExoPlayer. The WebView is forced to a 1920×1080 viewport so the TV layout is not magnified by device density.
 
 The web client is forced into **TV layout** (`NativeShell.AppHost.getDefaultLayout() === "tv"`) so D-pad / remote spatial navigation works on a Fire TV Stick.
 
 ## Funktionen
 
-- Vollständige `jellyfin-web`-Oberfläche, inklusive Login, Home, Bibliotheken, Dashboard und Player
+- Vollständige `jellyfin-web`-Oberfläche, inklusive Login, Home, Bibliotheken und Dashboard
+- TV-Layout in nativer 1080p-Skalierung (kein aufgeblasenes Handy-Layout)
+- Nativer ExoPlayer beim Abspielen / Auswählen einer Fassung (Release)
+- Offizielles Jellyfin-Logo (jellyfin-ux)
 - TV-Layout und Fernbedienungs-Tasten (Zurück, Play/Pause, Spulen)
 - Server-Suche im LAN (UDP 7359, `Who is JellyfinServer?`) oder manuelle Adresse
 - HTTP im Heimnetz und optional selbstsignierte HTTPS-Zertifikate
@@ -54,4 +57,4 @@ Paketname: `org.jellyfin.firetvweb` — parallel zur offiziellen Android-TV-App 
 
 ## Hinweise zur Wiedergabe
 
-Video läuft über den **HTML5-Player von jellyfin-web** in der Amazon-WebView, nicht über den nativen ExoPlayer der API-App. Der Server transcodiert zu HLS/H.264/AAC, wenn Direct Play in der WebView nicht möglich ist (typisch für viele MKVs). Das entspricht dem Verhalten der iOS-/Android-Web-Shells ohne Native-Player-Plugin.
+Die Oberfläche bleibt jellyfin-web. Sobald du Play oder eine Fassung/Release wählst, übernimmt **ExoPlayer** (Direct Play für MKV/MP4 wo möglich, sonst HLS-Transcode). Zurück auf der Fernbedienung beendet die Wiedergabe und kehrt in die Web-UI zurück.

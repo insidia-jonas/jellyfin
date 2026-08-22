@@ -17,6 +17,8 @@ class NativeInterface(
         fun enableFullscreen()
         fun disableFullscreen()
         fun updateVolumeLevel(level: Int)
+        fun launchPlayer(payload: String)
+        fun runOnHost(block: () -> Unit)
     }
 
     @JavascriptInterface

@@ -2,7 +2,10 @@
 <resources>
     <string name="app_name">Jellyfin</string>
     <string name="connect_title">Jellyfin on Fire TV</string>
-    <string name="connect_subtitle">Loads the full Jellyfin web interface (same as the iOS app), not the API-only Android TV client.</string>
+    <string name="connect_subtitle">Full Jellyfin web interface, sized for your TV. Play uses the Fire TV player so movies do not freeze the Stick.</string>
+    <string name="preparing_playback">Starting playback…</string>
+    <string name="playback_failed">This release could not be played. Try another version, or check that the server can transcode.</string>
+    <string name="webview_recovered">The interface recovered after a graphics error and will reload.</string>
     <string name="server_url_hint">http://192.168.1.10:8096</string>
     <string name="server_url_label">Server address</string>
     <string name="connect">Connect</string>
