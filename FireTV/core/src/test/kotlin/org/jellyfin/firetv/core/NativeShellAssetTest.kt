@@ -1,5 +1,6 @@
 package org.jellyfin.firetv.core
 
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.File
@@ -16,7 +17,8 @@ class NativeShellAssetTest {
         assertTrue(script.contains("downloadFile"))
         assertTrue(script.contains("accessToken"))
         assertTrue(script.contains("FireTvCanExit"))
-        assertTrue(script.contains("rewriteArtwork"))
+        assertFalse(script.contains("rewriteArtwork"))
+        assertFalse(script.contains("getScaledImageUrl"))
         assertTrue(script.contains("canSetAudioStreamIndex"))
         assertTrue(script.contains("import(\"/native/ExoPlayerPlugin.js\")") || script.contains("import('/native/ExoPlayerPlugin.js')"))
         assertTrue(script.contains("HTMLVideoElement"))

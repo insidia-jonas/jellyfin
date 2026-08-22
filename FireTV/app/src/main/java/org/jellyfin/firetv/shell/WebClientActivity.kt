@@ -41,6 +41,7 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
     private var ignoreSsl: Boolean = false
     private lateinit var nativeshellJs: String
     private var lastBackAt: Long = 0L
+    private var initialWebFocusDone: Boolean = false
     private val refreshDownloads = object : Runnable {
         override fun run() {
             if (!::binding.isInitialized || !binding.downloadsOverlay.isVisible) {
@@ -74,6 +75,7 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
         binding.errorChangeServerButton.setOnClickListener { openServerSelection() }
         binding.menuReload.setOnClickListener {
             hideOverlays()
+            initialWebFocusDone = false
             binding.webView.reload()
         }
         binding.menuChangeServer.setOnClickListener { openServerSelection() }
@@ -142,7 +144,10 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
                     runOnUiThread {
                         binding.loadingContainer.isVisible = false
                         binding.errorContainer.isVisible = false
-                        binding.webView.requestFocus()
+                        if (!initialWebFocusDone) {
+                            initialWebFocusDone = true
+                            binding.webView.requestFocus()
+                        }
                     }
                 }
 
@@ -178,6 +183,7 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
     }
 
     private fun loadWebClient() {
+        initialWebFocusDone = false
         binding.errorContainer.isVisible = false
         binding.loadingContainer.isVisible = true
         val target = serverUrl.trimEnd('/') + "/web/"

@@ -8,6 +8,10 @@
  *
  * Also forces the 1920×1080 TV layout, blocks HTML5 <video> (Amazon WebView
  * freezes on MKV), and forwards downloads to Android DownloadManager.
+ *
+ * Do not patch HTMLImageElement.src or ApiClient image URLs: Amazon WebView
+ * re-enters the setter (freeze on Search) and dropping fillWidth/fillHeight
+ * makes library posters such as Treasure Maps fail to load.
  */
 (function () {
     function forceTvViewport() {
@@ -55,10 +59,10 @@
             ".layout-tv .backdropContainer .backdropImage,.layout-tv .backgroundContainer .backdropImage{",
             "  opacity:.16!important;filter:none!important;",
             "}",
-            ".layout-tv .card,.layout-tv .cardBox,.layout-tv .emby-button,.layout-tv .listItem{",
+            ".layout-tv .card,.layout-tv .cardBox{",
             "  transition:transform .12s ease-out,box-shadow .12s ease-out!important;",
             "}",
-            ".layout-tv .card:focus,.layout-tv .card:focus .cardBox,.layout-tv .emby-button:focus,.layout-tv .listItem:focus{",
+            ".layout-tv .card:focus,.layout-tv .card:focus .cardBox{",
             "  outline:none!important;box-shadow:0 0 0 3px #00A4DC!important;",
             "}",
             "video,audio[controls]{display:none!important;width:0!important;height:0!important;}"
@@ -83,7 +87,6 @@
                     while (this.firstChild) {
                         this.removeChild(this.firstChild);
                     }
-                    this.load();
                 } catch (e) { /* ignore */ }
                 return Promise.resolve();
             };
@@ -100,93 +103,6 @@
                 el.pause();
             } catch (e) { /* ignore */ }
         }, true);
-    }
-
-    function maxEdgeFor(url) {
-        if (/\/Images\/(Backdrop|Thumb|Banner)/i.test(url)) {
-            return 1280;
-        }
-        if (/\/Images\/(Logo|Art)(\/|$|\?)/i.test(url)) {
-            return 480;
-        }
-        return 720;
-    }
-
-    function rewriteArtwork(url) {
-        if (typeof url !== "string") {
-            return url;
-        }
-        if (url.indexOf("/Items/") === -1 || url.indexOf("/Images/") === -1) {
-            return url;
-        }
-        if (url.indexOf("/web/") !== -1) {
-            return url;
-        }
-        var hash = "";
-        var hashAt = url.indexOf("#");
-        if (hashAt !== -1) {
-            hash = url.slice(hashAt);
-            url = url.slice(0, hashAt);
-        }
-        var parts = url.split("?");
-        var base = parts[0];
-        var kept = [];
-        var query = parts[1] || "";
-        if (query) {
-            query.split("&").forEach(function (part) {
-                if (!part) {
-                    return;
-                }
-                var name = part.split("=")[0].toLowerCase();
-                if (name === "maxwidth" || name === "maxheight" || name === "fillwidth" || name === "fillheight" || name === "quality") {
-                    return;
-                }
-                kept.push(part);
-            });
-        }
-        kept.push("maxWidth=" + maxEdgeFor(url));
-        kept.push("quality=70");
-        return base + "?" + kept.join("&") + hash;
-    }
-
-    function patchArtwork() {
-        if (window.__firetvArtworkPatched) {
-            return;
-        }
-        window.__firetvArtworkPatched = true;
-        var proto = window.HTMLImageElement && window.HTMLImageElement.prototype;
-        if (proto) {
-            var desc = Object.getOwnPropertyDescriptor(proto, "src");
-            if (desc && desc.set) {
-                Object.defineProperty(proto, "src", {
-                    configurable: true,
-                    enumerable: desc.enumerable,
-                    get: desc.get,
-                    set: function (value) {
-                        desc.set.call(this, rewriteArtwork(value));
-                    }
-                });
-            }
-        }
-        var wraps = 0;
-        var timer = setInterval(function () {
-            var api = window.ApiClient;
-            wraps += 1;
-            if (api && !api.__firetvWrapped) {
-                api.__firetvWrapped = true;
-                ["getScaledImageUrl", "getImageUrl"].forEach(function (name) {
-                    var orig = api[name];
-                    if (typeof orig === "function") {
-                        api[name] = function () {
-                            return rewriteArtwork(orig.apply(this, arguments));
-                        };
-                    }
-                });
-            }
-            if ((api && api.__firetvWrapped) || wraps > 80) {
-                clearInterval(timer);
-            }
-        }, 250);
     }
 
     window.FireTvCanExit = function () {
@@ -218,13 +134,11 @@
         forceTvViewport();
         injectPerformanceCss();
         patchHtml5Media();
-        patchArtwork();
     };
 
     forceTvViewport();
     injectPerformanceCss();
     patchHtml5Media();
-    patchArtwork();
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", window.FireTvGuard);
     } else {
@@ -247,7 +161,7 @@
             deviceId: "firetv-web",
             deviceName: "Fire TV",
             appName: "Jellyfin Fire TV",
-            appVersion: "1.3.0"
+            appVersion: "1.3.1"
         };
     }
 

@@ -5,7 +5,7 @@ package org.jellyfin.firetv.core
  */
 object FireTvClient {
     const val APP_NAME: String = "Jellyfin Fire TV"
-    const val APP_VERSION: String = "1.3.0"
+    const val APP_VERSION: String = "1.3.1"
     const val DEFAULT_LAYOUT: String = "tv"
     const val DEFAULT_HTTP_PORT: Int = 8096
     const val DISCOVERY_PORT: Int = 7359

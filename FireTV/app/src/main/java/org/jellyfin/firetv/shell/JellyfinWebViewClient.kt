@@ -62,6 +62,9 @@ class JellyfinWebViewClient(
     }
 
     override fun onPageFinished(view: WebView, url: String) {
+        if (url.startsWith("about:", ignoreCase = true)) {
+            return
+        }
         view.evaluateJavascript(PAGE_READY_SCRIPT, null)
         callbacks.onPageReady()
     }
@@ -180,7 +183,9 @@ class JellyfinWebViewClient(
         private val PAGE_READY_SCRIPT = """
             (function(){
               try { localStorage.setItem('layout','tv'); } catch(e) {}
-              if (window.FireTvGuard) { window.FireTvGuard(); }
+              var active = document.activeElement;
+              var typing = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
+              if (!typing && window.FireTvGuard) { window.FireTvGuard(); }
               var head = document.head;
               if (head) {
                 var meta = document.querySelector('meta[name="viewport"]');
