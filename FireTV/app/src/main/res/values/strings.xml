@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Jellyfin</string>
+    <string name="connect_title">Jellyfin on Fire TV</string>
+    <string name="connect_subtitle">Loads the full Jellyfin web interface (same as the iOS app), not the API-only Android TV client.</string>
+    <string name="server_url_hint">http://192.168.1.10:8096</string>
+    <string name="server_url_label">Server address</string>
+    <string name="connect">Connect</string>
+    <string name="discover">Search local network</string>
+    <string name="discovering">Searching for servers…</string>
+    <string name="no_servers_found">No servers found. Enter the address with the remote.</string>
+    <string name="ignore_ssl">Allow self-signed certificates</string>
+    <string name="connecting">Connecting to Jellyfin…</string>
+    <string name="connection_failed">Could not reach a Jellyfin server at this address.</string>
+    <string name="invalid_url">Enter a valid address, for example 192.168.1.10 or https://jellyfin.example.com</string>
+    <string name="found_servers">Servers on this network</string>
+    <string name="change_server">Change server</string>
+    <string name="retry">Retry</string>
+    <string name="reload">Reload</string>
+    <string name="exit">Exit</string>
+    <string name="client_menu">Jellyfin</string>
+    <string name="webview_error">The web interface could not be loaded. Check that the server is running and that this Fire TV Stick can reach it.</string>
+    <string name="press_back_again">Press Back again to exit</string>
+    <string name="connected_as">Connected to %1$s</string>
+</resources>
