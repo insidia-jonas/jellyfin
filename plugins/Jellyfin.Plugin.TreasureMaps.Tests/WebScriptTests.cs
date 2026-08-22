@@ -39,17 +39,29 @@ public class WebScriptTests
     }
 
     [Fact]
+    public void TitlePage_ReplacesPosterGridIncludingAndereInhalte()
+    {
+        var js = File.ReadAllText(ScriptPath());
+        Assert.Contains("#childrenCollapsible", js, StringComparison.Ordinal);
+        Assert.Contains("childrenItemsContainer", js, StringComparison.Ordinal);
+        Assert.Contains("andere inhalte", js, StringComparison.Ordinal);
+        Assert.Contains("hideNativeChildren", js, StringComparison.Ordinal);
+        Assert.Contains("pickReleases", js, StringComparison.Ordinal);
+        Assert.Contains("tmTitlePage", js, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ApplyScriptTag_InsertsThenUpgradesVersion()
     {
         var html = "<html><body>hi</body></html>";
         var first = WebScriptInjector.ApplyScriptTag(html);
         Assert.NotNull(first);
-        Assert.Contains("TreasureMaps/ClientScript?v=3", first, StringComparison.Ordinal);
+        Assert.Contains("TreasureMaps/ClientScript?v=4", first, StringComparison.Ordinal);
 
-        var stale = first!.Replace("ClientScript?v=3", "ClientScript?v=2", StringComparison.Ordinal);
+        var stale = first!.Replace("ClientScript?v=4", "ClientScript?v=3", StringComparison.Ordinal);
         var upgraded = WebScriptInjector.ApplyScriptTag(stale);
         Assert.NotNull(upgraded);
-        Assert.Contains("ClientScript?v=3", upgraded, StringComparison.Ordinal);
+        Assert.Contains("ClientScript?v=4", upgraded, StringComparison.Ordinal);
         Assert.Equal(1, CountOccurrences(upgraded!, "plugin=\"TreasureMaps\""));
     }
 

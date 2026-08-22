@@ -51,6 +51,9 @@
         '#tmDownloads .tmDlOpen{flex:0 0 auto;align-self:center;border:none;border-radius:999px;' +
         'min-height:2.75rem;padding:.55em 1.15em;background:#0a84ff;color:#fff;font-weight:600;' +
         'font-family:inherit;cursor:pointer}' +
+        '.tmTitlePage .collectionItems,.tmTitlePage #childrenCollapsible,' +
+        '.tmTitlePage #listChildrenCollapsible,.tmTitlePage .childrenItemsContainer,' +
+        '.tmTitlePage .tmNativeChildren{display:none!important}' +
         '.tmDownloadsPage .itemsContainer,.tmDownloadsPage .alphaPicker{display:none!important}' +
         '.tmDownloadHero{display:flex;gap:1rem;align-items:center;margin:0 0 1em;flex-wrap:wrap}' +
         '.tmDownloadHero .tmDlBar{flex:1 1 12rem;height:10px;border-radius:99px;background:rgba(255,255,255,.12)}' +
@@ -117,6 +120,7 @@
         var el = page && page.querySelector(selector);
         if (el) { callback(page, el); return; }
         if (tries > 0) { setTimeout(function () { whenReady(selector, tries - 1, callback); }, 350); }
+        else if (page) { callback(page, page); }
     }
 
     function looksQuality(name) {
@@ -140,41 +144,98 @@
         return item.Type === 'BoxSet' && /Download complete|Download failed|Downloading|SABnzbd|Treasure-Maps download/i.test(overview);
     }
 
-    /* ---- Movie/show title page: replace the generic children row with a release LIST ---- */
+    /* ---- Movie/show title page: replace the generic children POSTER GRID with a release LIST ----
+       Newer jellyfin-web renders BoxSet children in #childrenCollapsible / .childrenItemsContainer
+       (German heading: "Andere Inhalte"), not only .collectionItems. */
     function enhanceTitlePage(item) {
         if (isDownloadItem(item) && !hasReleaseChildrenHint(item)) {
             enhanceDownloadDetail(item);
             return;
         }
 
-        api().getItems(api().getCurrentUserId(), { ParentId: item.Id, Fields: 'ProviderIds' }).then(function (result) {
-            var releases = (result.Items || []).filter(function (i) {
-                return i.ProviderIds && i.ProviderIds.TreasureMaps;
-            });
+        api().getItems(api().getCurrentUserId(), { ParentId: item.Id, Fields: 'ProviderIds,Overview' }).then(function (result) {
+            var releases = pickReleases(result.Items || []);
             if (!releases.length) {
                 if (isDownloadItem(item)) { enhanceDownloadDetail(item); }
                 return;
             }
 
-            whenReady('.collectionItems', 14, function (page, collection) {
-                collection.style.display = 'none';
-                var old = page.querySelector('#tmReleases');
-                if (old) { old.remove(); }
-
-                var host = document.createElement('div');
-                host.id = 'tmReleases';
-                host.className = 'verticalSection detailVerticalSection';
-                var title = document.createElement('h2');
-                title.className = 'sectionTitle';
-                title.textContent = 'Releases';
-                host.appendChild(title);
-                releases.forEach(function (release) { host.appendChild(buildRow(release, item.Name)); });
-
-                collection.parentNode.insertBefore(host, collection);
-                refreshStatus();
-                startPoll();
+            whenReady(childrenSelectors(), 28, function (page) {
+                renderReleaseList(page, item, releases);
             });
         }).catch(function () { });
+    }
+
+    function pickReleases(items) {
+        return items.filter(function (i) {
+            if (!i || i.Type === 'Person') { return false; }
+            if (i.ProviderIds && i.ProviderIds.TreasureMaps) { return true; }
+            return i.Type === 'Folder' || i.Type === 'BoxSet' || looksQuality(i.Name);
+        });
+    }
+
+    function childrenSelectors() {
+        return '.collectionItems, #childrenCollapsible, #listChildrenCollapsible, .childrenItemsContainer, .itemsContainer';
+    }
+
+    function findChildrenHost(page) {
+        return page.querySelector('.collectionItems')
+            || page.querySelector('#childrenCollapsible')
+            || page.querySelector('#listChildrenCollapsible')
+            || page.querySelector('.childrenItemsContainer')
+            || page.querySelector('.detailPageSecondaryContainer .itemsContainer')
+            || page.querySelector('.itemsContainer');
+    }
+
+    function hideNativeChildren(page) {
+        page.classList.add('tmTitlePage', 'tmChannelPage');
+        page.querySelectorAll(childrenSelectors()).forEach(function (el) {
+            if (el.closest('#tmReleases') || el.closest('#tmDownloads')) { return; }
+            el.classList.add('tmNativeChildren');
+            el.style.display = 'none';
+        });
+        page.querySelectorAll('.verticalSection, .detailVerticalSection, section').forEach(function (sec) {
+            if (sec.id === 'tmReleases' || sec.id === 'tmDownloads' || sec.querySelector('#tmReleases')) { return; }
+            var heading = sec.querySelector('.sectionTitle, h2, h1');
+            var text = heading ? (heading.textContent || '') : '';
+            if (/andere inhalte|other items|items in this|more from|in this collection|weitere inhalte/i.test(text)) {
+                sec.classList.add('tmNativeChildren');
+                sec.style.display = 'none';
+            }
+        });
+    }
+
+    function renderReleaseList(page, item, releases) {
+        hideNativeChildren(page);
+        var old = page.querySelector('#tmReleases');
+        if (old) { old.remove(); }
+
+        var host = document.createElement('div');
+        host.id = 'tmReleases';
+        host.className = 'verticalSection detailVerticalSection';
+        var title = document.createElement('h2');
+        title.className = 'sectionTitle';
+        title.textContent = 'Releases';
+        host.appendChild(title);
+        releases.forEach(function (release) { host.appendChild(buildRow(release, item.Name)); });
+
+        var anchor = findChildrenHost(page)
+            || page.querySelector('.detailPageSecondaryContainer')
+            || page.querySelector('.itemOverview')
+            || page;
+        if (anchor.parentNode && anchor !== page) {
+            anchor.parentNode.insertBefore(host, anchor);
+        } else {
+            page.appendChild(host);
+        }
+
+        hideNativeChildren(page);
+        var observer = new MutationObserver(function () { hideNativeChildren(page); });
+        observer.observe(page, { childList: true, subtree: true });
+        setTimeout(function () { observer.disconnect(); }, 15000);
+
+        refreshStatus();
+        startPoll();
     }
 
     function hasReleaseChildrenHint(item) {

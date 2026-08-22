@@ -273,11 +273,12 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   `REL::` / `grab::` ids carry `title + quality + cover`. `DownloadTitle` detects quality-only
   labels (`1080p · WEB-DL · …`) so they never become the card heading.
 - Client script injection (web only): `WebScriptInjector` inserts
-  `<script plugin="TreasureMaps" defer src="/TreasureMaps/ClientScript?v=3">` into the web client's
+  `<script plugin="TreasureMaps" defer src="/TreasureMaps/ClientScript?v=4">` into the web client's
   `index.html` at startup (marker-guarded, same pattern as Intro Skipper; served anonymously by
   `GET TreasureMaps/ClientScript` from `Web/treasuremaps.js`). Rebuilding jellyfin-web replaces
   index.html — the injection re-applies on the next server start. The script: (1) replaces the
-  generic children card row on Treasure-Maps title pages with a "Releases" LIST (row per release,
+  generic children poster grid on Treasure-Maps title pages (`.collectionItems`,
+  `#childrenCollapsible`, German heading "Andere Inhalte") with a "Releases" LIST (row per release,
   flag+badge name, blue Download button calling the Grab endpoint with `title=`), (2) turns the
   Downloads folder into a large-row title/poster/progress list (`#tmDownloads`) and opens
   `#/details?id=` so phones and TV wrappers can navigate, (3) polls
