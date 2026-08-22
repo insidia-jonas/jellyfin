@@ -49,7 +49,9 @@ public sealed class OpenSubtitlesClient : IDisposable
     {
         var client = _httpClientFactory.CreateClient();
         client.DefaultRequestHeaders.Add("Api-Key", Config.OpenSubtitlesApiKey);
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Jellyfin.Plugin.TreasureMaps/1.0");
+        // OpenSubtitles requires "AppName vX.Y" (a slash-form User-Agent is often rejected).
+        client.DefaultRequestHeaders.UserAgent.Clear();
+        client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "TreasureMaps v1.0");
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         return client;
     }
@@ -70,6 +72,12 @@ public sealed class OpenSubtitlesClient : IDisposable
             return null;
         }
 
+        if (OpenSubtitlesErrors.LooksLikeEmail(Config.OpenSubtitlesUsername))
+        {
+            throw new InvalidOperationException(
+                OpenSubtitlesErrors.FormatHttpError(400, null, Config.OpenSubtitlesUsername));
+        }
+
         if (_token is not null && (DateTime.UtcNow - _tokenAcquired) < TimeSpan.FromHours(12))
         {
             return _token;
@@ -85,10 +93,14 @@ public sealed class OpenSubtitlesClient : IDisposable
 
             using var client = CreateClient();
             var payload = JsonSerializer.Serialize(new { username = Config.OpenSubtitlesUsername, password = Config.OpenSubtitlesPassword });
-            using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+            using var content = JsonBody(payload);
             using var response = await client.PostAsync(BaseUrl + "/login", content, cancellationToken).ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException(
+                    OpenSubtitlesErrors.FormatHttpError((int)response.StatusCode, body, Config.OpenSubtitlesUsername));
+            }
             var login = JsonSerializer.Deserialize<OsLoginResponse>(body, _jsonOptions);
             _token = login?.Token;
             _tokenAcquired = DateTime.UtcNow;
@@ -117,8 +129,12 @@ public sealed class OpenSubtitlesClient : IDisposable
 
         var url = BaseUrl + "/subtitles?" + query;
         using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException(OpenSubtitlesErrors.FormatHttpError((int)response.StatusCode, body));
+        }
+
         return JsonSerializer.Deserialize<OsSearchResponse>(body, _jsonOptions);
     }
 
@@ -138,11 +154,22 @@ public sealed class OpenSubtitlesClient : IDisposable
         }
 
         var payload = JsonSerializer.Serialize(new { file_id = fileId });
-        using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+        using var content = JsonBody(payload);
         using var response = await client.PostAsync(BaseUrl + "/download", content, cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException(OpenSubtitlesErrors.FormatHttpError((int)response.StatusCode, body));
+        }
+
         return JsonSerializer.Deserialize<OsDownloadResponse>(body, _jsonOptions);
+    }
+
+    private static StringContent JsonBody(string payload)
+    {
+        var content = new StringContent(payload, Encoding.UTF8);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        return content;
     }
 
     /// <summary>

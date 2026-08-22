@@ -82,8 +82,9 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   `PluginServiceRegistrator`), so it appears in each item's native "Subtitles → Search". It matches
   by OSDB **movie-hash** (exact file, computed by `MovieHasher` from the item's `MediaPath`) first,
   then IMDb id / query, ranked by hash-match then download count. Search needs the OpenSubtitles API
-  key; downloading needs the account login (username/password). Config + "test" button on the plugin
-  config page.
+  key; downloading needs the account login. The REST <c>POST /login</c> wants the
+  **opensubtitles.com username, not the email** (email → HTTP 400). Config + "test" button on the
+  plugin config page.
 - Pi deployment: `scripts/pi/full-redeploy.sh` is the one-shot for a Raspberry Pi — it stops
   `jellyfin` / `jellyfin12`, deletes every known old Treasure-Maps plugin dir and channel cache,
   checks out `BRANCH` (default `cursor/set-up-dev-environment-0947`), publishes Jellyfin 12,

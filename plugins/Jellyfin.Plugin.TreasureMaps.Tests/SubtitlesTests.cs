@@ -76,4 +76,25 @@ public class SubtitlesTests
         Assert.True(sub.Attributes.MoviehashMatch);
         Assert.Equal(998877, sub.Attributes.Files[0].FileId);
     }
+
+    [Fact]
+    public void LooksLikeEmail_DetectsAddressUsedAsUsername()
+    {
+        Assert.True(OpenSubtitlesErrors.LooksLikeEmail("j.kemmner@gmx.de"));
+        Assert.False(OpenSubtitlesErrors.LooksLikeEmail("jkemmner"));
+        Assert.False(OpenSubtitlesErrors.LooksLikeEmail(null));
+    }
+
+    [Fact]
+    public void FormatHttpError_ExplainsEmailLogin()
+    {
+        var message = OpenSubtitlesErrors.FormatHttpError(
+            400,
+            """{"message":"Error, invalid username/password - remember to use your username and not your email to authenticate","status":400}""",
+            "j.kemmner@gmx.de");
+
+        Assert.Contains("username", message, System.StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("not the email", message, System.StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("400 (Bad Request)", message, System.StringComparison.Ordinal);
+    }
 }
