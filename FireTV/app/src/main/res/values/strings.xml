@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Jellyfin</string>
+    <string name="app_version_label">Version %1$s</string>
     <string name="connect_title">Jellyfin on Fire TV</string>
-    <string name="connect_subtitle">Full Jellyfin web interface, sized for your TV. Play uses the Fire TV player so movies do not freeze the Stick.</string>
+    <string name="connect_subtitle">Full Jellyfin web interface on your TV. Play uses the Fire TV player so movies do not freeze. Downloads go to the Downloads folder.</string>
     <string name="preparing_playback">Starting playback…</string>
     <string name="playback_failed">This release could not be played. Try another version, or check that the server can transcode.</string>
+    <string name="playback_timeout">The server took too long to start this title. Check the network and try again.</string>
     <string name="webview_recovered">The interface recovered after a graphics error and will reload.</string>
     <string name="server_url_hint">http://192.168.1.10:8096</string>
     <string name="server_url_label">Server address</string>
@@ -20,9 +22,16 @@
     <string name="change_server">Change server</string>
     <string name="retry">Retry</string>
     <string name="reload">Reload</string>
+    <string name="downloads">Downloads</string>
+    <string name="download_failed">Download could not be started.</string>
+    <string name="downloads_unavailable">The Downloads app is not available on this device.</string>
     <string name="exit">Exit</string>
     <string name="client_menu">Jellyfin</string>
     <string name="webview_error">The web interface could not be loaded. Check that the server is running and that this Fire TV Stick can reach it.</string>
     <string name="press_back_again">Press Back again to exit</string>
     <string name="connected_as">Connected to %1$s</string>
+    <plurals name="download_started">
+        <item quantity="one">Download started</item>
+        <item quantity="other">%d downloads started</item>
+    </plurals>
 </resources>

@@ -12,14 +12,25 @@ class NativeShellAssetTest {
         assertTrue(script.contains("return \"tv\""))
         assertTrue(script.contains("width=1920"))
         assertTrue(script.contains("ExoPlayerPlugin"))
+        assertTrue(script.contains("filedownload"))
+        assertTrue(script.contains("downloadFile"))
+        assertTrue(script.contains("import(\"/native/ExoPlayerPlugin.js\")") || script.contains("import('/native/ExoPlayerPlugin.js')"))
+        assertTrue(script.contains("HTMLVideoElement"))
         assertTrue(script.contains("localStorage.setItem(\"layout\", \"tv\")"))
+        val plugin = locate("ExoPlayerPlugin.js")
+        val pluginText = plugin.readText()
+        assertTrue(pluginText.contains("export class ExoPlayerPlugin"))
+        assertTrue(pluginText.contains("NativePlayer"))
+        assertTrue(pluginText.contains("accessToken"))
     }
 
-    private fun locateNativeShell(): File {
+    private fun locateNativeShell(): File = locate("nativeshell.js")
+
+    private fun locate(name: String): File {
         val candidates = listOf(
-            File("app/src/main/assets/native/nativeshell.js"),
-            File("../app/src/main/assets/native/nativeshell.js"),
-            File("src/main/assets/native/nativeshell.js"),
+            File("app/src/main/assets/native/$name"),
+            File("../app/src/main/assets/native/$name"),
+            File("src/main/assets/native/$name"),
         )
         return candidates.first { it.isFile }
     }

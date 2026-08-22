@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Jellyfin</string>
+    <string name="app_version_label">Version %1$s</string>
     <string name="connect_title">Jellyfin auf Fire TV</string>
-    <string name="connect_subtitle">Vollständige Jellyfin-Web-Oberfläche, passend zur TV-Auflösung. Wiedergabe läuft über den Fire-TV-Player, damit Filme den Stick nicht einfrieren.</string>
+    <string name="connect_subtitle">Vollständige Jellyfin-Web-Oberfläche auf dem Fernseher. Wiedergabe läuft über den Fire-TV-Player, damit Filme den Stick nicht einfrieren. Downloads landen im Ordner Downloads.</string>
     <string name="server_url_hint">http://192.168.1.10:8096</string>
     <string name="server_url_label">Serveradresse</string>
     <string name="connect">Verbinden</string>
@@ -17,6 +18,9 @@
     <string name="change_server">Server wechseln</string>
     <string name="retry">Erneut versuchen</string>
     <string name="reload">Neu laden</string>
+    <string name="downloads">Downloads</string>
+    <string name="download_failed">Download konnte nicht gestartet werden.</string>
+    <string name="downloads_unavailable">Die Download-App ist auf diesem Gerät nicht verfügbar.</string>
     <string name="exit">Beenden</string>
     <string name="client_menu">Jellyfin</string>
     <string name="webview_error">Die Web-Oberfläche konnte nicht geladen werden. Prüfe, ob der Server läuft und dieser Fire TV Stick ihn erreicht.</string>
@@ -24,5 +28,10 @@
     <string name="connected_as">Verbunden mit %1$s</string>
     <string name="preparing_playback">Wiedergabe startet…</string>
     <string name="playback_failed">Diese Fassung konnte nicht abgespielt werden. Andere Version wählen oder Transcoding auf dem Server prüfen.</string>
+    <string name="playback_timeout">Der Server hat zu lange gebraucht, um den Titel zu starten. Netz prüfen und erneut versuchen.</string>
     <string name="webview_recovered">Die Oberfläche wurde nach einem Grafikfehler neu geladen.</string>
+    <plurals name="download_started">
+        <item quantity="one">Download gestartet</item>
+        <item quantity="other">%d Downloads gestartet</item>
+    </plurals>
 </resources>

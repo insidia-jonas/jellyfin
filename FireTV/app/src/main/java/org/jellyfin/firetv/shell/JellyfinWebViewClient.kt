@@ -2,20 +2,31 @@ package org.jellyfin.firetv.shell
 
 import android.content.Context
 import android.net.http.SslError
+import android.webkit.CookieManager
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.SslErrorHandler
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import org.jellyfin.firetv.core.ArtworkUrl
 import org.jellyfin.firetv.core.DisplayScale
+import org.jellyfin.firetv.core.NativeAsset
+import org.jellyfin.firetv.core.NativeShellInjector
 import org.jellyfin.firetv.core.ResourceKind
 import java.io.ByteArrayInputStream
+import java.net.HttpURLConnection
+import java.net.URL
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
+import javax.net.ssl.HostnameVerifier
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLContext
+import javax.net.ssl.X509TrustManager
 
 class JellyfinWebViewClient(
     private val context: Context,
     private val ignoreSslErrors: Boolean,
-    private val nativeshellJs: String,
     private val callbacks: Callbacks,
 ) : WebViewClient() {
 
@@ -39,21 +50,23 @@ class JellyfinWebViewClient(
         if (ResourceKind.isNativeBridge(path)) {
             return serveNativeAsset(request.url.lastPathSegment)
         }
-        // Never intercept media. Doing so (or re-downloading HTML on the WebView
-        // thread) is what froze the app when a release/version was selected.
         if (ResourceKind.isMedia(path)) {
             return null
+        }
+        if (request.method.equals("GET", ignoreCase = true) &&
+            request.isForMainFrame &&
+            ResourceKind.isWebDocument(path)
+        ) {
+            return injectNativeShell(request)
+        }
+        if (request.method.equals("GET", ignoreCase = true) && ResourceKind.isArtwork(path)) {
+            return downscaleArtwork(request)
         }
         return null
     }
 
-    override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
-        view.evaluateJavascript(nativeshellJs, null)
-    }
-
     override fun onPageFinished(view: WebView, url: String) {
-        view.evaluateJavascript(nativeshellJs, null)
-        view.evaluateJavascript(FIT_SCRIPT, null)
+        view.evaluateJavascript(PAGE_READY_SCRIPT, null)
         callbacks.onPageReady()
     }
 
@@ -89,11 +102,96 @@ class JellyfinWebViewClient(
         }
         return try {
             val stream = context.assets.open("native/$name")
-            val mime = if (name.endsWith(".js")) "application/javascript" else "application/octet-stream"
-            WebResourceResponse(mime, "utf-8", stream)
+            WebResourceResponse(
+                NativeAsset.mimeType(name),
+                "utf-8",
+                200,
+                "OK",
+                NativeAsset.responseHeaders(name),
+                stream,
+            )
         } catch (_: Exception) {
             notFound()
         }
+    }
+
+    private fun injectNativeShell(request: WebResourceRequest): WebResourceResponse? {
+        return runCatching {
+            val body = fetchBytes(request, request.url.toString()) ?: return null
+            val html = NativeShellInjector.inject(body.toString(Charsets.UTF_8))
+            WebResourceResponse(
+                "text/html",
+                "utf-8",
+                200,
+                "OK",
+                mapOf("Content-Type" to "text/html; charset=utf-8", "Cache-Control" to "no-cache"),
+                ByteArrayInputStream(html.toByteArray(Charsets.UTF_8)),
+            )
+        }.getOrNull()
+    }
+
+    private fun downscaleArtwork(request: WebResourceRequest): WebResourceResponse? {
+        val original = request.url.toString()
+        if (!ArtworkUrl.shouldDownscale(original)) {
+            return null
+        }
+        val resized = ArtworkUrl.downscale(original)
+        return runCatching {
+            val bytes = fetchBytes(request, resized) ?: return null
+            val mime = guessImageMime(resized, bytes)
+            WebResourceResponse(
+                mime,
+                null,
+                200,
+                "OK",
+                mapOf("Content-Type" to mime, "Cache-Control" to "max-age=86400"),
+                ByteArrayInputStream(bytes),
+            )
+        }.getOrNull()
+    }
+
+    private fun fetchBytes(request: WebResourceRequest, url: String): ByteArray? {
+        val connection = URL(url).openConnection() as HttpURLConnection
+        connection.connectTimeout = 8_000
+        connection.readTimeout = 12_000
+        connection.instanceFollowRedirects = true
+        connection.requestMethod = "GET"
+        request.requestHeaders.forEach { (key, value) ->
+            if (!key.equals("Accept-Encoding", ignoreCase = true)) {
+                connection.setRequestProperty(key, value)
+            }
+        }
+        CookieManager.getInstance().getCookie(url)?.let { connection.setRequestProperty("Cookie", it) }
+        if (ignoreSslErrors && connection is HttpsURLConnection) {
+            trustAll(connection)
+        }
+        return try {
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                null
+            } else {
+                connection.inputStream.use { it.readBytes() }
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun guessImageMime(url: String, bytes: ByteArray): String {
+        return when {
+            url.contains("format=webp", ignoreCase = true) || bytes.startsWith("RIFF") -> "image/webp"
+            bytes.size >= 3 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() -> "image/jpeg"
+            bytes.size >= 8 && bytes[0] == 0x89.toByte() -> "image/png"
+            else -> "image/jpeg"
+        }
+    }
+
+    private fun ByteArray.startsWith(ascii: String): Boolean {
+        val prefix = ascii.toByteArray(Charsets.US_ASCII)
+        if (size < prefix.size) {
+            return false
+        }
+        return prefix.indices.all { this[it] == prefix[it] }
     }
 
     private fun notFound(): WebResourceResponse {
@@ -107,19 +205,28 @@ class JellyfinWebViewClient(
         )
     }
 
+    private fun trustAll(connection: HttpsURLConnection) {
+        val trustManager = object : X509TrustManager {
+            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = Unit
+            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) = Unit
+            override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+        }
+        val context = SSLContext.getInstance("TLS")
+        context.init(null, arrayOf(trustManager), SecureRandom())
+        connection.sslSocketFactory = context.socketFactory
+        connection.hostnameVerifier = HostnameVerifier { _, _ -> true }
+    }
+
     companion object {
-        private val FIT_SCRIPT = """
+        private val PAGE_READY_SCRIPT = """
             (function(){
               try { localStorage.setItem('layout','tv'); } catch(e) {}
+              if (window.FireTvGuard) { window.FireTvGuard(); }
               var head = document.head;
               if (head) {
                 var meta = document.querySelector('meta[name="viewport"]');
                 if (!meta) { meta = document.createElement('meta'); meta.name='viewport'; head.insertBefore(meta, head.firstChild); }
                 meta.setAttribute('content', '${DisplayScale.VIEWPORT_CONTENT}');
-              }
-              if (document.documentElement) {
-                document.documentElement.style.width = '100%';
-                document.documentElement.style.height = '100%';
               }
             })();
         """.trimIndent()

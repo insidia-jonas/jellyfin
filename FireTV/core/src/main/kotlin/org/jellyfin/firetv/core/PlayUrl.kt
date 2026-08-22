@@ -16,6 +16,8 @@ object PlayUrl {
     fun resolve(serverBase: String, source: MediaSourceUrls): String? {
         val base = serverBase.trimEnd('/')
         val path = source.path
+        // Direct play of a remote HTTP(S) file. Never treat a server filesystem
+        // path like `/mnt/media/movie.mkv` as a URL — ExoPlayer would hang on it.
         if (source.supportsDirectPlay && path != null && isAbsoluteHttp(path)) {
             return path
         }
@@ -25,8 +27,8 @@ object PlayUrl {
         if (!source.transcodingUrl.isNullOrBlank()) {
             return absolutize(base, source.transcodingUrl!!)
         }
-        if (!path.isNullOrBlank()) {
-            return if (isAbsoluteHttp(path)) path else absolutize(base, path)
+        if (!path.isNullOrBlank() && isAbsoluteHttp(path)) {
+            return path
         }
         return null
     }

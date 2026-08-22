@@ -37,4 +37,29 @@ class PlayUrlTest {
         )
         assertEquals("https://cdn.example/movie.mp4", url)
     }
+
+    @Test
+    fun `ignores server filesystem paths that would hang exoplayer`() {
+        val url = PlayUrl.resolve(
+            "http://192.168.1.10:8096",
+            MediaSourceUrls(
+                path = "/mnt/media/movie.mkv",
+                supportsDirectPlay = true,
+            ),
+        )
+        assertEquals(null, url)
+    }
+
+    @Test
+    fun `filesystem path falls through to transcode`() {
+        val url = PlayUrl.resolve(
+            "http://192.168.1.10:8096",
+            MediaSourceUrls(
+                path = "/mnt/media/movie.mkv",
+                transcodingUrl = "/videos/1/master.m3u8",
+                supportsDirectPlay = true,
+            ),
+        )
+        assertEquals("http://192.168.1.10:8096/videos/1/master.m3u8", url)
+    }
 }

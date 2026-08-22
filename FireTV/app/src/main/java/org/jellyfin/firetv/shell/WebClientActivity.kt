@@ -1,16 +1,16 @@
 package org.jellyfin.firetv.shell
 
 import android.annotation.SuppressLint
+import android.app.DownloadManager
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.View
-import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
-import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
@@ -26,6 +26,7 @@ import org.jellyfin.firetv.connect.ConnectActivity
 import org.jellyfin.firetv.core.FireTvClient
 import org.jellyfin.firetv.core.ServerUrl
 import org.jellyfin.firetv.databinding.ActivityWebClientBinding
+import org.jellyfin.firetv.download.FileDownloader
 import org.jellyfin.firetv.player.NativePlayerBridge
 import org.jellyfin.firetv.player.PlayerActivity
 import org.jellyfin.firetv.prefs.AppPreferences
@@ -36,8 +37,6 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
     private lateinit var preferences: AppPreferences
     private lateinit var serverUrl: String
     private lateinit var mediaSession: PlaybackMediaSession
-    private var customView: View? = null
-    private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private var ignoreSsl: Boolean = false
     private lateinit var nativeshellJs: String
 
@@ -67,6 +66,10 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
             binding.webView.reload()
         }
         binding.menuChangeServer.setOnClickListener { openServerSelection() }
+        binding.menuDownloads.setOnClickListener {
+            hideMenu()
+            openDownloadManager()
+        }
         binding.menuExit.setOnClickListener { finishAffinity() }
 
         onBackPressedDispatcher.addCallback(
@@ -75,10 +78,6 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
                 override fun handleOnBackPressed() {
                     if (binding.menuOverlay.isVisible) {
                         hideMenu()
-                        return
-                    }
-                    if (customView != null) {
-                        binding.webView.webChromeClient?.onHideCustomView()
                         return
                     }
                     binding.webView.evaluateJavascript(
@@ -99,16 +98,23 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
         CookieManager.getInstance().setAcceptThirdPartyCookies(binding.webView, true)
         WebViewDisplayFit.apply(binding.webView)
         binding.webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            binding.webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
+        }
 
         binding.webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
-            javaScriptCanOpenWindowsAutomatically = true
-            mediaPlaybackRequiresUserGesture = false
+            javaScriptCanOpenWindowsAutomatically = false
+            // Require a gesture for HTML5 so Amazon WebView cannot autoplay MKV.
+            mediaPlaybackRequiresUserGesture = true
             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
             allowFileAccess = false
             allowContentAccess = false
             cacheMode = WebSettings.LOAD_DEFAULT
+            offscreenPreRaster = true
+            loadsImagesAutomatically = true
+            blockNetworkImage = false
             userAgentString = "$userAgentString ${FireTvClient.APP_NAME.replace(" ", "")}/${FireTvClient.APP_VERSION}"
         }
 
@@ -117,7 +123,6 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
         binding.webView.webViewClient = JellyfinWebViewClient(
             context = this,
             ignoreSslErrors = ignoreSsl,
-            nativeshellJs = nativeshellJs,
             callbacks = object : JellyfinWebViewClient.Callbacks {
                 override fun onPageReady() {
                     runOnUiThread {
@@ -141,28 +146,11 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
         )
         binding.webView.webChromeClient = object : WebChromeClient() {
             override fun onShowCustomView(view: View, callback: CustomViewCallback) {
-                if (customView != null) {
-                    callback.onCustomViewHidden()
-                    return
-                }
-                customView = view
-                customViewCallback = callback
-                binding.webView.visibility = View.GONE
-                (binding.root as FrameLayout).addView(
-                    view,
-                    0,
-                    FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
-                )
+                // HTML5 fullscreen freezes Fire TV on container formats. ExoPlayer owns video.
+                callback.onCustomViewHidden()
             }
 
-            override fun onHideCustomView() {
-                val view = customView ?: return
-                (binding.root as FrameLayout).removeView(view)
-                customView = null
-                customViewCallback?.onCustomViewHidden()
-                customViewCallback = null
-                binding.webView.visibility = View.VISIBLE
-            }
+            override fun onHideCustomView() = Unit
         }
 
         installDocumentStartScript()
@@ -286,6 +274,24 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
                     putExtra(PlayerActivity.EXTRA_IGNORE_SSL, ignoreSsl)
                 },
             )
+        }
+    }
+
+    override fun downloadFiles(json: String) {
+        val count = FileDownloader.enqueue(this, json)
+        val message = if (count > 0) {
+            resources.getQuantityString(R.plurals.download_started, count, count)
+        } else {
+            getString(R.string.download_failed)
+        }
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+    }
+
+    override fun openDownloadManager() {
+        runCatching {
+            startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.onFailure {
+            Toast.makeText(this, R.string.downloads_unavailable, Toast.LENGTH_LONG).show()
         }
     }
 

@@ -18,6 +18,8 @@ class NativeInterface(
         fun disableFullscreen()
         fun updateVolumeLevel(level: Int)
         fun launchPlayer(payload: String)
+        fun downloadFiles(json: String)
+        fun openDownloadManager()
         fun runOnHost(block: () -> Unit)
     }
 
@@ -69,5 +71,24 @@ class NativeInterface(
     @JavascriptInterface
     fun exitApp() {
         host.exitApp()
+    }
+
+    @JavascriptInterface
+    fun downloadFile(json: String?): Boolean {
+        downloadFiles(json)
+        return true
+    }
+
+    @JavascriptInterface
+    fun downloadFiles(json: String?): Boolean {
+        if (!json.isNullOrBlank()) {
+            host.runOnHost { host.downloadFiles(json) }
+        }
+        return true
+    }
+
+    @JavascriptInterface
+    fun openDownloadManager() {
+        host.runOnHost { host.openDownloadManager() }
     }
 }

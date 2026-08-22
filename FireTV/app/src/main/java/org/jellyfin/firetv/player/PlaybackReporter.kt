@@ -1,5 +1,6 @@
 package org.jellyfin.firetv.player
 
+import org.jellyfin.firetv.core.ResolvedPlayback
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL

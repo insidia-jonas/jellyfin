@@ -14,11 +14,19 @@ import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.jellyfin.firetv.R
+import org.jellyfin.firetv.core.ResolvedPlayback
+import org.jellyfin.firetv.core.StreamResolver
 import org.jellyfin.firetv.databinding.ActivityPlayerBinding
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -28,8 +36,16 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private var player: ExoPlayer? = null
     private var playback: ResolvedPlayback? = null
     private var reporter: PlaybackReporter? = null
+    private var resolveJob: Job? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private val hideOsd = Runnable { binding.osd.isVisible = false }
+    private val stallWatchdog = Runnable {
+        val exo = player ?: return@Runnable
+        if (exo.playbackState == Player.STATE_BUFFERING) {
+            Toast.makeText(this, R.string.playback_timeout, Toast.LENGTH_LONG).show()
+            stopAndClose()
+        }
+    }
     private val progressTick = object : Runnable {
         override fun run() {
             val exo = player ?: return
@@ -64,17 +80,24 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             return
         }
         val ignoreSsl = intent.getBooleanExtra(EXTRA_IGNORE_SSL, false)
-        lifecycleScope.launch {
+        resolveJob = lifecycleScope.launch {
             val resolved = withContext(Dispatchers.IO) {
-                runCatching { StreamResolver.resolve(payload, ignoreSsl) }
+                runCatching {
+                    withTimeout(25_000) {
+                        StreamResolver.resolve(payload, ignoreSsl)
+                    }
+                }
+            }
+            if (!isActiveSafe()) {
+                return@launch
             }
             val playback = resolved.getOrNull()
             if (playback == null) {
-                Toast.makeText(
-                    this@PlayerActivity,
-                    resolved.exceptionOrNull()?.message ?: getString(R.string.playback_failed),
-                    Toast.LENGTH_LONG,
-                ).show()
+                val reason = when (val error = resolved.exceptionOrNull()) {
+                    is TimeoutCancellationException -> getString(R.string.playback_timeout)
+                    else -> error?.message ?: getString(R.string.playback_failed)
+                }
+                Toast.makeText(this@PlayerActivity, reason, Toast.LENGTH_LONG).show()
                 finish()
                 return@launch
             }
@@ -82,18 +105,47 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         }
     }
 
+    private fun isActiveSafe(): Boolean {
+        return !isFinishing && !isDestroyed
+    }
+
     private fun startPlayer(resolved: ResolvedPlayback) {
         playback = resolved
         reporter = PlaybackReporter(resolved)
         binding.osdTitle.text = resolved.title
         binding.loadingTitle.text = resolved.title
-        val exo = ExoPlayer.Builder(this).build().also { player = it }
+        val headers = linkedMapOf<String, String>()
+        if (resolved.accessToken.isNotBlank()) {
+            headers["X-Emby-Token"] = resolved.accessToken
+            headers["Authorization"] =
+                "MediaBrowser Client=\"${resolved.appName}\", Device=\"${resolved.deviceName}\", " +
+                    "DeviceId=\"${resolved.deviceId}\", Version=\"${resolved.appVersion}\", Token=\"${resolved.accessToken}\""
+        }
+        val dataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent("${resolved.appName}/${resolved.appVersion}")
+            .setConnectTimeoutMs(12_000)
+            .setReadTimeoutMs(20_000)
+            .setAllowCrossProtocolRedirects(true)
+            .setDefaultRequestProperties(headers)
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(3_000, 20_000, 1_000, 2_500)
+            .build()
+        val exo = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            .setLoadControl(loadControl)
+            .build()
+            .also { player = it }
         binding.playerView.player = exo
         binding.playerView.useController = false
         exo.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_READY) {
                     binding.loading.isVisible = false
+                    mainHandler.removeCallbacks(stallWatchdog)
+                }
+                if (playbackState == Player.STATE_BUFFERING) {
+                    mainHandler.removeCallbacks(stallWatchdog)
+                    mainHandler.postDelayed(stallWatchdog, 45_000)
                 }
                 if (playbackState == Player.STATE_ENDED) {
                     stopAndClose()
@@ -101,7 +153,11 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                Toast.makeText(this@PlayerActivity, getString(R.string.playback_failed), Toast.LENGTH_LONG).show()
+                Toast.makeText(
+                    this@PlayerActivity,
+                    error.message?.takeIf { it.isNotBlank() } ?: getString(R.string.playback_failed),
+                    Toast.LENGTH_LONG,
+                ).show()
                 stopAndClose()
             }
         })
@@ -120,7 +176,15 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         if (event.action != KeyEvent.ACTION_DOWN) {
             return super.dispatchKeyEvent(event)
         }
-        val exo = player ?: return super.dispatchKeyEvent(event)
+        val exo = player
+        if (exo == null) {
+            if (event.keyCode == KeyEvent.KEYCODE_BACK || event.keyCode == KeyEvent.KEYCODE_ESCAPE) {
+                resolveJob?.cancel()
+                finish()
+                return true
+            }
+            return super.dispatchKeyEvent(event)
+        }
         return when (event.keyCode) {
             KeyEvent.KEYCODE_DPAD_CENTER,
             KeyEvent.KEYCODE_ENTER,
@@ -143,14 +207,14 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             KeyEvent.KEYCODE_DPAD_RIGHT,
             KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
             -> {
-                exo.seekTo((exo.currentPosition + 30_000).coerceAtMost(exo.duration.coerceAtLeast(0)))
+                exo.seekTo(seekTarget(exo, +30_000))
                 showOsd()
                 true
             }
             KeyEvent.KEYCODE_DPAD_LEFT,
             KeyEvent.KEYCODE_MEDIA_REWIND,
             -> {
-                exo.seekTo((exo.currentPosition - 10_000).coerceAtLeast(0))
+                exo.seekTo(seekTarget(exo, -10_000))
                 showOsd()
                 true
             }
@@ -165,6 +229,13 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         }
     }
 
+    private fun seekTarget(exo: ExoPlayer, deltaMs: Long): Long {
+        val duration = exo.duration
+        val position = exo.currentPosition.coerceAtLeast(0)
+        val next = position + deltaMs
+        return if (duration > 0) next.coerceIn(0, duration) else next.coerceAtLeast(0)
+    }
+
     private fun showOsd() {
         binding.osd.isVisible = true
         updateOsd()
@@ -174,7 +245,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
 
     private fun updateOsd() {
         val exo = player ?: return
-        val duration = exo.duration.coerceAtLeast(0)
+        val duration = exo.duration
         val position = exo.currentPosition.coerceAtLeast(0)
         binding.osdSeek.max = 1000
         binding.osdSeek.progress = if (duration > 0) ((position * 1000) / duration).toInt() else 0
@@ -233,6 +304,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private fun releasePlayer() {
         mainHandler.removeCallbacks(progressTick)
         mainHandler.removeCallbacks(hideOsd)
+        mainHandler.removeCallbacks(stallWatchdog)
         binding.playerView.player = null
         player?.release()
         player = null
@@ -246,6 +318,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     }
 
     override fun onDestroy() {
+        resolveJob?.cancel()
         if (PlayerCommands.listener === this) {
             PlayerCommands.listener = null
         }

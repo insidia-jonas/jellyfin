@@ -24,6 +24,23 @@ class ResourceKindTest {
     @Test
     fun `native bridge paths are detected`() {
         assertTrue(ResourceKind.isNativeBridge("/native/nativeshell.js"))
+        assertTrue(ResourceKind.isNativeBridge("/native/ExoPlayerPlugin.js"))
         assertFalse(ResourceKind.isNativeBridge("/web/native-looking.js"))
+    }
+
+    @Test
+    fun `only the web index is treated as a document to rewrite`() {
+        assertTrue(ResourceKind.isWebDocument("/web"))
+        assertTrue(ResourceKind.isWebDocument("/web/"))
+        assertTrue(ResourceKind.isWebDocument("/web/index.html"))
+        assertFalse(ResourceKind.isWebDocument("/web/main.bundle.js"))
+        assertFalse(ResourceKind.isWebDocument("/Videos/1/stream"))
+    }
+
+    @Test
+    fun `item images are artwork`() {
+        assertTrue(ResourceKind.isArtwork("/Items/abc/Images/Primary"))
+        assertFalse(ResourceKind.isArtwork("/web/assets/icon.png"))
+        assertFalse(ResourceKind.isArtwork("/Videos/abc/stream"))
     }
 }

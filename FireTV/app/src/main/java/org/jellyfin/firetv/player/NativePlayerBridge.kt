@@ -1,19 +1,33 @@
 package org.jellyfin.firetv.player
 
+import android.os.SystemClock
 import android.webkit.JavascriptInterface
 import org.jellyfin.firetv.shell.NativeInterface
 
 class NativePlayerBridge(
     private val host: NativeInterface.Host,
 ) {
+    @Volatile
+    private var lastLaunchAt = 0L
+
+    @Volatile
+    private var lastPayload = ""
+
     @JavascriptInterface
     fun isEnabled(): Boolean = true
 
     @JavascriptInterface
     fun loadPlayer(args: String?) {
-        if (!args.isNullOrBlank()) {
-            host.launchPlayer(args)
+        if (args.isNullOrBlank()) {
+            return
         }
+        val now = SystemClock.elapsedRealtime()
+        if (args == lastPayload && now - lastLaunchAt < 1_500) {
+            return
+        }
+        lastPayload = args
+        lastLaunchAt = now
+        host.launchPlayer(args)
     }
 
     @JavascriptInterface

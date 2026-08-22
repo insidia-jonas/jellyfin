@@ -1,9 +1,13 @@
 /**
  * NativeShell for the Fire TV web-shell client.
  *
- * Forces the 1920x1080 TV layout, registers a native ExoPlayer so selecting a
- * release/version does not freeze the Amazon WebView HTML5 player, and keeps
- * jellyfin-web as the full UI (same architecture as the iOS app).
+ * Must exist before jellyfin-web's plugin loader runs. jellyfin-web then:
+ *   1. reads NativeShell.getPlugins() → ["ExoPlayerPlugin"]
+ *   2. awaits window.ExoPlayerPlugin() which dynamically imports
+ *      /native/ExoPlayerPlugin.js (ES module, same as jellyfin-android)
+ *
+ * Also forces the 1920×1080 TV layout, blocks HTML5 <video> (Amazon WebView
+ * freezes on MKV), and forwards downloads to Android DownloadManager.
  */
 (function () {
     function forceTvViewport() {
@@ -33,9 +37,74 @@
         }
     }
 
+    function injectPerformanceCss() {
+        if (document.getElementById("firetv-perf-css")) {
+            return;
+        }
+        var parent = document.head || document.documentElement;
+        if (!parent) {
+            return;
+        }
+        var style = document.createElement("style");
+        style.id = "firetv-perf-css";
+        style.textContent = [
+            "html,body{width:100%!important;height:100%!important;overflow:hidden!important;}",
+            ".layout-tv .backdrop-container,.layout-tv .backgroundContainer{",
+            "  filter:none!important;transform:none!important;",
+            "}",
+            "video,audio[controls]{display:none!important;width:0!important;height:0!important;}"
+        ].join("");
+        parent.appendChild(style);
+    }
+
+    function patchHtml5Media() {
+        if (window.__firetvMediaPatched) {
+            return;
+        }
+        window.__firetvMediaPatched = true;
+        function block(proto) {
+            if (!proto || proto.__firetvPatched) {
+                return;
+            }
+            proto.__firetvPatched = true;
+            proto.play = function () {
+                try {
+                    this.pause();
+                    this.removeAttribute("src");
+                    while (this.firstChild) {
+                        this.removeChild(this.firstChild);
+                    }
+                    this.load();
+                } catch (e) { /* ignore */ }
+                return Promise.resolve();
+            };
+        }
+        block(window.HTMLVideoElement && window.HTMLVideoElement.prototype);
+        document.addEventListener("play", function (event) {
+            var el = event.target;
+            if (!el || el.tagName !== "VIDEO") {
+                return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            try {
+                el.pause();
+            } catch (e) { /* ignore */ }
+        }, true);
+    }
+
+    window.FireTvGuard = function () {
+        forceTvViewport();
+        injectPerformanceCss();
+        patchHtml5Media();
+    };
+
     forceTvViewport();
+    patchHtml5Media();
     if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", forceTvViewport);
+        document.addEventListener("DOMContentLoaded", window.FireTvGuard);
+    } else {
+        window.FireTvGuard();
     }
 
     if (window.NativeShell && window.NativeShell.AppHost) {
@@ -54,7 +123,7 @@
             deviceId: "firetv-web",
             deviceName: "Fire TV",
             appName: "Jellyfin Fire TV",
-            appVersion: "1.1.0"
+            appVersion: "1.2.0"
         };
     }
 
@@ -64,7 +133,6 @@
         "exit",
         "displaylanguage",
         "displaymode",
-        "fullscreenchange",
         "physicalvolumecontrol",
         "remotecontrol",
         "subtitleappearancesettings",
@@ -72,7 +140,10 @@
         "screensaver",
         "multiserver",
         "clientsettings",
-        "externallinks"
+        "externallinks",
+        "filedownload",
+        "downloadmanagement",
+        "htmlaudioautoplay"
     ];
 
     var exoPlayerProfile = {
@@ -135,6 +206,10 @@
         ResponseProfiles: []
     };
 
+    function copyProfile() {
+        return JSON.parse(JSON.stringify(exoPlayerProfile));
+    }
+
     function FireTvExoPlayerPlugin(deps) {
         deps = deps || {};
         this.events = deps.events;
@@ -147,12 +222,16 @@
         this.isLocalPlayer = true;
         this._currentTime = 0;
         this._paused = true;
+        this._nativePlayer = window.NativePlayer;
         window.ExoPlayer = this;
     }
 
     FireTvExoPlayerPlugin.prototype.play = function (options) {
         options = options || {};
         var items = options.items || [];
+        var ids = options.ids && options.ids.length
+            ? options.ids
+            : items.map(function (item) { return item.Id; }).filter(Boolean);
         var payload = {
             items: items.map(function (item) {
                 return {
@@ -165,6 +244,7 @@
                     ProductionYear: item.ProductionYear
                 };
             }),
+            ids: ids,
             mediaSourceId: options.mediaSourceId || options.MediaSourceId,
             audioStreamIndex: options.audioStreamIndex,
             subtitleStreamIndex: options.subtitleStreamIndex,
@@ -195,7 +275,13 @@
         if (!window.NativePlayer || !window.NativePlayer.isEnabled()) {
             return false;
         }
-        return !playOptions || playOptions.fullscreen !== false;
+        if (playOptions && playOptions.fullscreen === false) {
+            return false;
+        }
+        if (this.playbackManager && this.playbackManager.syncPlayEnabled) {
+            return false;
+        }
+        return true;
     };
     FireTvExoPlayerPlugin.prototype.stop = function (destroyPlayer) {
         if (window.NativePlayer) {
@@ -263,7 +349,7 @@
         }
     };
     FireTvExoPlayerPlugin.prototype.getDeviceProfile = function () {
-        return Promise.resolve(exoPlayerProfile);
+        return Promise.resolve(copyProfile());
     };
     FireTvExoPlayerPlugin.prototype.getPlaylist = function () {
         return Promise.resolve([]);
@@ -292,9 +378,30 @@
         return Promise.resolve();
     };
 
-    window.ExoPlayerPlugin = function () {
-        return Promise.resolve(FireTvExoPlayerPlugin);
+    window.FireTvExoPlayerPluginClass = FireTvExoPlayerPlugin;
+
+    var plugins = ["ExoPlayerPlugin"];
+    window.ExoPlayerPlugin = async function () {
+        try {
+            var pluginDefinition = await import("/native/ExoPlayerPlugin.js");
+            if (pluginDefinition && pluginDefinition.ExoPlayerPlugin) {
+                return pluginDefinition.ExoPlayerPlugin;
+            }
+        } catch (e) {
+            console.warn("FireTV: ExoPlayerPlugin module failed, using bundled class", e);
+        }
+        return FireTvExoPlayerPlugin;
     };
+
+    function postDownload(info) {
+        if (!window.NativeInterface) {
+            return;
+        }
+        var payload = typeof info === "string" ? info : JSON.stringify(info || {});
+        if (window.NativeInterface.downloadFiles) {
+            window.NativeInterface.downloadFiles(payload);
+        }
+    }
 
     window.NativeShell = {
         enableFullscreen: function () {
@@ -312,7 +419,17 @@
                 window.NativeInterface.openUrl(String(url || ""));
             }
         },
-        downloadFile: function () { },
+        downloadFile: function (downloadInfo) {
+            postDownload(downloadInfo);
+        },
+        downloadFiles: function (downloadInfo) {
+            postDownload(downloadInfo);
+        },
+        openDownloadManager: function () {
+            if (window.NativeInterface && window.NativeInterface.openDownloadManager) {
+                window.NativeInterface.openDownloadManager();
+            }
+        },
         updateMediaSession: function (mediaInfo) {
             if (window.NativeInterface) {
                 window.NativeInterface.updateMediaSession(JSON.stringify(mediaInfo || {}));
@@ -339,7 +456,7 @@
             }
         },
         getPlugins: function () {
-            return ["ExoPlayerPlugin"];
+            return plugins;
         }
     };
 
@@ -367,11 +484,19 @@
         getDefaultLayout: function () {
             return "tv";
         },
-        getDeviceProfile: function () {
-            return exoPlayerProfile;
+        getDeviceProfile: function (profileBuilder) {
+            if (typeof profileBuilder === "function") {
+                try {
+                    profileBuilder({ enableMkvProgressive: false });
+                } catch (e) { /* builder is optional */ }
+            }
+            return copyProfile();
         },
         getSyncProfile: function () {
-            return exoPlayerProfile;
+            return copyProfile();
+        },
+        screen: function () {
+            return { width: 1920, height: 1080 };
         },
         supports: function (command) {
             if (!command) {

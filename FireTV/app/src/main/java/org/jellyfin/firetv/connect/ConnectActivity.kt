@@ -31,6 +31,7 @@ class ConnectActivity : AppCompatActivity() {
 
         binding.ignoreSsl.isChecked = preferences.ignoreSslErrors
         binding.urlInput.setText(preferences.serverUrl.orEmpty())
+        binding.versionText.text = getString(R.string.app_version_label, org.jellyfin.firetv.BuildConfig.VERSION_NAME)
 
         binding.connectButton.setOnClickListener { connect(binding.urlInput.text?.toString().orEmpty()) }
         binding.discoverButton.setOnClickListener { discover() }
@@ -121,13 +122,10 @@ class ConnectActivity : AppCompatActivity() {
         binding.discoverButton.isEnabled = !busy
         binding.statusText.isVisible = !status.isNullOrBlank()
         binding.statusText.text = status
-        binding.statusText.setTextColor(
-            getColor(if (status == getString(R.string.connection_failed) || status == getString(R.string.invalid_url) || status == getString(R.string.no_servers_found)) {
-                R.color.error
-            } else {
-                R.color.text_secondary
-            }),
-        )
+        val error = status == getString(R.string.connection_failed) ||
+            status == getString(R.string.invalid_url) ||
+            status == getString(R.string.no_servers_found)
+        binding.statusText.setTextColor(getColor(if (error) R.color.error else R.color.text_secondary))
     }
 
     companion object {
