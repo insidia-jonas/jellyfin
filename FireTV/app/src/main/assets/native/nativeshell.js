@@ -59,12 +59,6 @@
             ".layout-tv .backdropContainer .backdropImage,.layout-tv .backgroundContainer .backdropImage{",
             "  opacity:.16!important;filter:none!important;",
             "}",
-            ".layout-tv .card,.layout-tv .cardBox{",
-            "  transition:transform .12s ease-out,box-shadow .12s ease-out!important;",
-            "}",
-            ".layout-tv .card:focus,.layout-tv .card:focus .cardBox{",
-            "  outline:none!important;box-shadow:0 0 0 3px #00A4DC!important;",
-            "}",
             "video,audio[controls]{display:none!important;width:0!important;height:0!important;}"
         ].join("");
         parent.appendChild(style);
@@ -161,7 +155,7 @@
             deviceId: "firetv-web",
             deviceName: "Fire TV",
             appName: "Jellyfin Fire TV",
-            appVersion: "1.3.1"
+            appVersion: "1.3.2"
         };
     }
 

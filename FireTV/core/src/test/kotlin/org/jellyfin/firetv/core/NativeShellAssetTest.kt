@@ -19,6 +19,8 @@ class NativeShellAssetTest {
         assertTrue(script.contains("FireTvCanExit"))
         assertFalse(script.contains("rewriteArtwork"))
         assertFalse(script.contains("getScaledImageUrl"))
+        assertFalse(script.contains("card:focus"))
+        assertFalse(script.contains("0 0 0 3px"))
         assertTrue(script.contains("canSetAudioStreamIndex"))
         assertTrue(script.contains("import(\"/native/ExoPlayerPlugin.js\")") || script.contains("import('/native/ExoPlayerPlugin.js')"))
         assertTrue(script.contains("HTMLVideoElement"))
