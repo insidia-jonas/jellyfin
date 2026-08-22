@@ -49,12 +49,15 @@ object DownloadIndex {
         val rows = mutableListOf<Row>()
         val cursor = runCatching { manager.query(query) }.getOrNull() ?: return emptyList()
         cursor.use {
-            val idIdx = it.columnIndex(DownloadManager.COLUMN_ID)
-            val titleIdx = it.columnIndex(DownloadManager.COLUMN_TITLE)
-            val statusIdx = it.columnIndex(DownloadManager.COLUMN_STATUS)
-            val bytesIdx = it.columnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
-            val totalIdx = it.columnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+            val idIdx = it.getColumnIndex(DownloadManager.COLUMN_ID)
+            val titleIdx = it.getColumnIndex(DownloadManager.COLUMN_TITLE)
+            val statusIdx = it.getColumnIndex(DownloadManager.COLUMN_STATUS)
+            val bytesIdx = it.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+            val totalIdx = it.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
             while (it.moveToNext()) {
+                if (idIdx < 0 || statusIdx < 0) {
+                    continue
+                }
                 val id = it.getLong(idIdx)
                 if (id !in remembered) {
                     continue
@@ -63,8 +66,8 @@ object DownloadIndex {
                     id = id,
                     title = it.safeString(titleIdx).ifBlank { "Jellyfin" },
                     status = mapStatus(it.getInt(statusIdx)),
-                    bytes = it.getLong(bytesIdx).coerceAtLeast(0),
-                    total = it.getLong(totalIdx),
+                    bytes = if (bytesIdx >= 0) it.getLong(bytesIdx).coerceAtLeast(0) else 0,
+                    total = if (totalIdx >= 0) it.getLong(totalIdx) else -1,
                 )
             }
         }

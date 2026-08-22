@@ -277,8 +277,9 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         resolved.audioTracks.firstOrNull { it.index == resolved.selectedAudioIndex }?.language?.let {
             builder.setPreferredAudioLanguage(it)
         }
-        val subtitle = resolved.subtitleTracks.firstOrNull { it.index == resolved.selectedSubtitleIndex }
-        if (subtitle == null || resolved.selectedSubtitleIndex == null || resolved.selectedSubtitleIndex < 0) {
+        val selectedSub = resolved.selectedSubtitleIndex
+        val subtitle = resolved.subtitleTracks.firstOrNull { it.index == selectedSub }
+        if (subtitle == null || selectedSub == null || selectedSub < 0) {
             builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
         } else {
             builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
