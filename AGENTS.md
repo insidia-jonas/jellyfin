@@ -220,11 +220,17 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   API gotchas: `imdbid`/`tmdbid` filters return 0 (broken) — use `q=<title>`; `/tv` is only
   partially enriched; single-letter `q` is a broad substring search (hence Find A–Z prefix-filters
   client-side). Rapid API calls get rate-limited (degraded/empty JSON), so space out manual probing.
-- `Find A–Z` (`SearchByLetterAsync`) is the TV-friendly search: letter folders `0-9,A–Z`, each runs a
-  live indexer query (movies + TV, in parallel) and keeps titles whose article-stripped name starts
-  with that letter. This is the only in-channel "search" — Jellyfin's channel API has no text-search
-  hook (`ISearchableChannel`/`CanSearch` are unused here). Global search additionally finds channel
-  items that have already been browsed (they get synced to the DB; ~3h cache).
+- Native search (Fire TV / iOS / web Search dialog) is **Search/Hints** plus `Items?SearchTerm=`.
+  Those clients do **not** run `treasuremaps.js`. Treasure-Maps implements `ISupportsSearch` and
+  `TreasureMapsSearchProvider` (`IExternalSearchProvider`): typed queries (2+ characters) hit
+  `/movie?q=` and `/tv?q=` live in parallel, materialize BoxSet title cards, and merge with library
+  hits. This fork's `SearchManager` **must merge** external + SQL results (upstream returned only
+  external hits when any existed). Channel items are exempt from the library TopParentIds access
+  filter (they have `ChannelId`). Fire TV/iOS often request only Movie/Series — `ChannelTitleCards`
+  also includes BoxSet so title cards are not dropped. Opening a search hit still opens the title
+  card (releases + heart / Start download), never the play-to-download clip. Live `q=` answers use
+  a 20s API cache; browse (`q=*`, empty, single letter) stays at 5 minutes. `Find A–Z` letter
+  folders remain as a TV-friendly fallback when the user is already inside the channel.
 - Release-name parsing: `ReleaseNameParser` extracts scene attributes from the release/dirname
   (resolution, source BluRay/WEB/CAM/TELESYNC/…, codec, HDR, `DL` dual-language, detected
   languages, group) and — for theatrical rips — the audio source `MIC` (microphone, worse) vs

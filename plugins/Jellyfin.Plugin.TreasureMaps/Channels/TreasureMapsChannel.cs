@@ -25,7 +25,7 @@ namespace Jellyfin.Plugin.TreasureMaps.Channels;
 /// Titles are shown once (one poster card per movie/show); opening a card lists the individual
 /// releases (qualities) behind it, which you grab by marking a release as a favorite (heart).
 /// </summary>
-public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMediaSourceDisplay, IRequiresMediaInfoCallback, IHasCacheKey
+public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSearch, IDisableMediaSourceDisplay, IRequiresMediaInfoCallback, IHasCacheKey
 {
     private const string GenrePrefix = "genre:";
     private const string FindPrefix = "find:";
@@ -269,6 +269,11 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             if (folderId.StartsWith(FindPrefix, StringComparison.Ordinal))
             {
                 return await SearchByLetterAsync(folderId[FindPrefix.Length..], cancellationToken).ConfigureAwait(false);
+            }
+
+            if (folderId.StartsWith("search:", StringComparison.Ordinal))
+            {
+                return await SearchLiveAsync(folderId["search:".Length..], cancellationToken).ConfigureAwait(false);
             }
 
             if (folderId.StartsWith(GenrePrefix, StringComparison.Ordinal))
@@ -803,13 +808,14 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
         return responses.SelectMany(r => r.Items).ToList();
     }
 
-    private async Task<(IReadOnlyList<Release> Items, bool Ok)> FetchPageSafeAsync(string kind, string? query, string? genre, string? categories, int offset, CancellationToken cancellationToken)
+    private async Task<(IReadOnlyList<Release> Items, bool Ok)> FetchPageSafeAsync(string kind, string? query, string? genre, string? categories, int offset, CancellationToken cancellationToken, int? limit = null)
     {
         try
         {
+            var pageSize = limit ?? PageSize;
             var response = string.Equals(kind, "tv", StringComparison.Ordinal)
-                ? await _client.SearchTvAsync(query, categories, PageSize, offset, cancellationToken).ConfigureAwait(false)
-                : await _client.SearchMoviesAsync(query, genre, categories, PageSize, offset, cancellationToken).ConfigureAwait(false);
+                ? await _client.SearchTvAsync(query, categories, pageSize, offset, cancellationToken).ConfigureAwait(false)
+                : await _client.SearchMoviesAsync(query, genre, categories, pageSize, offset, cancellationToken).ConfigureAwait(false);
             return (response?.Items ?? Array.Empty<Release>(), true);
         }
         catch (Exception ex)
@@ -1163,6 +1169,51 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
         ImageUrl = ChannelArtwork.GetPosterPath(id, name),
         Overview = name
     };
+
+    /// <inheritdoc />
+    public Task<IEnumerable<ChannelItemInfo>> GetSearchResults(ChannelSearchInfo searchInfo, CancellationToken cancellationToken)
+    {
+        var term = searchInfo?.SearchTerm?.Trim() ?? string.Empty;
+        var take = searchInfo?.Limit is > 0 and <= 50 ? searchInfo.Limit.Value : 20;
+        return SearchLiveCardsAsync(term, take, cancellationToken);
+    }
+
+    private async Task<ChannelItemResult> SearchLiveAsync(string term, CancellationToken cancellationToken)
+    {
+        var cards = await SearchLiveCardsAsync(term, 20, cancellationToken).ConfigureAwait(false);
+        return Result(cards.ToList());
+    }
+
+    /// <summary>
+    /// Live indexer search used by native Search/Hints (Fire TV, iOS, web) and the optional
+    /// <c>search:</c> channel folder. Queries <c>/movie?q=</c> and <c>/tv?q=</c> in parallel.
+    /// </summary>
+    private async Task<IEnumerable<ChannelItemInfo>> SearchLiveCardsAsync(string term, int take, CancellationToken cancellationToken)
+    {
+        term = (term ?? string.Empty).Trim();
+        if (term.Length < Search.TreasureMapsSearch.MinQueryLength || !TreasureMapsApiClient.IsConfigured)
+        {
+            return Array.Empty<ChannelItemInfo>();
+        }
+
+        const int livePageSize = 50;
+        var moviesTask = FetchPageSafeAsync("movie", term, null, null, 0, cancellationToken, livePageSize);
+        var tvTask = FetchPageSafeAsync("tv", term, null, null, 0, cancellationToken, livePageSize);
+        var both = await Task.WhenAll(moviesTask, tvTask).ConfigureAwait(false);
+
+        if (both.All(r => !r.Ok))
+        {
+            _logger.LogWarning("Treasure-Maps live search failed for '{Term}'", term);
+            return Array.Empty<ChannelItemInfo>();
+        }
+
+        var releases = both.SelectMany(r => r.Items).ToList();
+        var cards = BuildGroupCards(releases, "search:" + term.ToLowerInvariant());
+        return cards.Items
+            .Where(i => i.Type != ChannelItemType.Media && i.FolderType == ChannelFolderType.BoxSet)
+            .Take(take)
+            .ToList();
+    }
 
     /// <inheritdoc />
     public async Task<IEnumerable<ChannelItemInfo>> GetLatestMedia(ChannelLatestMediaSearch request, CancellationToken cancellationToken)

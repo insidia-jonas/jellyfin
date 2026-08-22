@@ -710,6 +710,64 @@ namespace Jellyfin.LiveTv.Channels
             return new QueryResult<BaseItem>(result.StartIndex, filtered.Length, filtered);
         }
 
+        /// <inheritdoc />
+        public async Task<IReadOnlyList<BaseItem>> SearchChannelItemsAsync(string searchTerm, Guid? userId, int? limit, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(searchTerm))
+            {
+                return Array.Empty<BaseItem>();
+            }
+
+            var channels = GetAllChannels().Where(i => i is ISupportsSearch).ToArray();
+            if (channels.Length == 0)
+            {
+                return Array.Empty<BaseItem>();
+            }
+
+            var results = new List<BaseItem>();
+            foreach (var channel in channels)
+            {
+                if (channel is not ISupportsSearch searchable)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var internalChannel = await GetChannel(channel, cancellationToken).ConfigureAwait(false);
+                    var infos = await searchable.GetSearchResults(
+                        new ChannelSearchInfo
+                        {
+                            SearchTerm = searchTerm,
+                            UserId = userId?.ToString("N", CultureInfo.InvariantCulture),
+                            Limit = limit
+                        },
+                        cancellationToken).ConfigureAwait(false);
+
+                    foreach (var info in infos)
+                    {
+                        if (info is null || IsPlayToDownloadClip(info) || info.Type == ChannelItemType.Media)
+                        {
+                            continue;
+                        }
+
+                        results.Add(await GetChannelItemEntityAsync(
+                            info,
+                            channel,
+                            internalChannel.Id,
+                            internalChannel,
+                            cancellationToken).ConfigureAwait(false));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Channel search failed for {Channel}", channel.Name);
+                }
+            }
+
+            return results;
+        }
+
         private static bool IsPlayToDownloadClip(ChannelItemInfo info)
         {
             if (info.Type != ChannelItemType.Media)

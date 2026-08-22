@@ -11,6 +11,7 @@ using Jellyfin.Data.Enums;
 using Jellyfin.Database.Implementations.Enums;
 using Jellyfin.Extensions;
 using MediaBrowser.Common.Extensions;
+using MediaBrowser.Controller.Channels;
 using MediaBrowser.Controller.Dto;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Movies;
@@ -357,6 +358,7 @@ public class ItemsController : BaseJellyfinApiController
 
         if (!string.IsNullOrWhiteSpace(searchTerm))
         {
+            includeItemTypes = ChannelTitleCards.IncludeIn(includeItemTypes);
             var searchProviderQuery = new SearchProviderQuery
             {
                 SearchTerm = searchTerm,

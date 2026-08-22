@@ -16,5 +16,10 @@ namespace MediaBrowser.Controller.Channels
         /// Gets or sets the user id.
         /// </summary>
         public string UserId { get; set; }
+
+        /// <summary>
+        /// Gets or sets the maximum number of title cards to return.
+        /// </summary>
+        public int? Limit { get; set; }
     }
 }

@@ -27,7 +27,26 @@ public class TreasureMapsApiClient
     // periods when rate-limited), the last known good response is served instead of a blank view.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTimeOffset FreshUntil, object Value)> _cache = new();
     private static readonly TimeSpan SearchCacheTtl = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan LiveSearchCacheTtl = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan CapsCacheTtl = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// Browse lists (<c>q=*</c> / empty / one letter) stay cached for minutes. Typed queries
+    /// (2+ characters) use a short TTL so Search/Hints typeahead stays live.
+    /// </summary>
+    /// <param name="query">The free-text query sent as <c>q=</c>.</param>
+    /// <returns>The cache duration for that query.</returns>
+    public static TimeSpan CacheTtlForQuery(string? query)
+    {
+        if (string.IsNullOrWhiteSpace(query)
+            || string.Equals(query, "*", StringComparison.Ordinal)
+            || query.Trim().Length < 2)
+        {
+            return SearchCacheTtl;
+        }
+
+        return LiveSearchCacheTtl;
+    }
 
     // Treasure-Maps category ids (movies/TV incl. language variants). Without a category the
     // /movie endpoint returns unrelated results (even books) with no movie metadata.
@@ -97,7 +116,7 @@ public class TreasureMapsApiClient
             ["sort"] = "posted_desc",
             ["extended"] = "1"
         };
-        return GetJsonAsync<ReleaseListResponse>("movie", parameters, SearchCacheTtl, cancellationToken);
+        return GetJsonAsync<ReleaseListResponse>("movie", parameters, CacheTtlForQuery(query), cancellationToken);
     }
 
     /// <summary>
@@ -130,7 +149,7 @@ public class TreasureMapsApiClient
             ["sort"] = "posted_desc",
             ["extended"] = "1"
         };
-        return GetJsonAsync<ReleaseListResponse>("tv", parameters, SearchCacheTtl, cancellationToken);
+        return GetJsonAsync<ReleaseListResponse>("tv", parameters, CacheTtlForQuery(query), cancellationToken);
     }
 
     /// <summary>

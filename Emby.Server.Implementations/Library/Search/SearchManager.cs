@@ -7,6 +7,7 @@ using Jellyfin.Data.Enums;
 using Jellyfin.Database.Implementations;
 using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Extensions;
+using MediaBrowser.Controller.Channels;
 using MediaBrowser.Controller.Dto;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
@@ -107,18 +108,11 @@ public class SearchManager : ISearchManager
             }
         }
 
-        if (externalResults.Count > 0)
-        {
-            return externalResults;
-        }
-
         var internalResults = await internalTask.ConfigureAwait(false);
-        if (_internalProviders.Length > 0)
-        {
-            _logger.LogDebug("No results from external providers, using internal provider results");
-        }
 
-        return internalResults;
+        // External providers used to replace the library entirely. Channel indexers (Treasure-Maps)
+        // must appear alongside Movies / TV Shows, not instead of them.
+        return MergeByBestScore(externalResults, internalResults, query.Limit ?? 100);
     }
 
     private async Task<IReadOnlyList<SearchResult>> FilterByUserAccessAsync(
@@ -133,7 +127,26 @@ public class SearchManager : ISearchManager
         // ItemIds is non-empty.
         var accessFilter = SearchQueryAccessFilter.Build(user, query, _libraryManager);
 
-        Guid[] candidateIds = [.. candidates.Select(c => c.ItemId)];
+        var libraryCandidates = new List<SearchResult>();
+        var channelResults = new List<SearchResult>();
+        foreach (var candidate in candidates)
+        {
+            var item = _libraryManager.GetItemById(candidate.ItemId);
+            if (item is not null && !item.ChannelId.IsEmpty())
+            {
+                channelResults.Add(candidate);
+                continue;
+            }
+
+            libraryCandidates.Add(candidate);
+        }
+
+        if (libraryCandidates.Count == 0)
+        {
+            return channelResults;
+        }
+
+        Guid[] candidateIds = [.. libraryCandidates.Select(c => c.ItemId)];
 
         var dbContext = await _dbProvider.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         await using (dbContext.ConfigureAwait(false))
@@ -145,9 +158,9 @@ public class SearchManager : ISearchManager
             baseQuery = _queryHelpers.ApplyAccessFiltering(dbContext, baseQuery, accessFilter);
 
             var allowedCount = await baseQuery.CountAsync(cancellationToken).ConfigureAwait(false);
-            if (allowedCount == candidates.Count)
+            if (allowedCount == libraryCandidates.Count)
             {
-                return candidates;
+                return channelResults.Count == 0 ? libraryCandidates : [.. channelResults, .. libraryCandidates];
             }
 
             var allowedIds = await baseQuery
@@ -155,16 +168,21 @@ public class SearchManager : ISearchManager
                 .ToHashSetAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-            var filtered = candidates.Where(c => allowedIds.Contains(c.ItemId)).ToList();
-            if (filtered.Count < candidates.Count)
+            var filtered = libraryCandidates.Where(c => allowedIds.Contains(c.ItemId)).ToList();
+            if (filtered.Count < libraryCandidates.Count)
             {
                 _logger.LogDebug(
                     "Dropped {Dropped} of {Total} search candidates due to user access filtering",
-                    candidates.Count - filtered.Count,
-                    candidates.Count);
+                    libraryCandidates.Count - filtered.Count,
+                    libraryCandidates.Count);
             }
 
-            return filtered;
+            if (channelResults.Count == 0)
+            {
+                return filtered;
+            }
+
+            return [.. channelResults, .. filtered];
         }
     }
 
@@ -185,7 +203,7 @@ public class SearchManager : ISearchManager
         var user = query.UserId.IsEmpty() ? null : _userManager.GetUserById(query.UserId);
 
         var excludeItemTypes = BuildExcludeItemTypes(query);
-        var includeItemTypes = BuildIncludeItemTypes(query);
+        var includeItemTypes = ChannelTitleCards.IncludeIn(BuildIncludeItemTypes(query).ToArray()).ToList();
 
         var internalQuery = new InternalItemsQuery(user)
         {
@@ -336,6 +354,39 @@ public class SearchManager : ISearchManager
         return results;
     }
 
+    private static IReadOnlyList<SearchResult> MergeByBestScore(
+        IReadOnlyList<SearchResult> first,
+        IReadOnlyList<SearchResult> second,
+        int limit)
+    {
+        if (first.Count == 0)
+        {
+            return second.Count <= limit ? second : second.Take(limit).ToList();
+        }
+
+        if (second.Count == 0)
+        {
+            return first.Count <= limit ? first : first.Take(limit).ToList();
+        }
+
+        var bestScores = new Dictionary<Guid, float>();
+        foreach (var result in first)
+        {
+            UpdateBestScore(bestScores, result);
+        }
+
+        foreach (var result in second)
+        {
+            UpdateBestScore(bestScores, result);
+        }
+
+        return bestScores
+            .Select(kvp => new SearchResult(kvp.Key, kvp.Value))
+            .OrderByDescending(r => r.Score)
+            .Take(limit)
+            .ToList();
+    }
+
     private static void UpdateBestScore(Dictionary<Guid, float> bestScores, SearchResult result)
     {
         if (!bestScores.TryGetValue(result.ItemId, out var existingScore) || result.Score > existingScore)
@@ -358,7 +409,7 @@ public class SearchManager : ISearchManager
     private static SearchProviderQuery BuildProviderQuery(SearchQuery query)
     {
         var excludeItemTypes = BuildExcludeItemTypes(query);
-        var includeItemTypes = BuildIncludeItemTypes(query);
+        var includeItemTypes = ChannelTitleCards.IncludeIn(BuildIncludeItemTypes(query).ToArray()).ToList();
 
         // Remove any excluded types from includes
         if (includeItemTypes.Count > 0 && excludeItemTypes.Count > 0)
