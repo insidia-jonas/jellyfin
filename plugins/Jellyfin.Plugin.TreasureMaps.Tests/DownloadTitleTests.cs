@@ -57,6 +57,7 @@ public class GrabRecordListTests
     [Fact]
     public void ListRecent_DedupesByTitle_NewestFirst()
     {
+        ResetTempGrabStore();
         var service = new GrabService(null!, null!, new Microsoft.Extensions.Logging.Abstractions.NullLogger<GrabService>());
         service.RegisterGrab(new[] { "nzo-old" }, "Silo", null, "Silo", "720p", "g1", "tv");
         service.RegisterGrab(new[] { "nzo-new" }, "Silo", "https://img/silo.jpg", "Silo", "1080p", "g2", "tv");
@@ -72,6 +73,7 @@ public class GrabRecordListTests
     [Fact]
     public void Forget_RemovesEveryRowForTheTitle()
     {
+        ResetTempGrabStore();
         var service = new GrabService(null!, null!, new Microsoft.Extensions.Logging.Abstractions.NullLogger<GrabService>());
         service.RegisterGrab(new[] { "nzo-a" }, "The End of Oak Street", null, "The End of Oak Street", "1080p", "g1", "movie");
         service.RegisterGrab(new[] { "nzo-b" }, "The End of Oak Street", null, "The End of Oak Street", "720p", "g2", "movie");
@@ -83,6 +85,15 @@ public class GrabRecordListTests
         Assert.False(service.IsTracked("nzo-b", "The End of Oak Street"));
         Assert.True(service.IsTracked("nzo-keep", "Silo"));
         Assert.Single(service.ListRecent(10));
+    }
+
+    private static void ResetTempGrabStore()
+    {
+        var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "treasuremaps-grabs.json");
+        if (System.IO.File.Exists(path))
+        {
+            System.IO.File.Delete(path);
+        }
     }
 }
 

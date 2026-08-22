@@ -13,6 +13,7 @@ using MediaBrowser.Controller.Channels;
 using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Branding;
+using MediaBrowser.Model.Configuration;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Library;
 using Microsoft.AspNetCore.Authorization;
@@ -743,7 +744,7 @@ public class TreasureMapsController : ControllerBase
     private async Task<IActionResult> SearchCardsAsync(string? q, CancellationToken cancellationToken)
     {
         var term = (q ?? string.Empty).Trim();
-        if (term.Length < Search.TreasureMapsSearch.MinQueryLength || !TreasureMapsApiClient.IsConfigured)
+        if (term.Length < Jellyfin.Plugin.TreasureMaps.Search.TreasureMapsSearch.MinQueryLength || !TreasureMapsApiClient.IsConfigured)
         {
             return Ok(new { ok = true, items = Array.Empty<object>() });
         }
@@ -756,7 +757,7 @@ public class TreasureMapsController : ControllerBase
                 id = i.Id.ToString("N"),
                 name = i.Name,
                 year = i.ProductionYear,
-                image = i.GetImagePath(ImageType.Primary),
+                image = i.PrimaryImagePath,
                 type = i.GetBaseItemKind().ToString()
             });
             return Ok(new { ok = true, items = cards });

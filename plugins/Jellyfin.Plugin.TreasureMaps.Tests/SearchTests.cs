@@ -12,7 +12,7 @@ public class SearchTests
     [Theory]
     [InlineData("Matrix", "Matrix", 95f)]
     [InlineData("The Matrix", "The Mat", 75f)]
-    [InlineData("The Matrix Reloaded", "Matrix", 70f)]
+    [InlineData("The Matrix Reloaded", "Matrix", 75f)]
     [InlineData("The Bear", "bear", 93f)]
     [InlineData("The Bear King of the Kitchen", "the bear", 75f)]
     [InlineData("Inception", "cept", 55f)]
