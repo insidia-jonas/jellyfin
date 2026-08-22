@@ -13,6 +13,8 @@ public class SearchTests
     [InlineData("Matrix", "Matrix", 95f)]
     [InlineData("The Matrix", "The Mat", 75f)]
     [InlineData("The Matrix Reloaded", "Matrix", 70f)]
+    [InlineData("The Bear", "bear", 93f)]
+    [InlineData("The Bear King of the Kitchen", "the bear", 75f)]
     [InlineData("Inception", "cept", 55f)]
     [InlineData("Inception", "xyz", 0f)]
     public void ScoreTitle_RanksMatches(string title, string query, float expected)
@@ -80,6 +82,13 @@ public class SearchTests
         Assert.Equal(TimeSpan.FromMinutes(5), TreasureMapsApiClient.CacheTtlForQuery("A"));
         Assert.Equal(TimeSpan.FromSeconds(20), TreasureMapsApiClient.CacheTtlForQuery("ma"));
         Assert.Equal(TimeSpan.FromSeconds(20), TreasureMapsApiClient.CacheTtlForQuery("matrix"));
+    }
+
+    [Fact]
+    public void BestDisplayTitle_PrefersSceneNameWhenItMatchesBetter()
+    {
+        Assert.Equal("The Bear", TreasureMapsSearch.BestDisplayTitle("The Bear King of the Kitchen", "The Bear", "the bear"));
+        Assert.Equal("The Bear", TreasureMapsSearch.BestDisplayTitle("The Bear King of the Kitchen", "The Bear", "bear"));
     }
 
     [Fact]

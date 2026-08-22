@@ -590,34 +590,49 @@ public class ItemsController : BaseJellyfinApiController
 
         query.Parent = null;
 
+        // Search hits include Treasure-Maps channel BoxSets. folder.GetItems with Recursive+ParentId
+        // applies ancestor/TopParent filters and drops those channel cards, leaving only one
+        // library collection (e.g. "The Shepherd and the Bear" for query "bear").
+        if (searchResultScores is not null && searchResultScores.Count > 0)
+        {
+            var hydrate = new InternalItemsQuery(user)
+            {
+                ItemIds = itemIds,
+                IncludeItemTypes = includeItemTypes,
+                ExcludeItemTypes = excludeItemTypes,
+                MediaTypes = mediaTypes,
+                DtoOptions = dtoOptions,
+                EnableTotalRecordCount = false,
+                Recursive = true
+            };
+            var hydrated = _libraryManager.GetItemList(hydrate);
+            var orderedItems = hydrated
+                .OrderByDescending(searchItem => searchResultScores.GetValueOrDefault(searchItem.Id, 0f))
+                .ThenBy(searchItem => searchItem.SortName)
+                .ToArray();
+
+            var totalCount = orderedItems.Length;
+            if (startIndex.HasValue && startIndex.Value > 0)
+            {
+                orderedItems = orderedItems.Skip(startIndex.Value).ToArray();
+            }
+
+            if (limit.HasValue)
+            {
+                orderedItems = orderedItems.Take(limit.Value).ToArray();
+            }
+
+            return new QueryResult<BaseItemDto>(
+                startIndex,
+                totalCount,
+                _dtoService.GetBaseItemDtos(orderedItems, dtoOptions, user));
+        }
+
         // At the user root an unfiltered, non-recursive request is a plain listing of the user's libraries
         if ((recursive.HasValue && recursive.Value) || ids.Length != 0 || item is not UserRootFolder || query.HasFilters)
         {
             // folder.GetItems applies user-access filtering via the InternalItemsQuery's User.
             result = folder.GetItems(query);
-            if (searchResultScores is not null && searchResultScores.Count > 0)
-            {
-                var orderedItems = result.Items
-                    .OrderByDescending(item => searchResultScores.GetValueOrDefault(item.Id, 0f))
-                    .ThenBy(item => item.SortName)
-                    .ToArray();
-
-                var totalCount = orderedItems.Length;
-                if (startIndex.HasValue && startIndex.Value > 0)
-                {
-                    orderedItems = orderedItems.Skip(startIndex.Value).ToArray();
-                }
-
-                if (limit.HasValue)
-                {
-                    orderedItems = orderedItems.Take(limit.Value).ToArray();
-                }
-
-                return new QueryResult<BaseItemDto>(
-                    startIndex,
-                    totalCount,
-                    _dtoService.GetBaseItemDtos(orderedItems, dtoOptions, user));
-            }
         }
         else
         {

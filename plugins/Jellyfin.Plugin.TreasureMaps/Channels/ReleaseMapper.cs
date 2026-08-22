@@ -266,6 +266,43 @@ public static class ReleaseMapper
         => id.StartsWith("tt", StringComparison.OrdinalIgnoreCase) ? id : "tt" + id;
 
     /// <summary>
+    /// Spotlight rows often have an IMDb id but no <c>images.cover</c>. Picbit hosts
+    /// <c>movies_{imdb}-cover.webp</c> for those ids, so Trending can show posters without
+    /// a second indexer round-trip.
+    /// </summary>
+    /// <param name="release">The release to update in place.</param>
+    /// <param name="kind"><c>movie</c> or <c>tv</c>.</param>
+    public static void ApplyPicbitCover(Release release, string kind)
+    {
+        if (release is null || !string.IsNullOrWhiteSpace(release.Images?.Cover))
+        {
+            return;
+        }
+
+        var raw = release.Ids?.Imdb ?? release.Tv?.Imdb;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return;
+        }
+
+        var numeric = raw.StartsWith("tt", StringComparison.OrdinalIgnoreCase) ? raw[2..] : raw.Trim();
+        if (numeric.Length == 0 || !numeric.All(char.IsDigit))
+        {
+            return;
+        }
+
+        // TV artwork on picbit uses an internal id, not IMDb; only movies are predictable.
+        if (!string.Equals(kind, "movie", StringComparison.OrdinalIgnoreCase)
+            && release.Movie is null)
+        {
+            return;
+        }
+
+        release.Images ??= new ReleaseImages();
+        release.Images.Cover = "https://picbit.io/movies_" + numeric + "-cover.webp";
+    }
+
+    /// <summary>
     /// Builds a short flag-emoji prefix for the audio languages of a release (from the API's
     /// audio_languages and/or the scene name), e.g. <c>🇩🇪</c> for a German release.
     /// Returns an empty string when no language could be detected.

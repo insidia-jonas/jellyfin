@@ -51,6 +51,12 @@
         '#tmDownloads .tmDlOpen{flex:0 0 auto;align-self:center;border:none;border-radius:999px;' +
         'min-height:2.75rem;padding:.55em 1.15em;background:#0a84ff;color:#fff;font-weight:600;' +
         'font-family:inherit;cursor:pointer}' +
+        '#tmSearchHits{margin:0 0 1.4em}' +
+        '#tmSearchHits h2{font-size:1.15em;margin:0 0 .6em}' +
+        '#tmSearchHits .tmSearchRow{display:flex;gap:.85em;overflow-x:auto;padding:.2em 0 0.6em}' +
+        '#tmSearchHits .tmSearchCard{flex:0 0 7.2rem;width:7.2rem;text-decoration:none;color:inherit}' +
+        '#tmSearchHits .tmSearchPoster{width:7.2rem;height:10.8rem;border-radius:10px;background:rgba(255,255,255,.08) center/cover no-repeat}' +
+        '#tmSearchHits .tmSearchName{margin:.4em 0 0;font-size:.86em;line-height:1.25;overflow-wrap:anywhere}' +
         '.tmTitlePage .collectionItems,.tmTitlePage #childrenCollapsible,' +
         '.tmTitlePage #listChildrenCollapsible,.tmTitlePage .childrenItemsContainer,' +
         '.tmTitlePage .tmNativeChildren{display:none!important}' +
@@ -92,6 +98,8 @@
                     enhanceReleasePage(item);
                 }
             }).catch(function () { });
+        } else if (/search/i.test(hash) && searchQueryFromHash(hash)) {
+            enhanceSearchPage(searchQueryFromHash(hash));
         } else if (list) {
             api().getItem(api().getCurrentUserId(), list[1]).then(function (item) {
                 if (isDownloadsFolder(item)) {
@@ -113,6 +121,51 @@
     function visiblePage() {
         var pages = document.querySelectorAll('.page:not(.hide)');
         return pages.length ? pages[pages.length - 1] : null;
+    }
+
+    function searchQueryFromHash(hash) {
+        var m = (hash || '').match(/[?&](?:query|q)=([^&]+)/i);
+        return m ? decodeURIComponent(m[1].replace(/\+/g, ' ')).trim() : '';
+    }
+
+    function enhanceSearchPage(query) {
+        if (!query || query.length < 2) { return; }
+        whenReady('.searchResults,.padded-right,.verticalSection', 16, function (page) {
+            if (!page || page.getAttribute('data-tm-search') === query) { return; }
+            page.setAttribute('data-tm-search', query);
+            api().ajax({ url: api().getUrl('TreasureMaps/Search/Cards', { q: query }), type: 'GET' })
+                .then(function (res) {
+                    var items = (res && res.items) || [];
+                    var old = page.querySelector('#tmSearchHits');
+                    if (old) { old.remove(); }
+                    if (!items.length) { return; }
+                    var box = document.createElement('div');
+                    box.id = 'tmSearchHits';
+                    var h = document.createElement('h2');
+                    h.textContent = 'Treasure-Maps';
+                    box.appendChild(h);
+                    var row = document.createElement('div');
+                    row.className = 'tmSearchRow';
+                    items.forEach(function (it) {
+                        var a = document.createElement('a');
+                        a.className = 'tmSearchCard';
+                        a.href = '#/details?id=' + it.id;
+                        var poster = document.createElement('div');
+                        poster.className = 'tmSearchPoster';
+                        poster.style.backgroundImage = 'url(' + api().getUrl('Items/' + it.id + '/Images/Primary') + ')';
+                        var name = document.createElement('div');
+                        name.className = 'tmSearchName';
+                        name.textContent = it.year ? (it.name + ' (' + it.year + ')') : it.name;
+                        a.appendChild(poster);
+                        a.appendChild(name);
+                        row.appendChild(a);
+                    });
+                    box.appendChild(row);
+                    var anchor = page.querySelector('.searchResults, .verticalSection, .padded-right') || page;
+                    anchor.insertBefore(box, anchor.firstChild);
+                })
+                .catch(function () { });
+        });
     }
 
     function whenReady(selector, tries, callback) {

@@ -51,17 +51,26 @@ public class WebScriptTests
     }
 
     [Fact]
+    public void SearchPage_InjectsTreasureMapsHits()
+    {
+        var js = File.ReadAllText(ScriptPath());
+        Assert.Contains("enhanceSearchPage", js, StringComparison.Ordinal);
+        Assert.Contains("TreasureMaps/Search/Cards", js, StringComparison.Ordinal);
+        Assert.Contains("#tmSearchHits", js, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ApplyScriptTag_InsertsThenUpgradesVersion()
     {
         var html = "<html><body>hi</body></html>";
         var first = WebScriptInjector.ApplyScriptTag(html);
         Assert.NotNull(first);
-        Assert.Contains("TreasureMaps/ClientScript?v=4", first, StringComparison.Ordinal);
+        Assert.Contains("TreasureMaps/ClientScript?v=5", first, StringComparison.Ordinal);
 
-        var stale = first!.Replace("ClientScript?v=4", "ClientScript?v=3", StringComparison.Ordinal);
+        var stale = first!.Replace("ClientScript?v=5", "ClientScript?v=3", StringComparison.Ordinal);
         var upgraded = WebScriptInjector.ApplyScriptTag(stale);
         Assert.NotNull(upgraded);
-        Assert.Contains("ClientScript?v=4", upgraded, StringComparison.Ordinal);
+        Assert.Contains("ClientScript?v=5", upgraded, StringComparison.Ordinal);
         Assert.Equal(1, CountOccurrences(upgraded!, "plugin=\"TreasureMaps\""));
     }
 

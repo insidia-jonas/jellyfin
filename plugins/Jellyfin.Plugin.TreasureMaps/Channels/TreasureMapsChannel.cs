@@ -102,7 +102,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
             var c = Config;
             return string.Join(
                 '|',
-                "32",
+                "33",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -900,6 +900,9 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
     /// the shared item and the other folders appear empty.
     /// </summary>
     private ChannelItemResult BuildGroupCards(IReadOnlyList<Release>? releases, string scope)
+        => BuildGroupCards(releases, scope, Config.ResultLimit, searchTerm: null);
+
+    private ChannelItemResult BuildGroupCards(IReadOnlyList<Release>? releases, string scope, int maxGroups, string? searchTerm)
     {
         var prefs = GetLanguagePreferences();
         var marker = ShortHash(DataVersion);
@@ -926,9 +929,10 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         }
 
         var groups = ReleaseGrouper.Group(kept);
+        var cap = maxGroups > 0 ? maxGroups : Config.ResultLimit;
         var ordered = groups
             .OrderBy(g => bestRank.TryGetValue(g.Key, out var r) ? r : int.MaxValue)
-            .Take(Config.ResultLimit)
+            .Take(cap)
             .ToList();
 
         var items = new List<ChannelItemInfo>(ordered.Count);
@@ -940,11 +944,19 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
             // exact same poster on every release tile (covers can differ between releases).
             // FolderType BoxSet makes clients open a DETAILS page (plot, rating, genres, cast,
             // IMDb link) with the releases listed below, instead of a bare children list.
+            var displayTitle = string.IsNullOrWhiteSpace(searchTerm)
+                ? group.Title
+                : Search.TreasureMapsSearch.BestDisplayTitle(
+                    group.Title,
+                    string.Equals(group.Kind, "tv", StringComparison.Ordinal)
+                        ? ReleaseGrouper.ShowNameFromScene(group.Releases[0].Title)
+                        : ReleaseGrouper.CleanSceneTitle(group.Releases[0].Title),
+                    searchTerm);
             var card = new ChannelItemInfo
             {
-                Id = string.Join(Sep, GroupPrefix.TrimEnd(':'), scopeHash, marker, group.Kind, Encode(group.Key), Encode(group.Title), Encode(group.Cover ?? string.Empty)),
-                Name = group.Title,
-                OriginalTitle = group.Title,
+                Id = string.Join(Sep, GroupPrefix.TrimEnd(':'), scopeHash, marker, group.Kind, Encode(group.Key), Encode(displayTitle), Encode(group.Cover ?? string.Empty)),
+                Name = displayTitle,
+                OriginalTitle = displayTitle,
                 SortName = ChannelPresentation.TitleSortName(group.Posted, group.Title),
                 Type = ChannelItemType.Folder,
                 FolderType = ChannelFolderType.BoxSet,
@@ -1174,7 +1186,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
     public Task<IEnumerable<ChannelItemInfo>> GetSearchResults(ChannelSearchInfo searchInfo, CancellationToken cancellationToken)
     {
         var term = searchInfo?.SearchTerm?.Trim() ?? string.Empty;
-        var take = searchInfo?.Limit is > 0 and <= 50 ? searchInfo.Limit.Value : 20;
+        var take = searchInfo?.Limit is > 0 ? Math.Clamp(searchInfo.Limit.Value, 8, 40) : 24;
         return SearchLiveCardsAsync(term, take, cancellationToken);
     }
 
@@ -1196,7 +1208,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
             return Array.Empty<ChannelItemInfo>();
         }
 
-        const int livePageSize = 50;
+        const int livePageSize = 100;
         var moviesTask = FetchPageSafeAsync("movie", term, null, null, 0, cancellationToken, livePageSize);
         var tvTask = FetchPageSafeAsync("tv", term, null, null, 0, cancellationToken, livePageSize);
         var both = await Task.WhenAll(moviesTask, tvTask).ConfigureAwait(false);
@@ -1208,10 +1220,16 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         }
 
         var releases = both.SelectMany(r => r.Items).ToList();
-        var cards = BuildGroupCards(releases, "search:" + term.ToLowerInvariant());
+        // Keep many groups so TV hits are not dropped after the movie page fills ResultLimit.
+        var cards = BuildGroupCards(releases, "search:" + term.ToLowerInvariant(), 80, term);
         return cards.Items
             .Where(i => i.Type != ChannelItemType.Media && i.FolderType == ChannelFolderType.BoxSet)
+            .Select(i => (Card: i, Score: Search.TreasureMapsSearch.ScoreTitle(i.Name, term)))
+            .Where(x => x.Score > 0)
+            .OrderByDescending(x => x.Score)
+            .ThenBy(x => x.Card.Name, StringComparer.OrdinalIgnoreCase)
             .Take(take)
+            .Select(x => x.Card)
             .ToList();
     }
 
@@ -1310,9 +1328,23 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         var response = await _client.GetSpotlightAsync(kind, feed, 30, cancellationToken).ConfigureAwait(false);
         var items = response?.Items ?? Array.Empty<Release>();
 
-        var enriched = await Task.WhenAll(items.Select(it => EnrichTrendingAsync(it, kind, cancellationToken))).ConfigureAwait(false);
-        var releases = enriched.Where(r => r is not null).Select(r => r!).ToList();
-        return BuildGroupCards(releases, folderId);
+        foreach (var item in items)
+        {
+            ReleaseMapper.ApplyPicbitCover(item, kind);
+        }
+
+        // Enrich a few at a time — 30 parallel /movie?q= calls get the indexer rate-limited
+        // and "Trending Diese Woche" then renders as grey 2026 tiles with no posters.
+        var enriched = new List<Release>(items.Count);
+        const int batchSize = 3;
+        for (var i = 0; i < items.Count; i += batchSize)
+        {
+            var batch = items.Skip(i).Take(batchSize);
+            var done = await Task.WhenAll(batch.Select(it => EnrichTrendingAsync(it, kind, cancellationToken))).ConfigureAwait(false);
+            enriched.AddRange(done.Where(r => r is not null).Select(r => r!));
+        }
+
+        return BuildGroupCards(enriched, folderId);
     }
 
     private async Task<Release?> EnrichTrendingAsync(Release item, string kind, CancellationToken cancellationToken)
@@ -1337,11 +1369,12 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
                 : await _client.SearchMoviesAsync(title, null, 10, cancellationToken).ConfigureAwait(false);
             var results = response?.Items ?? Array.Empty<Release>();
 
-            var imdb = item.Ids?.Imdb;
+            var imdb = ReleaseMapper.NormalizeImdbId(item.Ids?.Imdb ?? item.Tv?.Imdb ?? string.Empty);
             Release? match = null;
-            if (!string.IsNullOrWhiteSpace(imdb))
+            if (!string.IsNullOrWhiteSpace(imdb) && !string.Equals(imdb, "tt", StringComparison.Ordinal))
             {
-                match = results.FirstOrDefault(r => string.Equals(r.Ids?.Imdb ?? r.Tv?.Imdb, imdb, StringComparison.Ordinal));
+                match = results.FirstOrDefault(r =>
+                    string.Equals(ReleaseMapper.NormalizeImdbId(r.Ids?.Imdb ?? r.Tv?.Imdb ?? string.Empty), imdb, StringComparison.OrdinalIgnoreCase));
             }
 
             match ??= results.FirstOrDefault(r => !string.IsNullOrWhiteSpace(r.Images?.Cover));

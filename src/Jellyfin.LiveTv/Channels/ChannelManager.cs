@@ -1244,11 +1244,16 @@ namespace Jellyfin.LiveTv.Channels
                 item.Path = mediaSource?.Path;
             }
 
-            if (!string.IsNullOrEmpty(info.ImageUrl) && !item.HasImage(ImageType.Primary))
+            if (!string.IsNullOrEmpty(info.ImageUrl))
             {
-                item.SetImagePath(ImageType.Primary, info.ImageUrl);
-                _logger.LogDebug("Forcing update due to ImageUrl {0}", item.Name);
-                forceUpdate = true;
+                var currentPrimary = item.GetImagePath(ImageType.Primary);
+                if (!item.HasImage(ImageType.Primary)
+                    || !string.Equals(currentPrimary, info.ImageUrl, StringComparison.Ordinal))
+                {
+                    item.SetImagePath(ImageType.Primary, info.ImageUrl);
+                    _logger.LogDebug("Forcing update due to ImageUrl {0}", item.Name);
+                    forceUpdate = true;
+                }
             }
 
             if (!info.IsLiveStream)

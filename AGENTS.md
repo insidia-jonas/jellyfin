@@ -221,16 +221,19 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   partially enriched; single-letter `q` is a broad substring search (hence Find A–Z prefix-filters
   client-side). Rapid API calls get rate-limited (degraded/empty JSON), so space out manual probing.
 - Native search (Fire TV / iOS / web Search dialog) is **Search/Hints** plus `Items?SearchTerm=`.
-  Those clients do **not** run `treasuremaps.js`. Treasure-Maps implements `ISupportsSearch` and
-  `TreasureMapsSearchProvider` (`IExternalSearchProvider`): typed queries (2+ characters) hit
-  `/movie?q=` and `/tv?q=` live in parallel, materialize BoxSet title cards, and merge with library
-  hits. This fork's `SearchManager` **must merge** external + SQL results (upstream returned only
-  external hits when any existed). Channel items are exempt from the library TopParentIds access
-  filter (they have `ChannelId`). Fire TV/iOS often request only Movie/Series — `ChannelTitleCards`
-  also includes BoxSet so title cards are not dropped. Opening a search hit still opens the title
-  card (releases + heart / Start download), never the play-to-download clip. Live `q=` answers use
-  a 20s API cache; browse (`q=*`, empty, single letter) stays at 5 minutes. `Find A–Z` letter
-  folders remain as a TV-friendly fallback when the user is already inside the channel.
+  Treasure-Maps implements `ISupportsSearch` and `TreasureMapsSearchProvider`: typed queries (2+
+  characters) hit `/movie?q=` and `/tv?q=` live, **rank by title** (so "The Bear" beats Lioness
+  episode titles that merely contain "bear"), materialize BoxSet title cards, and merge with the
+  library. Web `/Items?SearchTerm=` must hydrate by ItemId **without** folder ancestor filters or
+  channel cards vanish and only one library collection remains. The web script (`?v=5`) also
+  injects a Treasure-Maps row on the search page via `GET TreasureMaps/Search/Cards`. TM titles
+  are BoxSets (details + grab); web may list them under Sammlungen as well as that extra row.
+  The indexer often stores The Bear as "The Bear King of the Kitchen" — search prefers the scene
+  name when it scores better. Live `q=` cache is 20s; browse stays 5 minutes.
+- Spotlight / Trending Diese Woche (`/spotlight?type=movie&feed=3`) returns ~9 upcoming titles
+  with IMDb ids and **no covers**. Synthesize `https://picbit.io/movies_{imdb}-cover.webp` and
+  enrich metadata in small batches (3) — 30 parallel searches rate-limit the indexer and leave
+  grey 2026 tiles. Bump `DataVersion` after cover/mapping changes so cached folders refresh.
 - Release-name parsing: `ReleaseNameParser` extracts scene attributes from the release/dirname
   (resolution, source BluRay/WEB/CAM/TELESYNC/…, codec, HDR, `DL` dual-language, detected
   languages, group) and — for theatrical rips — the audio source `MIC` (microphone, worse) vs

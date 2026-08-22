@@ -79,7 +79,19 @@ public static class TreasureMapsSearch
             return ExactMatchScore;
         }
 
-        if (name.StartsWith(term, StringComparison.OrdinalIgnoreCase))
+        // "bear" should rank "The Bear" just under an exact match (web/TV users type without the article).
+        var strippedName = StripLeadingArticle(name);
+        var strippedTerm = StripLeadingArticle(term);
+        if (strippedName.Length > 0
+            && (strippedName.Equals(term, StringComparison.OrdinalIgnoreCase)
+                || strippedName.Equals(strippedTerm, StringComparison.OrdinalIgnoreCase)))
+        {
+            return ExactMatchScore - 2f;
+        }
+
+        if (name.StartsWith(term, StringComparison.OrdinalIgnoreCase)
+            || strippedName.StartsWith(term, StringComparison.OrdinalIgnoreCase)
+            || strippedName.StartsWith(strippedTerm, StringComparison.OrdinalIgnoreCase))
         {
             return PrefixMatchScore;
         }
@@ -96,5 +108,40 @@ public static class TreasureMapsSearch
         }
 
         return 0f;
+    }
+
+    /// <summary>
+    /// Picks the title that scores best against the typed query (metadata vs scene name).
+    /// The indexer often stores "The Bear" as "The Bear King of the Kitchen".
+    /// </summary>
+    /// <param name="metaTitle">The API metadata title.</param>
+    /// <param name="sceneTitle">The title parsed from the scene/release name.</param>
+    /// <param name="searchTerm">The typed query.</param>
+    /// <returns>The better display title.</returns>
+    public static string BestDisplayTitle(string? metaTitle, string? sceneTitle, string searchTerm)
+    {
+        var meta = (metaTitle ?? string.Empty).Trim();
+        var scene = (sceneTitle ?? string.Empty).Trim();
+        var metaScore = ScoreTitle(meta, searchTerm);
+        var sceneScore = ScoreTitle(scene, searchTerm);
+        if (sceneScore > metaScore && scene.Length > 0)
+        {
+            return scene;
+        }
+
+        return meta.Length > 0 ? meta : scene;
+    }
+
+    private static string StripLeadingArticle(string value)
+    {
+        foreach (var article in new[] { "The ", "A ", "An ", "Der ", "Die ", "Das ", "Le ", "La ", "El ", "Los ", "Las " })
+        {
+            if (value.StartsWith(article, StringComparison.OrdinalIgnoreCase))
+            {
+                return value[article.Length..].TrimStart();
+            }
+        }
+
+        return value;
     }
 }

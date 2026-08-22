@@ -180,6 +180,14 @@ public class ReleaseMapperTests
         Assert.Equal("https://img/reacher.jpg", item.ImageUrl);
     }
 
+    [Fact]
+    public void ApplyPicbitCover_FillsMissingMoviePosterFromImdb()
+    {
+        var release = new Release { Ids = new ReleaseIds { Imdb = "29355505" }, Movie = new ReleaseMovie { Title = "Toy Story 5" } };
+        ReleaseMapper.ApplyPicbitCover(release, "movie");
+        Assert.Equal("https://picbit.io/movies_29355505-cover.webp", release.Images!.Cover);
+    }
+
     [Theory]
     [InlineData(0, "unknown size")]
     [InlineData(512, "512 B")]

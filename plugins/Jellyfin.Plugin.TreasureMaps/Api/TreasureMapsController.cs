@@ -42,6 +42,7 @@ public class TreasureMapsController : ControllerBase
     private readonly IServerConfigurationManager _configurationManager;
     private readonly LibraryRefreshService _libraryRefresh;
     private readonly GrabService _grabService;
+    private readonly IChannelManager _channelManager;
     private readonly ILogger<TreasureMapsController> _logger;
 
     /// <summary>
@@ -65,6 +66,7 @@ public class TreasureMapsController : ControllerBase
         IServerConfigurationManager configurationManager,
         LibraryRefreshService libraryRefresh,
         GrabService grabService,
+        IChannelManager channelManager,
         ILogger<TreasureMapsController> logger)
     {
         _client = client;
@@ -76,6 +78,7 @@ public class TreasureMapsController : ControllerBase
         _configurationManager = configurationManager;
         _libraryRefresh = libraryRefresh;
         _grabService = grabService;
+        _channelManager = channelManager;
         _logger = logger;
     }
 
@@ -667,6 +670,11 @@ public class TreasureMapsController : ControllerBase
             return Ok(new { ok = false, message = "Configure the Treasure-Maps connection first.", items = Array.Empty<object>() });
         }
 
+        if (string.Equals(type, "cards", StringComparison.OrdinalIgnoreCase))
+        {
+            return await SearchCardsAsync(q, cancellationToken).ConfigureAwait(false);
+        }
+
         var kind = (type ?? "movie").ToLowerInvariant();
         var limit = Plugin.Instance?.Configuration.ResultLimit ?? 60;
         try
@@ -719,6 +727,45 @@ public class TreasureMapsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Treasure-Maps search failed");
+            return Ok(new { ok = false, message = ex.Message, items = Array.Empty<object>() });
+        }
+    }
+
+    /// <summary>
+    /// Live title-card search for the web Search page (materialized channel BoxSets).
+    /// </summary>
+    /// <param name="q">The typed query.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>Ranked Treasure-Maps title cards the client can open.</returns>
+    [HttpGet("Search/Cards")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public Task<IActionResult> SearchCards([FromQuery] string? q, CancellationToken cancellationToken)
+        => SearchCardsAsync(q, cancellationToken);
+
+    private async Task<IActionResult> SearchCardsAsync(string? q, CancellationToken cancellationToken)
+    {
+        var term = (q ?? string.Empty).Trim();
+        if (term.Length < Search.TreasureMapsSearch.MinQueryLength || !TreasureMapsApiClient.IsConfigured)
+        {
+            return Ok(new { ok = true, items = Array.Empty<object>() });
+        }
+
+        try
+        {
+            var items = await _channelManager.SearchChannelItemsAsync(term, null, 24, cancellationToken).ConfigureAwait(false);
+            var cards = items.Select(i => new
+            {
+                id = i.Id.ToString("N"),
+                name = i.Name,
+                year = i.ProductionYear,
+                image = i.GetImagePath(ImageType.Primary),
+                type = i.GetBaseItemKind().ToString()
+            });
+            return Ok(new { ok = true, items = cards });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Treasure-Maps card search failed for '{Term}'", term);
             return Ok(new { ok = false, message = ex.Message, items = Array.Empty<object>() });
         }
     }
