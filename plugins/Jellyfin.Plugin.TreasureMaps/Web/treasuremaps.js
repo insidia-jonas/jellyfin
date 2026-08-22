@@ -48,9 +48,12 @@
         '#tmDownloads .tmDlMeta{font-size:.92em;opacity:.85;overflow-wrap:anywhere}' +
         '#tmDownloads .tmDlBar{height:8px;border-radius:99px;background:rgba(255,255,255,.12);overflow:hidden}' +
         '#tmDownloads .tmDlBar>span{display:block;height:100%;width:0;background:#0a84ff;border-radius:99px}' +
-        '#tmDownloads .tmDlOpen{flex:0 0 auto;align-self:center;border:none;border-radius:999px;' +
-        'min-height:2.75rem;padding:.55em 1.15em;background:#0a84ff;color:#fff;font-weight:600;' +
-        'font-family:inherit;cursor:pointer}' +
+        '#tmDownloads .tmDlActions{display:flex;flex-direction:column;gap:.5rem;align-self:center;flex:0 0 auto}' +
+        '#tmDownloads .tmDlOpen,#tmDownloads .tmDlRemove{border:none;border-radius:999px;' +
+        'min-height:2.75rem;padding:.55em 1.15em;font-weight:600;font-family:inherit;cursor:pointer}' +
+        '#tmDownloads .tmDlOpen{background:#0a84ff;color:#fff}' +
+        '#tmDownloads .tmDlRemove{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.38)}' +
+        '#tmDownloads .tmDlRemove:disabled{opacity:.45;cursor:default}' +
         '#tmSearchHits{margin:0 0 1.4em}' +
         '#tmSearchHits h2{font-size:1.15em;margin:0 0 .6em}' +
         '#tmSearchHits .tmSearchRow{display:flex;gap:.85em;overflow-x:auto;padding:.2em 0 0.6em}' +
@@ -64,9 +67,12 @@
         '.tmDownloadHero{display:flex;gap:1rem;align-items:center;margin:0 0 1em;flex-wrap:wrap}' +
         '.tmDownloadHero .tmDlBar{flex:1 1 12rem;height:10px;border-radius:99px;background:rgba(255,255,255,.12)}' +
         '.tmDownloadHero .tmDlBar>span{display:block;height:100%;background:#0a84ff;border-radius:99px}' +
+        '.tmDownloadHero .tmDlRemove{border:1px solid rgba(255,255,255,.38);background:transparent;color:#fff;' +
+        'border-radius:999px;min-height:2.5rem;padding:.45em 1.1em;font-weight:600;font-family:inherit;cursor:pointer}' +
         '@media (max-width:700px){' +
         '#tmDownloads .tmDlRow{flex-wrap:wrap}' +
-        '#tmDownloads .tmDlOpen{width:100%}' +
+        '#tmDownloads .tmDlActions{width:100%}' +
+        '#tmDownloads .tmDlOpen,#tmDownloads .tmDlRemove{width:100%}' +
         '}';
     document.head.appendChild(style);
 
@@ -520,6 +526,8 @@
         body.appendChild(meta);
         body.appendChild(bar);
 
+        var actions = document.createElement('div');
+        actions.className = 'tmDlActions';
         var open = document.createElement('button');
         open.type = 'button';
         open.className = 'tmDlOpen';
@@ -534,11 +542,47 @@
         row.addEventListener('keydown', function (ev) {
             if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(); }
         });
+        if (child && child.Id) { actions.appendChild(open); }
+
+        var remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'tmDlRemove';
+        remove.textContent = 'Remove';
+        remove.addEventListener('click', function (ev) {
+            ev.stopPropagation();
+            removeDownload(row, entry && entry.id, title, remove);
+        });
+        actions.appendChild(remove);
 
         row.appendChild(poster);
         row.appendChild(body);
-        if (child && child.Id) { row.appendChild(open); }
+        row.appendChild(actions);
         return row;
+    }
+
+    function removeDownload(row, nzoId, title, button) {
+        if (!api()) { return; }
+        if (button) { button.disabled = true; }
+        api().fetch({
+            url: api().getUrl('TreasureMaps/Downloads/Remove', { nzoId: nzoId || '', title: title || '' }),
+            type: 'POST',
+            dataType: 'json'
+        }).then(function (res) {
+            if (!res || res.ok === false) {
+                if (button) { button.disabled = false; }
+                return;
+            }
+            if (row && row.parentNode) { row.parentNode.removeChild(row); }
+            var host = document.getElementById('tmDownloads');
+            if (host && !host.querySelector('.tmDlRow')) {
+                var empty = document.createElement('div');
+                empty.className = 'tmDlMeta';
+                empty.textContent = 'No Treasure-Maps downloads yet.';
+                host.appendChild(empty);
+            }
+        }, function () {
+            if (button) { button.disabled = false; }
+        });
     }
 
     function statusText(entry, speed, quality) {
@@ -572,6 +616,19 @@
             bar.innerHTML = '<span></span>';
             hero.appendChild(meta);
             hero.appendChild(bar);
+            var remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'tmDlRemove';
+            remove.textContent = 'Remove';
+            remove.addEventListener('click', function (ev) {
+                ev.stopPropagation();
+                var title = (item.ProviderIds && item.ProviderIds.TreasureMapsTitle) || item.OriginalTitle || item.Name;
+                var nzo = '';
+                var ext = String(item.ExternalId || '').split('::');
+                if (ext.length > 1) { nzo = ext[1]; }
+                removeDownload(hero, nzo, title, remove);
+            });
+            hero.appendChild(remove);
             var buttons = pageEl.querySelector('.mainDetailButtons');
             var nameEl = pageEl.querySelector('.itemName') || pageEl.querySelector('h1');
             if (buttons && buttons.parentNode) {

@@ -13,7 +13,6 @@ using MediaBrowser.Controller.Channels;
 using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Branding;
-using MediaBrowser.Model.Configuration;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Library;
 using Microsoft.AspNetCore.Authorization;
@@ -280,7 +279,7 @@ public class TreasureMapsController : ControllerBase
                 sab = new
                 {
                     speed,
-                    items = items.Select(i => new { name = i.Name, status = i.Status, percent = i.Percent, fail = i.FailMessage }).ToList()
+                    items = items.Select(i => new { name = i.Name, status = i.Status, percent = i.Percent, fail = i.FailMessage, storage = i.Storage }).ToList()
                 };
             }
             catch (Exception ex)
@@ -336,41 +335,8 @@ public class TreasureMapsController : ControllerBase
         };
     }
 
-    private async Task<string> EnsureLibraryAsync(string name, CollectionTypeOptions collectionType, string path)
-    {
-        try
-        {
-            Directory.CreateDirectory(path);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Could not create library folder {Path}", path);
-        }
-
-        var existing = _libraryManager.GetVirtualFolders()
-            .FirstOrDefault(v => string.Equals(v.Name, name, StringComparison.OrdinalIgnoreCase));
-
-        if (existing is null)
-        {
-            var options = new LibraryOptions
-            {
-                PathInfos = new[] { new MediaPathInfo(path) },
-                EnableRealtimeMonitor = true
-            };
-            await _libraryManager.AddVirtualFolder(name, collectionType, options, true).ConfigureAwait(false);
-            _logger.LogInformation("Created Jellyfin library '{Name}' -> {Path}", name, path);
-            return "created";
-        }
-
-        if (existing.Locations?.Any(l => string.Equals(l, path, StringComparison.OrdinalIgnoreCase)) == true)
-        {
-            return "already configured";
-        }
-
-        _libraryManager.AddMediaPath(name, new MediaPathInfo(path));
-        _logger.LogInformation("Added {Path} to existing Jellyfin library '{Name}'", path, name);
-        return "path added";
-    }
+    private Task<string> EnsureLibraryAsync(string name, CollectionTypeOptions collectionType, string path)
+        => LibrarySetup.EnsureAsync(_libraryManager, name, collectionType, path, _logger);
 
     /// <summary>
     /// Moves the Treasure-Maps channel to the end of the top menu (after Movies, TV Shows, ...)
@@ -516,8 +482,10 @@ public class TreasureMapsController : ControllerBase
             {
                 ok = true,
                 speed,
-                items = items
-                    .Where(i => _grabService.IsTracked(i.Id, i.Name))
+                items = DownloadList.DedupeByTitle(
+                    items.Where(i => _grabService.IsTracked(i.Id, i.Name)),
+                    i => DownloadTitle.Resolve(i.Name, _grabService.Lookup(i.Id, i.Name)?.Title),
+                    i => i.Status)
                     .Select(i =>
                     {
                         var rec = _grabService.Lookup(i.Id, i.Name);
@@ -533,7 +501,8 @@ public class TreasureMapsController : ControllerBase
                             timeLeft = i.TimeLeft,
                             sizeMb = i.SizeMb,
                             leftMb = i.LeftMb,
-                            failMessage = i.FailMessage
+                            failMessage = i.FailMessage,
+                            storage = i.Storage
                         };
                     })
             });
@@ -542,6 +511,35 @@ public class TreasureMapsController : ControllerBase
         {
             _logger.LogWarning(ex, "Failed to read the SABnzbd download status");
             return Ok(new { ok = false, message = ex.Message, items = Array.Empty<object>() });
+        }
+    }
+
+    /// <summary>
+    /// Removes a Treasure-Maps download from the Downloads list and from SABnzbd queue/history.
+    /// Does not delete the video files on disk.
+    /// </summary>
+    /// <param name="nzoId">The SABnzbd job id.</param>
+    /// <param name="title">The movie/show title (clears every duplicate row for that title).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>How many SABnzbd jobs were asked to be deleted.</returns>
+    [HttpPost("Downloads/Remove")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> RemoveDownload([FromQuery] string? nzoId, [FromQuery] string? title, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(nzoId) && string.IsNullOrWhiteSpace(title))
+        {
+            return Ok(new { ok = false, message = "nzoId or title is required." });
+        }
+
+        try
+        {
+            var removed = await _grabService.RemoveFromDownloadsAsync(nzoId, title, cancellationToken).ConfigureAwait(false);
+            return Ok(new { ok = true, removed });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to remove Treasure-Maps download {Title} ({NzoId})", title, nzoId);
+            return Ok(new { ok = false, message = ex.Message });
         }
     }
 

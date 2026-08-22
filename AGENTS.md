@@ -116,10 +116,12 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   the handler can identify them. Title cards also get the best release's guid
   (`ReleaseGrouper.PickBestRelease`), so favouriting the poster downloads that quality. Play on a
   title card is not a download (no media source). `LibraryRefreshService` scans Movies / TV Shows
-  on startup and when SABnzbd marks a job completed. Diagnose empty libraries with
-  `GET TreasureMaps/Libraries/Status` or the config buttons "Check Movies / TV folders" and
-  "Scan libraries now". A job still in the SABnzbd queue only shows under Treasure-Maps →
-  Downloads. Toggle: `GrabOnFavorite` (default on).
+  on startup and when SABnzbd marks a **Treasure-Maps** job completed. It also attaches the real
+  completed folder from SABnzbd history (`storage` / `path`) via `LibrarySetup` when the Movies
+  library points at a different/empty path — that is why a ✓ Downloaded title can be missing
+  from Filme/Movies. Diagnose with `GET TreasureMaps/Libraries/Status` or the config buttons
+  "Check Movies / TV folders" and "Scan libraries now". A job still in the SABnzbd queue only
+  shows under Treasure-Maps → Downloads. Toggle: `GrabOnFavorite` (default on).
 - Browse & Grab: the plugin ships a **second** dashboard page (`browse.html`, registered in
   `Plugin.GetPages()` as `TreasureMapsBrowse`, linked from the config page) styled like the
   Treasure-Maps website (tabs Trending/Movies/TV, poster grid, curated genre selector, 1-click Grab).
@@ -280,17 +282,21 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   (movie/show name + poster + status overview). Opening a card shows a details page (web / iOS /
   Fire TV can navigate it). Only jobs this plugin queued are listed — `GrabService` persists
   `grabs.json` under the plugin data folder and `IsTracked` filters SABnzbd queue/history.
-  Foreign SAB jobs never appear here. Do **not** use `Folder()` for download tiles (`Folder()`
-  stamps the generic "Treasure-Maps" poster). Jellyfin caches channel folders for hours; the
-  channel implements `IHasCacheKey` with a 2-minute time bucket. Empty Downloads must return a
-  hint item (never an empty result — Jellyfin caches empty for hours). Bump `DataVersion` when
-  changing download item ids (`DL::nzo::title`).
+  Foreign SAB jobs never appear here. Duplicate SABnzbd nzo rows for the same title are
+  collapsed to one card (`DownloadList.DedupeByTitle`). Users can clear a row without deleting
+  the video: web `POST TreasureMaps/Downloads/Remove?nzoId=&title=` (Remove button) and native
+  delete via `ISupportsDelete` on `DL::` / `dlinfo` ids (`del_files=0` + `GrabService.Forget`).
+  Do **not** use `Folder()` for download tiles (`Folder()` stamps the generic "Treasure-Maps"
+  poster). Jellyfin caches channel folders for hours; the channel implements `IHasCacheKey`
+  with a 2-minute time bucket. Empty Downloads must return a hint item (never an empty result
+  — Jellyfin caches empty for hours). Bump `DataVersion` when changing download item ids
+  (`DL::nzo::title`).
 - Grab records: play-to-download, favorite, Browse & Grab, and `POST .../Grab?title=` all call
   `RegisterGrab` with the **movie title** (not the quality badge). SAB job names use that title.
   `REL::` / `grab::` ids carry `title + quality + cover`. `DownloadTitle` detects quality-only
   labels (`1080p · WEB-DL · …`) so they never become the card heading.
 - Client script injection (web only): `WebScriptInjector` inserts
-  `<script plugin="TreasureMaps" defer src="/TreasureMaps/ClientScript?v=4">` into the web client's
+  `<script plugin="TreasureMaps" defer src="/TreasureMaps/ClientScript?v=6">` into the web client's
   `index.html` at startup (marker-guarded, same pattern as Intro Skipper; served anonymously by
   `GET TreasureMaps/ClientScript` from `Web/treasuremaps.js`). Rebuilding jellyfin-web replaces
   index.html — the injection re-applies on the next server start. The script: (1) replaces the

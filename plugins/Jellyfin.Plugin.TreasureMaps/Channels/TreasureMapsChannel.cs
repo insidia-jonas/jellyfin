@@ -10,6 +10,7 @@ using Jellyfin.Plugin.TreasureMaps.Languages;
 using Jellyfin.Plugin.TreasureMaps.ReleaseNaming;
 using Jellyfin.Plugin.TreasureMaps.Xrel;
 using MediaBrowser.Controller.Channels;
+using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Channels;
 using MediaBrowser.Model.Dto;
@@ -25,7 +26,7 @@ namespace Jellyfin.Plugin.TreasureMaps.Channels;
 /// Titles are shown once (one poster card per movie/show); opening a card lists the individual
 /// releases (qualities) behind it, which you grab by marking a release as a favorite (heart).
 /// </summary>
-public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSearch, IDisableMediaSourceDisplay, IRequiresMediaInfoCallback, IHasCacheKey
+public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSearch, IDisableMediaSourceDisplay, IRequiresMediaInfoCallback, IHasCacheKey, ISupportsDelete
 {
     private const string GenrePrefix = "genre:";
     private const string FindPrefix = "find:";
@@ -102,7 +103,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
             var c = Config;
             return string.Join(
                 '|',
-                "33",
+                "34",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -486,15 +487,15 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         }
 
         var (speed, entries) = await _sabnzbd.GetDownloadStatusAsync(cancellationToken).ConfigureAwait(false);
+        var tracked = entries.Where(e => _grabService.IsTracked(e.Id, e.Name)).ToList();
+        var unique = DownloadList.DedupeByTitle(
+            tracked,
+            e => DownloadTitle.Resolve(e.Name, _grabService.Lookup(e.Id, e.Name)?.Title),
+            e => e.Status);
         var items = new List<ChannelItemInfo>();
         var order = 0;
-        foreach (var entry in entries)
+        foreach (var entry in unique)
         {
-            if (!_grabService.IsTracked(entry.Id, entry.Name))
-            {
-                continue;
-            }
-
             items.Add(DownloadCard(entry, order++, speed));
         }
 
@@ -642,6 +643,44 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         // The plugin's own in-memory API caches keep this cheap for the indexer.
         var bucket = DateTime.UtcNow.Ticks / TimeSpan.FromMinutes(2).Ticks;
         return (userId ?? string.Empty) + "-" + DataVersion + "-" + bucket.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <inheritdoc />
+    public bool CanDelete(BaseItem item)
+    {
+        var id = item.ExternalId ?? string.Empty;
+        if (id.StartsWith(FolderIdPrefix, StringComparison.Ordinal))
+        {
+            id = id[FolderIdPrefix.Length..];
+        }
+
+        return id.StartsWith("DL" + Sep, StringComparison.Ordinal)
+            || id.StartsWith("dl" + Sep, StringComparison.Ordinal)
+            || id.StartsWith("dlinfo", StringComparison.Ordinal);
+    }
+
+    /// <inheritdoc />
+    public Task DeleteItem(string id, CancellationToken cancellationToken)
+    {
+        if (id.StartsWith(FolderIdPrefix, StringComparison.Ordinal))
+        {
+            id = id[FolderIdPrefix.Length..];
+        }
+
+        var parts = id.Split(Sep);
+        string? nzoId = null;
+        string? title = null;
+        if (id.StartsWith("DL" + Sep, StringComparison.Ordinal) || id.StartsWith("dl" + Sep, StringComparison.Ordinal))
+        {
+            nzoId = parts.Length > 1 ? parts[1] : null;
+            title = parts.Length > 2 ? Decode(parts[2]) : null;
+        }
+        else if (id.StartsWith("dlinfo", StringComparison.Ordinal))
+        {
+            nzoId = parts.Length > 1 ? parts[1] : null;
+        }
+
+        return _grabService.RemoveFromDownloadsAsync(nzoId, title, cancellationToken);
     }
 
     /// <summary>

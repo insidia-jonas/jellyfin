@@ -68,4 +68,40 @@ public class GrabRecordListTests
         var silo = Assert.Single(recent, r => r.Title == "Silo");
         Assert.Equal("nzo-new", silo.NzoId);
     }
+
+    [Fact]
+    public void Forget_RemovesEveryRowForTheTitle()
+    {
+        var service = new GrabService(null!, null!, new Microsoft.Extensions.Logging.Abstractions.NullLogger<GrabService>());
+        service.RegisterGrab(new[] { "nzo-a" }, "The End of Oak Street", null, "The End of Oak Street", "1080p", "g1", "movie");
+        service.RegisterGrab(new[] { "nzo-b" }, "The End of Oak Street", null, "The End of Oak Street", "720p", "g2", "movie");
+        service.RegisterGrab(new[] { "nzo-keep" }, "Silo", null, "Silo", "1080p", "g3", "tv");
+
+        Assert.Equal(2, service.ListNzoIds(null, "The End of Oak Street").Count);
+        Assert.Equal(2, service.Forget(null, "The End of Oak Street"));
+        Assert.False(service.IsTracked("nzo-a", "The End of Oak Street"));
+        Assert.False(service.IsTracked("nzo-b", "The End of Oak Street"));
+        Assert.True(service.IsTracked("nzo-keep", "Silo"));
+        Assert.Single(service.ListRecent(10));
+    }
+}
+
+public class DownloadListTests
+{
+    [Fact]
+    public void DedupeByTitle_KeepsOneRow_PrefersActive()
+    {
+        var rows = new[]
+        {
+            new { Title = "The End of Oak Street", Status = "Completed", Id = "old" },
+            new { Title = "The End of Oak Street", Status = "Downloading", Id = "live" },
+            new { Title = "The End of Oak Street", Status = "Completed", Id = "dup" },
+            new { Title = "Silo", Status = "Completed", Id = "silo" }
+        };
+
+        var unique = DownloadList.DedupeByTitle(rows, r => r.Title, r => r.Status);
+        Assert.Equal(2, unique.Count);
+        Assert.Equal("live", unique[0].Id);
+        Assert.Equal("silo", unique[1].Id);
+    }
 }

@@ -133,6 +133,134 @@ public class GrabService
     public bool IsTracked(string? nzoId, string? name) => Lookup(nzoId, name) is not null;
 
     /// <summary>
+    /// SABnzbd job ids registered for this title (every duplicate grab of the same movie/show).
+    /// </summary>
+    /// <param name="nzoId">A known job id, may be null.</param>
+    /// <param name="name">The job or display title, may be null.</param>
+    /// <returns>The matching nzo ids.</returns>
+    public IReadOnlyList<string> ListNzoIds(string? nzoId, string? name)
+    {
+        EnsureLoaded();
+        var rec = Lookup(nzoId, name);
+        var titleKey = NameKey(rec?.Title ?? name);
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        if (!string.IsNullOrWhiteSpace(nzoId))
+        {
+            ids.Add(nzoId);
+        }
+
+        foreach (var record in _byNzo.Values.Concat(_byName.Values))
+        {
+            if (string.IsNullOrWhiteSpace(record.NzoId) || !SameGrab(record, nzoId, titleKey))
+            {
+                continue;
+            }
+
+            ids.Add(record.NzoId);
+        }
+
+        return ids.ToList();
+    }
+
+    /// <summary>
+    /// Drops a title from Downloads: forgets the grab records and removes the SABnzbd
+    /// queue/history rows. Downloaded video files are left on disk.
+    /// </summary>
+    /// <param name="nzoId">A SABnzbd job id, may be null when <paramref name="name"/> is set.</param>
+    /// <param name="name">The job or display title, may be null.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>How many SABnzbd jobs were asked to be deleted.</returns>
+    public async Task<int> RemoveFromDownloadsAsync(string? nzoId, string? name, CancellationToken cancellationToken)
+    {
+        var ids = ListNzoIds(nzoId, name);
+        foreach (var id in ids)
+        {
+            if (!SabnzbdClient.IsConfigured)
+            {
+                break;
+            }
+
+            try
+            {
+                await _sabnzbd.RemoveJobAsync(id, fromHistory: true, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "SABnzbd history delete failed for {Id}", id);
+            }
+
+            try
+            {
+                await _sabnzbd.RemoveJobAsync(id, fromHistory: false, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "SABnzbd queue delete failed for {Id}", id);
+            }
+        }
+
+        Forget(nzoId, name);
+        return ids.Count;
+    }
+
+    /// <summary>
+    /// Forgets grab records for a title so it no longer appears in Downloads.
+    /// </summary>
+    /// <param name="nzoId">A SABnzbd job id, may be null.</param>
+    /// <param name="name">The job or display title, may be null.</param>
+    /// <returns>How many nzo-keyed records were removed.</returns>
+    public int Forget(string? nzoId, string? name)
+    {
+        EnsureLoaded();
+        var rec = Lookup(nzoId, name);
+        var titleKey = NameKey(rec?.Title ?? name);
+        var removed = 0;
+
+        foreach (var key in _byNzo.Keys.ToList())
+        {
+            if (!_byNzo.TryGetValue(key, out var record) || !SameGrab(record, nzoId, titleKey))
+            {
+                continue;
+            }
+
+            if (_byNzo.TryRemove(key, out _))
+            {
+                removed++;
+            }
+        }
+
+        foreach (var key in _byName.Keys.ToList())
+        {
+            if (!_byName.TryGetValue(key, out var record))
+            {
+                continue;
+            }
+
+            if (SameGrab(record, nzoId, titleKey)
+                || string.Equals(key, titleKey, StringComparison.Ordinal)
+                || string.Equals(key, NameKey(name), StringComparison.Ordinal))
+            {
+                _byName.TryRemove(key, out _);
+            }
+        }
+
+        Persist();
+        return removed;
+    }
+
+    private static bool SameGrab(GrabRecord record, string? nzoId, string? titleKey)
+    {
+        if (!string.IsNullOrEmpty(nzoId) && string.Equals(record.NzoId, nzoId, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return !string.IsNullOrEmpty(titleKey)
+            && (string.Equals(NameKey(record.Title), titleKey, StringComparison.Ordinal)
+                || string.Equals(record.NameKey, titleKey, StringComparison.Ordinal));
+    }
+
+    /// <summary>
     /// Recent Treasure-Maps grabs, newest first, one row per title.
     /// </summary>
     /// <param name="max">The maximum number of records.</param>

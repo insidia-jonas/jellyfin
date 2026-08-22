@@ -49,4 +49,28 @@ public class LibraryPathsTests
             Directory.Delete(dir, true);
         }
     }
+
+    [Fact]
+    public void LibraryRootFromCompletedPath_UsesCategoryParent()
+    {
+        Assert.Equal(
+            "/downloads/complete/movies",
+            LibraryPaths.LibraryRootFromCompletedPath("/downloads/complete/movies/The.End.of.Oak.Street.2024"));
+    }
+
+    [Fact]
+    public void LibraryRootFromCompletedPath_PrefersConfiguredRoot_WhenStorageIsUnderIt()
+    {
+        Assert.Equal(
+            "/srv/media/movies",
+            LibraryPaths.LibraryRootFromCompletedPath("/srv/media/movies/The End of Oak Street/file.mkv", "/srv/media/movies"));
+    }
+
+    [Fact]
+    public void LibraryRootFromCompletedPath_VideoFile_WalksUpToCategory()
+    {
+        Assert.Equal(
+            "/data/movies",
+            LibraryPaths.LibraryRootFromCompletedPath("/data/movies/Title/Title.2024.1080p.mkv"));
+    }
 }

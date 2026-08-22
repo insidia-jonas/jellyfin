@@ -92,6 +92,32 @@ public class SabnzbdClient
         return result.NzoIds ?? new List<string>();
     }
 
+    /// <summary>
+    /// Removes a job from the SABnzbd queue or history. Does not delete downloaded files.
+    /// </summary>
+    /// <param name="nzoId">The SABnzbd job id.</param>
+    /// <param name="fromHistory">True to delete a finished history item.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task that completes when SABnzbd has been asked to delete the job.</returns>
+    public async Task RemoveJobAsync(string nzoId, bool fromHistory, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(nzoId))
+        {
+            return;
+        }
+
+        using var client = _httpClientFactory.CreateClient();
+        var url = BuildApiUrl(new Dictionary<string, string?>
+        {
+            ["mode"] = fromHistory ? "history" : "queue",
+            ["name"] = "delete",
+            ["value"] = nzoId,
+            ["del_files"] = "0"
+        });
+        using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+    }
+
     private static readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
 
     private static async Task<T?> ReadJsonAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)
@@ -232,7 +258,7 @@ public class SabnzbdClient
             }
         }
 
-        var historyUrl = BuildApiUrl(new Dictionary<string, string?> { ["mode"] = "history", ["limit"] = "30" });
+        var historyUrl = BuildApiUrl(new Dictionary<string, string?> { ["mode"] = "history", ["limit"] = "50" });
         using (var response = await client.GetAsync(historyUrl, cancellationToken).ConfigureAwait(false))
         {
             response.EnsureSuccessStatusCode();
@@ -250,7 +276,8 @@ public class SabnzbdClient
                         Name = GetString(slot, "name"),
                         Status = GetString(slot, "status") ?? "Completed",
                         Percent = 100,
-                        FailMessage = GetString(slot, "fail_message")
+                        FailMessage = GetString(slot, "fail_message"),
+                        Storage = GetString(slot, "storage") ?? GetString(slot, "path")
                     });
                 }
             }
@@ -312,6 +339,9 @@ public class SabnzbdClient
 
         /// <summary>Gets or sets the failure message, if any.</summary>
         public string? FailMessage { get; set; }
+
+        /// <summary>Gets or sets the completed storage path from SABnzbd history.</summary>
+        public string? Storage { get; set; }
     }
 
     private sealed class SabVersionResponse
