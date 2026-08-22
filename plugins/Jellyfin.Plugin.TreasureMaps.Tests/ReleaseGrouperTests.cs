@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using System.Text.Json;
 using Jellyfin.Plugin.TreasureMaps.Api;
@@ -52,6 +53,19 @@ public class ReleaseGrouperTests
         Assert.Equal("https://img/dune.jpg", dune.Cover); // filled from the release that has it
         Assert.Equal(2021, dune.Year);
         Assert.Equal("movie", dune.Kind);
+    }
+
+    [Fact]
+    public void PickBestRelease_PrefersHigherQuality()
+    {
+        var response = JsonSerializer.Deserialize<ReleaseListResponse>(TwoReleasesSameMovieJson, _options)!;
+        var dune = ReleaseGrouper.Group(response.Items).First(g => g.Title == "Dune");
+
+        var best = ReleaseGrouper.PickBestRelease(dune.Releases);
+
+        Assert.NotNull(best);
+        Assert.Equal("g2", best!.Guid);
+        Assert.Contains("2160p", best.Title, StringComparison.Ordinal);
     }
 
     [Fact]

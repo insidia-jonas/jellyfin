@@ -25,5 +25,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddHostedService<GrabOnFavoriteService>();
         serviceCollection.AddHostedService<WebScriptInjector>();
         serviceCollection.AddHostedService<PeopleImageService>();
+        serviceCollection.AddSingleton<LibraryRefreshService>();
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<LibraryRefreshService>());
     }
 }

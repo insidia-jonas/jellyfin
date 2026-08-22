@@ -102,7 +102,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             var c = Config;
             return string.Join(
                 '|',
-                "29",
+                "30",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -812,6 +812,14 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             if (!string.IsNullOrWhiteSpace(group.Imdb))
             {
                 card.ProviderIds["Imdb"] = ReleaseMapper.NormalizeImdbId(group.Imdb!);
+            }
+
+            // Favouriting the title card (the poster) grabs the best release in the group.
+            var best = ReleaseGrouper.PickBestRelease(group.Releases);
+            if (best is not null && !string.IsNullOrWhiteSpace(best.Guid))
+            {
+                card.ProviderIds["TreasureMaps"] = best.Guid;
+                card.ProviderIds["TreasureMapsKind"] = group.Kind;
             }
 
             card.Tags.Add(count == 1 ? "1 release" : count + " releases");

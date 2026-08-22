@@ -105,8 +105,13 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   `IUserDataManager.UserDataSaved`; marking a Treasure-Maps channel item as a **favorite** (the ❤ in
   the normal browsing view) triggers a grab to SABnzbd. Channel items are tagged with
   `ProviderIds["TreasureMaps"]` (release guid) + `["TreasureMapsKind"]` (movie/tv) by the mapper so
-  the handler can identify them. This exists because Jellyfin channels cannot add custom action
-  buttons to items — favouriting is the usable in-place gesture. Toggle: `GrabOnFavorite` (default on).
+  the handler can identify them. Title cards also get the best release's guid
+  (`ReleaseGrouper.PickBestRelease`), so favouriting the poster downloads that quality. Play on a
+  title card is not a download (no media source). `LibraryRefreshService` scans Movies / TV Shows
+  on startup and when SABnzbd marks a job completed. Diagnose empty libraries with
+  `GET TreasureMaps/Libraries/Status` or the config buttons "Check Movies / TV folders" and
+  "Scan libraries now". A job still in the SABnzbd queue only shows under Treasure-Maps →
+  Downloads. Toggle: `GrabOnFavorite` (default on).
 - Browse & Grab: the plugin ships a **second** dashboard page (`browse.html`, registered in
   `Plugin.GetPages()` as `TreasureMapsBrowse`, linked from the config page) styled like the
   Treasure-Maps website (tabs Trending/Movies/TV, poster grid, curated genre selector, 1-click Grab).

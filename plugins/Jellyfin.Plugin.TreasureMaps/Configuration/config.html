@@ -170,6 +170,9 @@
                         <div class="fieldDescription" style="margin-top:.35em;">Creates/updates the <code>movies</code> and <code>tv</code> categories with the folders above directly in SABnzbd (needs the SABnzbd <strong>full</strong> API key).</div>
                         <button is="emby-button" type="button" id="setupLibraries" class="raised block"><span>Create media libraries (Movies / TV Shows)</span></button>
                         <div class="fieldDescription" style="margin-top:.35em;">Creates Jellyfin libraries pointing at the download folders above, so finished downloads appear in the top menu under <strong>Movies</strong> / <strong>TV Shows</strong>.</div>
+                        <button is="emby-button" type="button" id="libraryStatus" class="raised block"><span>Check Movies / TV folders</span></button>
+                        <button is="emby-button" type="button" id="scanLibraries" class="raised block"><span>Scan libraries now</span></button>
+                        <div class="fieldDescription" style="margin-top:.35em;">Shows the resolved download folders and how many video files are in them. Scan picks up finished SABnzbd jobs into Movies / TV Shows.</div>
                         <button is="emby-button" type="button" id="moveMenuLast" class="raised block"><span>Move Treasure-Maps to the end of the menu</span></button>
                         <div class="fieldDescription" style="margin-top:.35em;">Reorders every user's top menu so the Treasure-Maps channel comes after the media libraries.</div>
                         <button is="emby-button" type="button" id="applyTheme" class="raised block"><span>Apply glass theme (modern macOS look)</span></button>
@@ -394,6 +397,71 @@
                                 resultEl.textContent = 'Library setup request failed.';
                             });
                         });
+                    });
+                });
+
+            document.querySelector('#libraryStatus')
+                .addEventListener('click', function () {
+                    var resultEl = document.querySelector('#sabResult');
+                    resultEl.textContent = 'Checking folders...';
+                    Dashboard.showLoadingMsg();
+                    ApiClient.fetch({
+                        url: ApiClient.getUrl('TreasureMaps/Libraries/Status'),
+                        type: 'GET',
+                        dataType: 'json',
+                        headers: { accept: 'application/json' }
+                    }).then(function (res) {
+                        Dashboard.hideLoadingMsg();
+                        if (!res || !res.ok) {
+                            resultEl.style.color = 'red';
+                            resultEl.textContent = 'Status failed.';
+                            return;
+                        }
+                        function line(lib) {
+                            if (!lib) { return ''; }
+                            var files = lib.videoFiles < 0 ? 'folder missing' : (lib.videoFiles + ' video file(s)');
+                            return lib.name + ': ' + (lib.path || '(no path)') + ' — ' + files + (lib.libraryConfigured ? '' : ' — library not created');
+                        }
+                        var sab = '';
+                        if (res.sabnzbd && res.sabnzbd.items) {
+                            sab = ' SABnzbd: ' + res.sabnzbd.items.map(function (i) {
+                                return (i.name || '?') + ' [' + (i.status || '?') + (i.percent ? ' ' + Math.round(i.percent) + '%' : '') + ']';
+                            }).join('; ');
+                        } else if (res.sabnzbd && res.sabnzbd.error) {
+                            sab = ' SABnzbd: ' + res.sabnzbd.error;
+                        }
+                        resultEl.style.color = 'green';
+                        resultEl.textContent = line(res.movies) + ' | ' + line(res.tv) + sab;
+                    }, function () {
+                        Dashboard.hideLoadingMsg();
+                        resultEl.style.color = 'red';
+                        resultEl.textContent = 'Status request failed.';
+                    });
+                });
+
+            document.querySelector('#scanLibraries')
+                .addEventListener('click', function () {
+                    var resultEl = document.querySelector('#sabResult');
+                    resultEl.textContent = 'Scanning libraries...';
+                    Dashboard.showLoadingMsg();
+                    ApiClient.fetch({
+                        url: ApiClient.getUrl('TreasureMaps/Libraries/Scan'),
+                        type: 'POST',
+                        dataType: 'json',
+                        headers: { accept: 'application/json' }
+                    }).then(function (res) {
+                        Dashboard.hideLoadingMsg();
+                        if (res && res.ok) {
+                            resultEl.style.color = 'green';
+                            resultEl.textContent = 'Library scan finished. Reload Movies / TV Shows.';
+                        } else {
+                            resultEl.style.color = 'red';
+                            resultEl.textContent = 'Scan failed: ' + ((res && res.message) || 'unknown error');
+                        }
+                    }, function () {
+                        Dashboard.hideLoadingMsg();
+                        resultEl.style.color = 'red';
+                        resultEl.textContent = 'Scan request failed.';
                     });
                 });
 

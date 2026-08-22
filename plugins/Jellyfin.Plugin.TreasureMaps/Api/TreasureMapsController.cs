@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data;
 using Jellyfin.Plugin.TreasureMaps.ReleaseNaming;
+using Jellyfin.Plugin.TreasureMaps;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.Channels;
 using MediaBrowser.Controller.Configuration;
@@ -39,6 +40,7 @@ public class TreasureMapsController : ControllerBase
     private readonly IUserManager _userManager;
     private readonly IUserViewManager _userViewManager;
     private readonly IServerConfigurationManager _configurationManager;
+    private readonly LibraryRefreshService _libraryRefresh;
     private readonly ILogger<TreasureMapsController> _logger;
 
     /// <summary>
@@ -60,6 +62,7 @@ public class TreasureMapsController : ControllerBase
         IUserManager userManager,
         IUserViewManager userViewManager,
         IServerConfigurationManager configurationManager,
+        LibraryRefreshService libraryRefresh,
         ILogger<TreasureMapsController> logger)
     {
         _client = client;
@@ -69,6 +72,7 @@ public class TreasureMapsController : ControllerBase
         _userManager = userManager;
         _userViewManager = userViewManager;
         _configurationManager = configurationManager;
+        _libraryRefresh = libraryRefresh;
         _logger = logger;
     }
 
@@ -213,8 +217,8 @@ public class TreasureMapsController : ControllerBase
             ? await _sabnzbd.GetCompleteDirAsync(cancellationToken).ConfigureAwait(false)
             : null;
 
-        var moviesPath = ResolveDownloadFolder(config.SabnzbdMovieFolder, config.SabnzbdMovieCategory, completeDir);
-        var tvPath = ResolveDownloadFolder(config.SabnzbdTvFolder, config.SabnzbdTvCategory, completeDir);
+        var moviesPath = LibraryPaths.Resolve(config.SabnzbdMovieFolder, config.SabnzbdMovieCategory, completeDir);
+        var tvPath = LibraryPaths.Resolve(config.SabnzbdTvFolder, config.SabnzbdTvCategory, completeDir);
         if (moviesPath is null && tvPath is null)
         {
             return Ok(new { ok = false, message = "Configure the SABnzbd movie/TV folders (absolute paths) or connect SABnzbd first." });
@@ -244,20 +248,86 @@ public class TreasureMapsController : ControllerBase
         }
     }
 
-    private static string? ResolveDownloadFolder(string? folder, string? category, string? completeDir)
+    /// <summary>
+    /// Returns where Movies / TV Shows point, how many video files are on disk, and the latest
+    /// SABnzbd jobs — used to diagnose an empty library after a grab.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The library and download status.</returns>
+    [HttpGet("Libraries/Status")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> LibraryStatus(CancellationToken cancellationToken)
     {
-        var value = !string.IsNullOrWhiteSpace(folder) ? folder : category;
-        if (string.IsNullOrWhiteSpace(value))
+        var config = Plugin.Instance?.Configuration ?? new Configuration.PluginConfiguration();
+        var completeDir = SabnzbdClient.IsConfigured
+            ? await _sabnzbd.GetCompleteDirAsync(cancellationToken).ConfigureAwait(false)
+            : null;
+        var moviesPath = LibraryPaths.Resolve(config.SabnzbdMovieFolder, config.SabnzbdMovieCategory, completeDir);
+        var tvPath = LibraryPaths.Resolve(config.SabnzbdTvFolder, config.SabnzbdTvCategory, completeDir);
+
+        object? sab = null;
+        if (SabnzbdClient.IsConfigured)
         {
-            return null;
+            try
+            {
+                var (speed, items) = await _sabnzbd.GetDownloadStatusAsync(cancellationToken).ConfigureAwait(false);
+                sab = new
+                {
+                    speed,
+                    items = items.Select(i => new { name = i.Name, status = i.Status, percent = i.Percent, fail = i.FailMessage }).ToList()
+                };
+            }
+            catch (Exception ex)
+            {
+                sab = new { error = ex.Message };
+            }
         }
 
-        if (Path.IsPathRooted(value))
+        var folders = _libraryManager.GetVirtualFolders();
+        return Ok(new
         {
-            return value;
-        }
+            ok = true,
+            completeDir,
+            movies = DescribeLibrary("Movies", moviesPath, folders),
+            tv = DescribeLibrary("TV Shows", tvPath, folders),
+            sabnzbd = sab
+        });
+    }
 
-        return string.IsNullOrWhiteSpace(completeDir) ? null : Path.Combine(completeDir, value);
+    /// <summary>
+    /// Triggers a full media-library scan so finished SABnzbd downloads appear under Movies / TV Shows.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The scan result.</returns>
+    [HttpPost("Libraries/Scan")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> ScanLibraries(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _libraryRefresh.ScanAsync(cancellationToken).ConfigureAwait(false);
+            return Ok(new { ok = true });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Library scan failed");
+            return Ok(new { ok = false, message = ex.Message });
+        }
+    }
+
+    private static object DescribeLibrary(string name, string? path, IReadOnlyList<VirtualFolderInfo> folders)
+    {
+        var existing = folders.FirstOrDefault(v => string.Equals(v.Name, name, StringComparison.OrdinalIgnoreCase));
+        var videos = LibraryPaths.CountVideos(path);
+        return new
+        {
+            name,
+            path,
+            exists = !string.IsNullOrWhiteSpace(path) && Directory.Exists(path!),
+            videoFiles = videos,
+            libraryConfigured = existing is not null,
+            libraryLocations = existing?.Locations
+        };
     }
 
     private async Task<string> EnsureLibraryAsync(string name, CollectionTypeOptions collectionType, string path)

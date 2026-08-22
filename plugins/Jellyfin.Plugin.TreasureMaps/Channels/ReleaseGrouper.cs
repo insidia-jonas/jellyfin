@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using Jellyfin.Plugin.TreasureMaps.Api;
+using Jellyfin.Plugin.TreasureMaps.ReleaseNaming;
 
 namespace Jellyfin.Plugin.TreasureMaps.Channels;
 
@@ -182,6 +183,41 @@ public static class ReleaseGrouper
 
         return kind == "tv" ? ShowNameFromScene(release.Title) : CleanSceneTitle(release.Title);
     }
+
+    /// <summary>
+    /// Picks the preferred release in a group: higher parsed quality score wins (4K &gt; 1080p,
+    /// BluRay &gt; WEB, …). Used when the user favourites a title card rather than a specific row.
+    /// </summary>
+    /// <param name="releases">The releases in the group.</param>
+    /// <returns>The preferred release, or null when the list is empty.</returns>
+    public static Release? PickBestRelease(IEnumerable<Release> releases)
+    {
+        Release? best = null;
+        var bestScore = int.MinValue;
+        foreach (var release in releases)
+        {
+            var parsed = ReleaseNameParser.Parse(release.Title);
+            var score = (parsed.QualityScore * 100) + ResolutionBonus(parsed.Resolution);
+            if (best is null || score > bestScore)
+            {
+                best = release;
+                bestScore = score;
+            }
+        }
+
+        return best;
+    }
+
+    private static int ResolutionBonus(string? resolution)
+        => resolution switch
+        {
+            "2160p" => 40,
+            "1080p" => 30,
+            "720p" => 20,
+            "576p" => 10,
+            "480p" => 5,
+            _ => 0
+        };
 
     /// <summary>
     /// Builds the stable grouping key for a release (resolving kind and title automatically).
