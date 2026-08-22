@@ -41,6 +41,7 @@ public class TreasureMapsController : ControllerBase
     private readonly IUserViewManager _userViewManager;
     private readonly IServerConfigurationManager _configurationManager;
     private readonly LibraryRefreshService _libraryRefresh;
+    private readonly GrabService _grabService;
     private readonly ILogger<TreasureMapsController> _logger;
 
     /// <summary>
@@ -63,6 +64,7 @@ public class TreasureMapsController : ControllerBase
         IUserViewManager userViewManager,
         IServerConfigurationManager configurationManager,
         LibraryRefreshService libraryRefresh,
+        GrabService grabService,
         ILogger<TreasureMapsController> logger)
     {
         _client = client;
@@ -73,6 +75,7 @@ public class TreasureMapsController : ControllerBase
         _userViewManager = userViewManager;
         _configurationManager = configurationManager;
         _libraryRefresh = libraryRefresh;
+        _grabService = grabService;
         _logger = logger;
     }
 
@@ -510,17 +513,26 @@ public class TreasureMapsController : ControllerBase
             {
                 ok = true,
                 speed,
-                items = items.Select(i => new
-                {
-                    id = i.Id,
-                    name = i.Name,
-                    status = i.Status,
-                    percent = i.Percent,
-                    timeLeft = i.TimeLeft,
-                    sizeMb = i.SizeMb,
-                    leftMb = i.LeftMb,
-                    failMessage = i.FailMessage
-                })
+                items = items
+                    .Where(i => _grabService.IsTracked(i.Id, i.Name))
+                    .Select(i =>
+                    {
+                        var rec = _grabService.Lookup(i.Id, i.Name);
+                        return new
+                        {
+                            id = i.Id,
+                            name = i.Name,
+                            title = DownloadTitle.Resolve(i.Name, rec?.Title),
+                            cover = rec?.CoverUrl,
+                            quality = rec?.Quality,
+                            status = i.Status,
+                            percent = i.Percent,
+                            timeLeft = i.TimeLeft,
+                            sizeMb = i.SizeMb,
+                            leftMb = i.LeftMb,
+                            failMessage = i.FailMessage
+                        };
+                    })
             });
         }
         catch (Exception ex)
@@ -748,15 +760,15 @@ public class TreasureMapsController : ControllerBase
     /// </summary>
     /// <param name="guid">The release GUID.</param>
     /// <param name="type">The media type (<c>movie</c> or <c>tv</c>); auto-detected from the name when omitted.</param>
-    /// <param name="name">An optional human-readable name for the SABnzbd job.</param>
+    /// <param name="name">An optional quality or scene name.</param>
+    /// <param name="title">The movie/show title for Downloads cards.</param>
     /// <param name="poster">An optional cover URL, shown on the Downloads folder tile.</param>
-    /// <param name="grabService">The shared grab service (artwork registry).</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The result of the grab (SABnzbd job ids or the written file path).</returns>
     [HttpPost("Releases/{guid}/Grab")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> Grab([FromRoute] string guid, [FromQuery] string? type, [FromQuery] string? name, [FromQuery] string? poster, [FromServices] GrabService grabService, CancellationToken cancellationToken)
+    public async Task<IActionResult> Grab([FromRoute] string guid, [FromQuery] string? type, [FromQuery] string? name, [FromQuery] string? title, [FromQuery] string? poster, CancellationToken cancellationToken)
     {
         var config = Plugin.Instance?.Configuration ?? new Configuration.PluginConfiguration();
         if (!SabnzbdClient.IsConfigured && string.IsNullOrWhiteSpace(config.NzbDropFolder))
@@ -769,17 +781,24 @@ public class TreasureMapsController : ControllerBase
 
         try
         {
-            var payload = await _client.DownloadNzbAsync(guid, cancellationToken).ConfigureAwait(false);
-            var jobName = string.IsNullOrWhiteSpace(name) ? guid : name!;
-            var safeName = Sanitize(jobName);
+            var displayTitle = title;
+            if (string.IsNullOrWhiteSpace(displayTitle) && !DownloadTitle.LooksLikeQualityLabel(name))
+            {
+                displayTitle = name;
+            }
+
+            var quality = DownloadTitle.LooksLikeQualityLabel(name) ? name : null;
+            var jobName = string.IsNullOrWhiteSpace(displayTitle) ? (string.IsNullOrWhiteSpace(name) ? guid : name!) : displayTitle;
 
             if (SabnzbdClient.IsConfigured)
             {
-                var nzoIds = await _sabnzbd.AddNzbAsync(payload, safeName, category, cancellationToken).ConfigureAwait(false);
-                grabService.RegisterArtwork(nzoIds, safeName, poster);
+                var nzoIds = await _grabService.GrabAsync(guid, jobName, isTv, poster, cancellationToken, displayTitle, quality).ConfigureAwait(false);
                 _logger.LogInformation("Grabbed {Guid} into SABnzbd category '{Category}' ({Ids})", guid, category, string.Join(",", nzoIds));
-                return Ok(new { ok = true, target = "sabnzbd", category, mediaType = isTv ? "tv" : "movie", nzoIds, bytes = payload.Length });
+                return Ok(new { ok = true, target = "sabnzbd", category, mediaType = isTv ? "tv" : "movie", nzoIds, bytes = 0 });
             }
+
+            var payload = await _client.DownloadNzbAsync(guid, cancellationToken).ConfigureAwait(false);
+            var safeName = Sanitize(jobName);
 
             Directory.CreateDirectory(config.NzbDropFolder);
             var path = Path.Combine(config.NzbDropFolder, safeName + ".nzb");

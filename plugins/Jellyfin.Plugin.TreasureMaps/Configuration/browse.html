@@ -101,7 +101,7 @@
                     var rating = (i.rating ? '<div class="tmRating">&#9733; ' + Number(i.rating).toFixed(1) + '</div>' : '');
                     var badge = '<div class="tmBadge">' + (i.type === 'tv' ? 'TV' : 'Movie') + '</div>';
                     var meta = [i.quality].filter(Boolean).join(' · ');
-                    return '<div class="tmCard" data-guid="' + esc(i.guid) + '" data-type="' + esc(i.type) + '" data-name="' + esc(i.scene) + '">'
+                    return '<div class="tmCard" data-guid="' + esc(i.guid) + '" data-type="' + esc(i.type) + '" data-name="' + esc(i.scene) + '" data-title="' + esc(i.title) + '">'
                         + '<div class="tmPoster">' + poster + rating + badge
                         + '<div class="tmOverlay"><button class="tmGrab">&#11015; Grab</button></div>'
                         + '</div>'
@@ -117,10 +117,13 @@
                             var guid = el.getAttribute('data-guid');
                             var type = el.getAttribute('data-type');
                             var name = el.getAttribute('data-name');
+                            var title = el.getAttribute('data-title') || '';
                             btn.disabled = true; btn.innerHTML = 'Grabbing…';
                             ApiClient.fetch({
                                 url: ApiClient.getUrl('TreasureMaps/Releases/' + encodeURIComponent(guid) + '/Grab'
-                                    + '?type=' + encodeURIComponent(type) + '&name=' + encodeURIComponent(name)),
+                                    + '?type=' + encodeURIComponent(type)
+                                    + '&name=' + encodeURIComponent(name)
+                                    + '&title=' + encodeURIComponent(title)),
                                 type: 'POST', dataType: 'json', headers: { accept: 'application/json' }
                             }).then(function (res) {
                                 if (res && res.ok) {

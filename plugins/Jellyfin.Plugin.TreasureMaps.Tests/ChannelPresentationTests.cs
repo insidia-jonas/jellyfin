@@ -24,6 +24,14 @@ public class ChannelPresentationTests
     }
 
     [Fact]
+    public void DownloadSortName_ActiveFirst()
+    {
+        var active = ChannelPresentation.DownloadSortName(true, "Zulu");
+        var done = ChannelPresentation.DownloadSortName(false, "Alpha");
+        Assert.True(string.CompareOrdinal(active, done) < 0);
+    }
+
+    [Fact]
     public void GetPosterPath_CreatesPng()
     {
         var path = ChannelArtwork.GetPosterPath("test-movies", "Movies");

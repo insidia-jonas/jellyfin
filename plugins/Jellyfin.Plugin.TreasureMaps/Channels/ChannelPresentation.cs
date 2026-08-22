@@ -31,4 +31,13 @@ public static class ChannelPresentation
         var inverted = (DateTimeOffset.MaxValue.UtcTicks - ticks).ToString("D19", CultureInfo.InvariantCulture);
         return inverted + "-" + title;
     }
+
+    /// <summary>
+    /// Sort key for a Downloads card: active jobs first, then by title.
+    /// </summary>
+    /// <param name="active">Whether the job is still downloading.</param>
+    /// <param name="title">The movie/show title.</param>
+    /// <returns>The sort key.</returns>
+    public static string DownloadSortName(bool active, string title)
+        => (active ? "0-" : "1-") + title;
 }

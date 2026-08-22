@@ -259,31 +259,33 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   and returns a bundled 6s "Download started ✓" mp4 (embedded resource, extracted to tmp,
   `MediaProtocol.File`). CRITICAL: the `MediaSourceInfo` must declare `MediaStreams` (h264/aac) or
   clients hit the transcode/HLS path and fail with a fatal player error.
-- Download status for TV: the channel root has a **Downloads** folder listing the SABnzbd queue
-  (progress/speed/ETA in names+overviews) and recent history (✓/✗). Jellyfin caches channel
-  folders for 3h, so the channel implements `IHasCacheKey` with a 2-minute time bucket — keeps the
-  view fresh while the plugin's in-memory API caches protect the indexer. Folder names on reused
-  ids update because ChannelManager updates container-folder names (and this fork also updates
-  DateCreated).
-- Downloads tiles show the movie POSTER, not text tiles: the cover travels through the
-  `REL::`/`grab::` ids into the grab, `GrabService` keeps an in-memory artwork registry
-  (nzo id + normalized job name → cover; fed by the play, favorite and API grab paths — the web
-  script passes a `poster` param). Registry is per-session: jobs grabbed before a server restart
-  fall back to text tiles until they age out of the SABnzbd history.
+- Download status for TV: the channel root has a **Downloads** folder of **BoxSet title cards**
+  (movie/show name + poster + status overview). Opening a card shows a details page (web / iOS /
+  Fire TV can navigate it). Only jobs this plugin queued are listed — `GrabService` persists
+  `grabs.json` under the plugin data folder and `IsTracked` filters SABnzbd queue/history.
+  Foreign SAB jobs never appear here. Do **not** use `Folder()` for download tiles (`Folder()`
+  stamps the generic "Treasure-Maps" poster). Jellyfin caches channel folders for hours; the
+  channel implements `IHasCacheKey` with a 2-minute time bucket. Empty Downloads must return a
+  hint item (never an empty result — Jellyfin caches empty for hours). Bump `DataVersion` when
+  changing download item ids (`DL::nzo::title`).
+- Grab records: play-to-download, favorite, Browse & Grab, and `POST .../Grab?title=` all call
+  `RegisterGrab` with the **movie title** (not the quality badge). SAB job names use that title.
+  `REL::` / `grab::` ids carry `title + quality + cover`. `DownloadTitle` detects quality-only
+  labels (`1080p · WEB-DL · …`) so they never become the card heading.
 - Client script injection (web only): `WebScriptInjector` inserts
-  `<script plugin="TreasureMaps" defer src="/TreasureMaps/ClientScript?v=2">` into the web client's
+  `<script plugin="TreasureMaps" defer src="/TreasureMaps/ClientScript?v=3">` into the web client's
   `index.html` at startup (marker-guarded, same pattern as Intro Skipper; served anonymously by
   `GET TreasureMaps/ClientScript` from `Web/treasuremaps.js`). Rebuilding jellyfin-web replaces
   index.html — the injection re-applies on the next server start. The script: (1) replaces the
   generic children card row on Treasure-Maps title pages with a "Releases" LIST (row per release,
-  flag+badge name, blue Download button calling the Grab endpoint), (2) polls
-  `GET TreasureMaps/Downloads/Status` (SABnzbd queue+history: percent/speed/ETA/completed/failed)
-  every 3s and shows per-row live status, matching jobs by nzo id (from the grab response) with a
-  normalized-name fallback, (3) adds a Download button on release tile pages, (4) hides hover play
-  overlays on channel pages. Release rows wrap on narrow viewports (`overflow-wrap:anywhere`,
-  stacked name + Download below 700px) so phones do not ellipsis the quality label. Bump `?v=`
-  on the script src when changing the JS so phones do not keep a cached copy; the injector
-  replaces a stale tag.
+  flag+badge name, blue Download button calling the Grab endpoint with `title=`), (2) turns the
+  Downloads folder into a large-row title/poster/progress list (`#tmDownloads`) and opens
+  `#/details?id=` so phones and TV wrappers can navigate, (3) polls
+  `GET TreasureMaps/Downloads/Status` (TM-only items: title/cover/percent/speed/ETA) every 3s,
+  (4) adds a Download button on release tile pages and fixes quality-string headings via
+  `TreasureMapsTitle`, (5) hides hover play overlays on channel pages. Release rows wrap on
+  narrow viewports. Bump `?v=` on the script src when changing the JS; the injector replaces a
+  stale tag.
 - Actor photos: channel items add People by NAME only and nothing refreshes them (the
   "Refresh People" task only validates/deletes). `PeopleImageService` queues full metadata+image
   refreshes for imageless persons every 12h (TMDB resolves them by name search);

@@ -77,7 +77,30 @@ public sealed class GrabOnFavoriteService : IHostedService
 
             var isTv = string.Equals(item.GetProviderId("TreasureMapsKind"), "tv", StringComparison.OrdinalIgnoreCase);
             var cover = item.PrimaryImagePath;
-            _ = RunGrabAsync(guid!, item.Name ?? guid!, isTv, cover);
+            var storedTitle = item.GetProviderId("TreasureMapsTitle");
+            if (string.IsNullOrWhiteSpace(storedTitle))
+            {
+                storedTitle = item.OriginalTitle;
+            }
+
+            if (DownloadTitle.LooksLikeQualityLabel(storedTitle))
+            {
+                storedTitle = null;
+            }
+
+            if (string.IsNullOrWhiteSpace(storedTitle) && !DownloadTitle.LooksLikeQualityLabel(item.Name))
+            {
+                storedTitle = item.Name;
+            }
+
+            var quality = item.GetProviderId("TreasureMapsQuality");
+            if (string.IsNullOrWhiteSpace(quality) && DownloadTitle.LooksLikeQualityLabel(item.Name))
+            {
+                quality = item.Name;
+            }
+
+            var jobName = string.IsNullOrWhiteSpace(storedTitle) ? (item.Name ?? guid!) : storedTitle;
+            _ = RunGrabAsync(guid!, jobName, isTv, cover, storedTitle, quality);
         }
         catch (Exception ex)
         {
@@ -85,11 +108,11 @@ public sealed class GrabOnFavoriteService : IHostedService
         }
     }
 
-    private async Task RunGrabAsync(string guid, string name, bool isTv, string? cover)
+    private async Task RunGrabAsync(string guid, string name, bool isTv, string? cover, string? title, string? quality)
     {
         try
         {
-            await _grabService.GrabAsync(guid, name, isTv, cover, CancellationToken.None).ConfigureAwait(false);
+            await _grabService.GrabAsync(guid, name, isTv, cover, CancellationToken.None, title, quality).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

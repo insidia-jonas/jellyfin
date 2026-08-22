@@ -102,7 +102,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             var c = Config;
             return string.Join(
                 '|',
-                "31",
+                "32",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -184,6 +184,13 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             if (string.Equals(folderId, "downloads", StringComparison.Ordinal))
             {
                 return await GetDownloadsAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            if (folderId.StartsWith("DL" + Sep, StringComparison.Ordinal)
+                || folderId.StartsWith("dl" + Sep, StringComparison.Ordinal)
+                || folderId.StartsWith("dlinfo", StringComparison.Ordinal))
+            {
+                return GetDownloadDetail(folderId);
             }
 
             // A title card (GRP) opens into the individual releases behind that movie/show.
@@ -462,9 +469,8 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
     }
 
     /// <summary>
-    /// Builds the "Downloads" view: the SABnzbd queue (with live progress in the folder names)
-    /// and the most recent completed/failed jobs — the TV-friendly download status display.
-    /// The short channel cache key (see <see cref="GetCacheKey"/>) keeps this view fresh.
+    /// Builds the Downloads view: only jobs this plugin queued (not the rest of SABnzbd),
+    /// as openable title cards with the movie name and poster — not quality-string folders.
     /// </summary>
     private async Task<ChannelItemResult> GetDownloadsAsync(CancellationToken cancellationToken)
     {
@@ -479,40 +485,148 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
         var order = 0;
         foreach (var entry in entries)
         {
-            string name;
-            string overview;
-            if (string.Equals(entry.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+            if (!_grabService.IsTracked(entry.Id, entry.Name))
             {
-                name = "\u2713 " + entry.Name;
-                overview = "Download completed.";
-            }
-            else if (string.Equals(entry.Status, "Failed", StringComparison.OrdinalIgnoreCase))
-            {
-                name = "\u2717 " + entry.Name;
-                overview = "Download failed." + (string.IsNullOrWhiteSpace(entry.FailMessage) ? string.Empty : " " + entry.FailMessage);
-            }
-            else
-            {
-                name = $"\u2B07 {entry.Percent:0}% \u2013 {entry.Name}";
-                overview = $"Downloading \u2013 {entry.Percent:0}%"
-                    + (string.IsNullOrWhiteSpace(speed) ? string.Empty : $" \u00B7 {speed}B/s")
-                    + (string.IsNullOrWhiteSpace(entry.TimeLeft) ? string.Empty : $" \u00B7 {entry.TimeLeft} left")
-                    + (string.IsNullOrWhiteSpace(entry.LeftMb) ? string.Empty : $" \u00B7 {entry.LeftMb}/{entry.SizeMb} MB remaining");
+                continue;
             }
 
-            var row = Folder("dl" + Sep + (entry.Id ?? order.ToString(System.Globalization.CultureInfo.InvariantCulture)), name, order++);
-            row.Overview = overview;
-            // Show the title's poster on the tile (registered at grab time) instead of a text tile.
-            row.ImageUrl = _grabService.GetArtwork(entry.Id, entry.Name);
-            items.Add(row);
+            items.Add(DownloadCard(entry, order++, speed));
         }
 
         if (items.Count == 0)
         {
-            items.Add(Folder("downloads-empty", "No active downloads", 0));
+            var empty = Folder("downloads-empty", "No Treasure-Maps downloads yet", 0);
+            empty.Overview = "Only movies and shows you grab from Treasure-Maps appear here. Other SABnzbd jobs stay in your download client.";
+            items.Add(empty);
         }
 
         return Result(items);
+    }
+
+    private ChannelItemInfo DownloadCard(SabnzbdClient.SabDownloadStatus entry, int order, string? speed)
+    {
+        var rec = _grabService.Lookup(entry.Id, entry.Name);
+        var title = DownloadTitle.Resolve(entry.Name, rec?.Title);
+        var quality = rec?.Quality;
+        if (string.IsNullOrWhiteSpace(quality) && DownloadTitle.LooksLikeQualityLabel(entry.Name))
+        {
+            quality = entry.Name;
+        }
+
+        var active = !string.Equals(entry.Status, "Completed", StringComparison.OrdinalIgnoreCase)
+                     && !string.Equals(entry.Status, "Failed", StringComparison.OrdinalIgnoreCase);
+        var overview = DownloadOverview(entry, speed, quality);
+        var cover = rec?.CoverUrl ?? _grabService.GetArtwork(entry.Id, entry.Name);
+        if (string.IsNullOrWhiteSpace(cover))
+        {
+            cover = ChannelArtwork.GetPosterPath("dl-" + (entry.Id ?? title), title);
+        }
+
+        var card = new ChannelItemInfo
+        {
+            Id = string.Join(Sep, "DL", entry.Id ?? order.ToString(System.Globalization.CultureInfo.InvariantCulture), Encode(title)),
+            Name = title,
+            OriginalTitle = title,
+            SortName = ChannelPresentation.DownloadSortName(active, title),
+            Type = ChannelItemType.Folder,
+            FolderType = ChannelFolderType.BoxSet,
+            ContentType = string.Equals(rec?.Kind, "tv", StringComparison.Ordinal) ? ChannelMediaContentType.TvExtra : ChannelMediaContentType.Movie,
+            ImageUrl = cover,
+            Overview = overview,
+            DateCreated = rec?.GrabbedAt is DateTime grabbed && grabbed != default ? grabbed : DateTime.UtcNow.AddMinutes(-order)
+        };
+
+        if (!string.IsNullOrWhiteSpace(rec?.Guid))
+        {
+            card.ProviderIds["TreasureMaps"] = rec.Guid;
+        }
+
+        if (!string.IsNullOrWhiteSpace(rec?.Kind))
+        {
+            card.ProviderIds["TreasureMapsKind"] = rec.Kind;
+        }
+
+        card.ProviderIds["TreasureMapsTitle"] = title;
+        if (!string.IsNullOrWhiteSpace(quality))
+        {
+            card.ProviderIds["TreasureMapsQuality"] = quality;
+        }
+
+        return card;
+    }
+
+    private static string DownloadOverview(SabnzbdClient.SabDownloadStatus entry, string? speed, string? quality)
+    {
+        var badge = string.IsNullOrWhiteSpace(quality) ? string.Empty : quality.Trim() + "\n\n";
+        if (string.Equals(entry.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+        {
+            return badge + "Download complete. Open Movies or TV Shows once the library scan finishes.";
+        }
+
+        if (string.Equals(entry.Status, "Failed", StringComparison.OrdinalIgnoreCase))
+        {
+            return badge + "Download failed." + (string.IsNullOrWhiteSpace(entry.FailMessage) ? string.Empty : " " + entry.FailMessage);
+        }
+
+        return badge + $"Downloading \u2013 {entry.Percent:0}%"
+            + (string.IsNullOrWhiteSpace(speed) ? string.Empty : $" \u00B7 {speed}B/s")
+            + (string.IsNullOrWhiteSpace(entry.TimeLeft) ? string.Empty : $" \u00B7 {entry.TimeLeft} left")
+            + (string.IsNullOrWhiteSpace(entry.LeftMb) ? string.Empty : $" \u00B7 {entry.LeftMb}/{entry.SizeMb} MB remaining");
+    }
+
+    private ChannelItemResult GetDownloadDetail(string folderId)
+    {
+        if (folderId.StartsWith("dlinfo", StringComparison.Ordinal))
+        {
+            var done = new ChannelItemInfo
+            {
+                Id = FolderIdPrefix + "downloads-library-hint",
+                Name = "Finished downloads appear in Movies / TV Shows",
+                SortName = ChannelPresentation.FolderSortName(0, "Finished"),
+                Type = ChannelItemType.Folder,
+                FolderType = ChannelFolderType.Container,
+                Overview = "Treasure-Maps sends the NZB to SABnzbd. After it finishes, the file is scanned into your Movies or TV Shows library.",
+                DateCreated = DateTime.UtcNow
+            };
+            return Result(new List<ChannelItemInfo> { done });
+        }
+
+        var parts = folderId.Split(Sep);
+        var nzoId = parts.Length > 1 ? parts[1] : string.Empty;
+        var title = parts.Length > 2 ? Decode(parts[2]) : "Download";
+        var rec = _grabService.Lookup(nzoId, title);
+        if (!string.IsNullOrWhiteSpace(rec?.Title))
+        {
+            title = rec.Title;
+        }
+
+        var cover = rec?.CoverUrl;
+        if (string.IsNullOrWhiteSpace(cover))
+        {
+            cover = ChannelArtwork.GetPosterPath("dl-" + (nzoId.Length > 0 ? nzoId : title), title);
+        }
+
+        var quality = rec?.Quality;
+        var child = new ChannelItemInfo
+        {
+            Id = "dlinfo" + Sep + (nzoId.Length > 0 ? nzoId : Encode(title)),
+            Name = string.IsNullOrWhiteSpace(quality) ? "Download status" : quality,
+            OriginalTitle = title,
+            Type = ChannelItemType.Folder,
+            FolderType = ChannelFolderType.Container,
+            ImageUrl = cover,
+            Overview = string.IsNullOrWhiteSpace(rec?.Quality)
+                ? "This is a Treasure-Maps download, not a stream. After SABnzbd finishes, open Movies or TV Shows."
+                : rec.Quality + "\n\nThis is a Treasure-Maps download, not a stream. After SABnzbd finishes, open Movies or TV Shows.",
+            DateCreated = rec?.GrabbedAt is DateTime grabbed && grabbed != default ? grabbed : DateTime.UtcNow
+        };
+        child.ProviderIds["TreasureMapsTitle"] = title;
+        if (!string.IsNullOrWhiteSpace(rec?.Guid))
+        {
+            child.ProviderIds["TreasureMaps"] = rec.Guid;
+        }
+
+        return Result(new List<ChannelItemInfo> { child });
     }
 
     /// <inheritdoc />
@@ -537,12 +651,37 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
     {
         if (id.StartsWith(GrabPrefix, StringComparison.Ordinal))
         {
-            // grab::<kind>::<guid>::<b64 name>::<b64 cover>
+            // grab::<kind>::<guid>::<b64 title>::<b64 quality>::<b64 cover>
+            // older: grab::<kind>::<guid>::<b64 name>::<b64 cover>
             var parts = id.Split(Sep);
             var kind = parts.Length > 1 ? parts[1] : "movie";
             var guid = parts.Length > 2 ? parts[2] : string.Empty;
-            var name = parts.Length > 3 ? Decode(parts[3]) : guid;
-            var cover = parts.Length > 4 ? Decode(parts[4]) : null;
+            string title;
+            string? quality;
+            string? cover;
+            if (parts.Length >= 6)
+            {
+                title = Decode(parts[3]);
+                quality = Decode(parts[4]);
+                cover = Decode(parts[5]);
+            }
+            else
+            {
+                var raw = parts.Length > 3 ? Decode(parts[3]) : guid;
+                cover = parts.Length > 4 ? Decode(parts[4]) : null;
+                if (DownloadTitle.LooksLikeQualityLabel(raw))
+                {
+                    quality = raw;
+                    title = string.Empty;
+                }
+                else
+                {
+                    title = raw;
+                    quality = null;
+                }
+            }
+
+            var jobName = string.IsNullOrWhiteSpace(title) ? (quality ?? guid) : title;
 
             if (!string.IsNullOrEmpty(guid))
             {
@@ -551,7 +690,14 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
                     {
                         try
                         {
-                            await _grabService.GrabAsync(guid, name, string.Equals(kind, "tv", StringComparison.Ordinal), cover, CancellationToken.None).ConfigureAwait(false);
+                            await _grabService.GrabAsync(
+                                guid,
+                                jobName,
+                                string.Equals(kind, "tv", StringComparison.Ordinal),
+                                cover,
+                                CancellationToken.None,
+                                title,
+                                quality).ConfigureAwait(false);
                         }
                         catch (Exception ex)
                         {
@@ -874,13 +1020,13 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
             matching = all.ToList();
         }
 
-        return await BuildReleaseTilesAsync(matching, groupId, cover, cancellationToken).ConfigureAwait(false);
+        return await BuildReleaseTilesAsync(matching, groupId, cover, title, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
     /// Builds the individual release tiles (one per release/quality) shown inside a title card.
     /// </summary>
-    private async Task<ChannelItemResult> BuildReleaseTilesAsync(IReadOnlyList<Release> releases, string scope, string? groupCover, CancellationToken cancellationToken)
+    private async Task<ChannelItemResult> BuildReleaseTilesAsync(IReadOnlyList<Release> releases, string scope, string? groupCover, string groupTitle, CancellationToken cancellationToken)
     {
         var prefs = GetLanguagePreferences();
         var xrelRatings = await FetchXrelRatingsAsync(releases, cancellationToken).ConfigureAwait(false);
@@ -916,10 +1062,20 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
                     item.ImageUrl = groupCover;
                 }
 
-                // REL::<scopeHash>::<marker>::<kind>::<guid>::<b64 name>::<b64 cover> — unique per
-                // title card, refreshed on config change; name + cover travel along so the grab
-                // job and the Downloads tile can carry them.
-                item.Id = string.Join(Sep, ReleasePrefix.TrimEnd(':'), scopeHash, marker, kind, item.Id, Encode(item.Name), Encode(item.ImageUrl ?? string.Empty));
+                // REL::<scope>::<marker>::<kind>::<guid>::<b64 title>::<b64 quality>::<b64 cover>
+                item.Id = string.Join(
+                    Sep,
+                    ReleasePrefix.TrimEnd(':'),
+                    scopeHash,
+                    marker,
+                    kind,
+                    item.Id,
+                    Encode(groupTitle),
+                    Encode(item.Name),
+                    Encode(item.ImageUrl ?? string.Empty));
+                item.OriginalTitle = groupTitle;
+                item.ProviderIds["TreasureMapsTitle"] = groupTitle;
+                item.ProviderIds["TreasureMapsQuality"] = item.Name;
                 ranked.Add((item, rank, parsed.QualityScore, order++));
             }
         }
@@ -937,7 +1093,8 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
 
     private static ChannelItemResult GetReleaseDetail(string folderId)
     {
-        // REL::<scopeHash>::<marker>::<kind>::<guid>::<b64 name>::<b64 cover>
+        // REL::<scope>::<marker>::<kind>::<guid>::<b64 title>::<b64 quality>::<b64 cover>
+        // older: REL::<scope>::<marker>::<kind>::<guid>::<b64 name>::<b64 cover>
         var parts = folderId.Split(Sep);
         if (parts.Length < 5)
         {
@@ -946,15 +1103,29 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
 
         var kind = string.Equals(parts[3], "tv", StringComparison.Ordinal) ? "tv" : "movie";
         var guid = parts[4];
-        var name = parts.Length >= 6 ? parts[5] : Encode(guid);
-        var cover = parts.Length >= 7 ? Decode(parts[6]) : string.Empty;
+        string title;
+        string quality;
+        string cover;
+        if (parts.Length >= 8)
+        {
+            title = Decode(parts[5]);
+            quality = Decode(parts[6]);
+            cover = Decode(parts[7]);
+        }
+        else
+        {
+            quality = parts.Length >= 6 ? Decode(parts[5]) : string.Empty;
+            cover = parts.Length >= 7 ? Decode(parts[6]) : string.Empty;
+            title = DownloadTitle.LooksLikeQualityLabel(quality) ? string.Empty : quality;
+        }
 
         // A playable clip: pressing the native PLAY button (Fire TV etc.) starts the download and
         // plays a short confirmation video (see GetChannelItemMediaInfo). Favoriting still works.
         var child = new ChannelItemInfo
         {
-            Id = string.Join(Sep, GrabPrefix.TrimEnd(':'), kind, guid, name, Encode(cover)),
+            Id = string.Join(Sep, GrabPrefix.TrimEnd(':'), kind, guid, Encode(title), Encode(quality), Encode(cover)),
             Name = "\u2B07 Start download",
+            OriginalTitle = string.IsNullOrWhiteSpace(title) ? quality : title,
             Type = ChannelItemType.Media,
             ContentType = ChannelMediaContentType.Clip,
             MediaType = ChannelMediaType.Video,
@@ -963,6 +1134,15 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
         };
         child.ProviderIds["TreasureMaps"] = guid;
         child.ProviderIds["TreasureMapsKind"] = kind;
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            child.ProviderIds["TreasureMapsTitle"] = title;
+        }
+
+        if (!string.IsNullOrWhiteSpace(quality))
+        {
+            child.ProviderIds["TreasureMapsQuality"] = quality;
+        }
 
         return Result(new List<ChannelItemInfo> { child });
     }

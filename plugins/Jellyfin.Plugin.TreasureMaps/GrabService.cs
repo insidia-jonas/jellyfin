@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -15,15 +17,20 @@ namespace Jellyfin.Plugin.TreasureMaps;
 /// </summary>
 public class GrabService
 {
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = true
+    };
+
     private readonly TreasureMapsApiClient _client;
     private readonly SabnzbdClient _sabnzbd;
     private readonly ILogger<GrabService> _logger;
     private readonly ConcurrentDictionary<string, byte> _handled = new(StringComparer.Ordinal);
-
-    // Artwork registry: remembers the cover of every grab (by SABnzbd job id and normalized job
-    // name) so the Downloads folder can show poster tiles instead of plain text tiles.
-    private readonly ConcurrentDictionary<string, string> _artworkByNzo = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, string> _artworkByName = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, GrabRecord> _byNzo = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, GrabRecord> _byName = new(StringComparer.Ordinal);
+    private readonly object _persistLock = new();
+    private bool _loaded;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="GrabService"/> class.
@@ -42,12 +49,21 @@ public class GrabService
     /// Grabs a release into SABnzbd. Repeated calls for the same guid in one session are ignored.
     /// </summary>
     /// <param name="guid">The release guid.</param>
-    /// <param name="name">The SABnzbd job name (usually the scene/badge name).</param>
+    /// <param name="name">The SABnzbd job name (preferably the movie/show title).</param>
     /// <param name="isTv">Whether the release is a TV release (category selection).</param>
-    /// <param name="coverUrl">The title's cover URL (shown on the Downloads folder tile), may be null.</param>
+    /// <param name="coverUrl">The title's cover URL (shown on the Downloads tile), may be null.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
+    /// <param name="displayTitle">The human title when <paramref name="name"/> is a quality badge.</param>
+    /// <param name="quality">The quality badge for the Downloads overview.</param>
     /// <returns>The created SABnzbd job ids (empty when skipped as duplicate).</returns>
-    public async Task<IReadOnlyList<string>> GrabAsync(string guid, string name, bool isTv, string? coverUrl, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<string>> GrabAsync(
+        string guid,
+        string name,
+        bool isTv,
+        string? coverUrl,
+        CancellationToken cancellationToken,
+        string? displayTitle = null,
+        string? quality = null)
     {
         if (!_handled.TryAdd(guid, 0))
         {
@@ -67,9 +83,11 @@ public class GrabService
             var preferred = isTv ? config.SabnzbdTvCategory : config.SabnzbdMovieCategory;
             var category = string.IsNullOrWhiteSpace(preferred) ? config.SabnzbdCategory : preferred;
 
-            var ids = await _sabnzbd.AddNzbAsync(payload, Sanitize(name), category, cancellationToken).ConfigureAwait(false);
-            RegisterArtwork(ids, name, coverUrl);
-            _logger.LogInformation("Grabbed '{Name}' into SABnzbd category '{Category}' ({Ids})", name, category, string.Join(",", ids));
+            var title = DownloadTitle.Resolve(name, displayTitle);
+            var jobName = title == "Download" ? Sanitize(string.IsNullOrWhiteSpace(name) ? guid : name) : Sanitize(title);
+            var ids = await _sabnzbd.AddNzbAsync(payload, jobName, category, cancellationToken).ConfigureAwait(false);
+            RegisterGrab(ids, jobName, coverUrl, title, quality, guid, isTv ? "tv" : "movie");
+            _logger.LogInformation("Grabbed '{Name}' into SABnzbd category '{Category}' ({Ids})", title, category, string.Join(",", ids));
             return ids;
         }
         catch
@@ -86,16 +104,33 @@ public class GrabService
     /// <param name="nzoId">The SABnzbd job id.</param>
     /// <param name="name">The job name.</param>
     /// <returns>The cover URL, or null.</returns>
-    public string? GetArtwork(string? nzoId, string? name)
+    public string? GetArtwork(string? nzoId, string? name) => Lookup(nzoId, name)?.CoverUrl;
+
+    /// <summary>
+    /// Returns the persisted grab record for a SABnzbd job, if this plugin queued it.
+    /// </summary>
+    /// <param name="nzoId">The SABnzbd job id.</param>
+    /// <param name="name">The job name.</param>
+    /// <returns>The record, or null.</returns>
+    public GrabRecord? Lookup(string? nzoId, string? name)
     {
-        if (!string.IsNullOrEmpty(nzoId) && _artworkByNzo.TryGetValue(nzoId, out var byId))
+        EnsureLoaded();
+        if (!string.IsNullOrEmpty(nzoId) && _byNzo.TryGetValue(nzoId, out var byId))
         {
             return byId;
         }
 
-        var key = NormalizeName(name);
-        return key.Length > 0 && _artworkByName.TryGetValue(key, out var byName) ? byName : null;
+        var key = NameKey(name);
+        return key.Length > 0 && _byName.TryGetValue(key, out var byName) ? byName : null;
     }
+
+    /// <summary>
+    /// Whether this SABnzbd job was started from Treasure-Maps (and should appear in Downloads).
+    /// </summary>
+    /// <param name="nzoId">The SABnzbd job id.</param>
+    /// <param name="name">The job name.</param>
+    /// <returns>True when the job is a Treasure-Maps grab.</returns>
+    public bool IsTracked(string? nzoId, string? name) => Lookup(nzoId, name) is not null;
 
     /// <summary>
     /// Registers the cover for a set of SABnzbd jobs (used by grab paths that queue directly).
@@ -104,30 +139,172 @@ public class GrabService
     /// <param name="name">The job name.</param>
     /// <param name="coverUrl">The cover URL, may be null.</param>
     public void RegisterArtwork(IReadOnlyList<string> nzoIds, string name, string? coverUrl)
+        => RegisterGrab(nzoIds, name, coverUrl, DownloadTitle.Resolve(name, null), null, null, null);
+
+    /// <summary>
+    /// Remembers a Treasure-Maps grab so Downloads can filter SABnzbd and show the real title.
+    /// </summary>
+    /// <param name="nzoIds">The SABnzbd job ids.</param>
+    /// <param name="name">The job name (and extra name key).</param>
+    /// <param name="coverUrl">The cover URL, may be null.</param>
+    /// <param name="title">The movie/show title.</param>
+    /// <param name="quality">The quality badge, may be null.</param>
+    /// <param name="guid">The indexer guid, may be null.</param>
+    /// <param name="kind">movie or tv, may be null.</param>
+    public void RegisterGrab(
+        IReadOnlyList<string> nzoIds,
+        string name,
+        string? coverUrl,
+        string? title,
+        string? quality,
+        string? guid,
+        string? kind)
     {
-        if (string.IsNullOrWhiteSpace(coverUrl))
+        EnsureLoaded();
+        var resolved = DownloadTitle.Resolve(name, title);
+        var key = NameKey(name);
+        var now = DateTime.UtcNow;
+        var ids = (nzoIds ?? Array.Empty<string>()).Where(id => !string.IsNullOrWhiteSpace(id)).ToList();
+        if (ids.Count == 0)
+        {
+            ids.Add(string.Empty);
+        }
+
+        foreach (var id in ids)
+        {
+            var record = new GrabRecord
+            {
+                NzoId = string.IsNullOrEmpty(id) ? null : id,
+                NameKey = key,
+                Title = resolved,
+                CoverUrl = string.IsNullOrWhiteSpace(coverUrl) ? Lookup(id, name)?.CoverUrl : coverUrl,
+                Kind = kind,
+                Guid = guid,
+                Quality = quality,
+                GrabbedAt = now
+            };
+
+            if (!string.IsNullOrEmpty(record.NzoId))
+            {
+                _byNzo[record.NzoId] = record;
+            }
+
+            if (key.Length > 0)
+            {
+                _byName[key] = record;
+            }
+
+            var titleKey = NameKey(resolved);
+            if (titleKey.Length > 0)
+            {
+                _byName[titleKey] = record;
+            }
+        }
+
+        Persist();
+    }
+
+    /// <summary>
+    /// Normalizes a job or title name for artwork / tracking lookups.
+    /// </summary>
+    /// <param name="name">The raw name.</param>
+    /// <returns>Letters and digits only, lower-case.</returns>
+    public static string NameKey(string? name)
+        => new string((name ?? string.Empty).ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+
+    private void EnsureLoaded()
+    {
+        if (_loaded)
         {
             return;
         }
 
-        foreach (var id in nzoIds)
+        lock (_persistLock)
         {
-            _artworkByNzo[id] = coverUrl!;
-        }
+            if (_loaded)
+            {
+                return;
+            }
 
-        var key = NormalizeName(name);
-        if (key.Length > 0)
-        {
-            _artworkByName[key] = coverUrl!;
+            try
+            {
+                var path = StorePath();
+                if (File.Exists(path))
+                {
+                    var json = File.ReadAllText(path);
+                    var records = JsonSerializer.Deserialize<List<GrabRecord>>(json, JsonOptions) ?? new List<GrabRecord>();
+                    foreach (var record in records)
+                    {
+                        if (!string.IsNullOrEmpty(record.NzoId))
+                        {
+                            _byNzo[record.NzoId] = record;
+                        }
+
+                        if (!string.IsNullOrEmpty(record.NameKey))
+                        {
+                            _byName[record.NameKey] = record;
+                        }
+
+                        var titleKey = NameKey(record.Title);
+                        if (titleKey.Length > 0)
+                        {
+                            _byName[titleKey] = record;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to load Treasure-Maps grab history");
+            }
+
+            _loaded = true;
         }
     }
 
-    private static string NormalizeName(string? name)
-        => new string((name ?? string.Empty).ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+    private void Persist()
+    {
+        lock (_persistLock)
+        {
+            try
+            {
+                var path = StorePath();
+                var dir = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+
+                var records = _byNzo.Values
+                    .Concat(_byName.Values)
+                    .GroupBy(r => r.NzoId ?? r.NameKey ?? r.Title)
+                    .Select(g => g.OrderByDescending(r => r.GrabbedAt).First())
+                    .OrderByDescending(r => r.GrabbedAt)
+                    .Take(500)
+                    .ToList();
+                File.WriteAllText(path, JsonSerializer.Serialize(records, JsonOptions));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to persist Treasure-Maps grab history");
+            }
+        }
+    }
+
+    private static string StorePath()
+    {
+        var dir = Plugin.Instance?.DataFolderPath;
+        if (string.IsNullOrWhiteSpace(dir))
+        {
+            return Path.Combine(Path.GetTempPath(), "treasuremaps-grabs.json");
+        }
+
+        return Path.Combine(dir, "grabs.json");
+    }
 
     private static string Sanitize(string name)
     {
-        var invalid = System.IO.Path.GetInvalidFileNameChars();
+        var invalid = Path.GetInvalidFileNameChars();
         return new string(name.Select(c => invalid.Contains(c) ? '_' : c).ToArray());
     }
 }
