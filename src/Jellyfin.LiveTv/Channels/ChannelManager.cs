@@ -624,6 +624,55 @@ namespace Jellyfin.LiveTv.Channels
                 return new QueryResult<BaseItem>();
             }
 
+            var latestFromProvider = new List<BaseItem>();
+            foreach (var channel in channels)
+            {
+                if (channel is not ISupportsLatestMedia latestProvider)
+                {
+                    await RefreshLatestChannelItems(channel, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                try
+                {
+                    var internalChannel = await GetChannel(channel, cancellationToken).ConfigureAwait(false);
+                    var infos = await latestProvider.GetLatestMedia(
+                        new ChannelLatestMediaSearch
+                        {
+                            UserId = query.User?.Id.ToString("N", CultureInfo.InvariantCulture)
+                        },
+                        cancellationToken).ConfigureAwait(false);
+
+                    foreach (var info in infos)
+                    {
+                        if (info is null || IsPlayToDownloadClip(info))
+                        {
+                            continue;
+                        }
+
+                        latestFromProvider.Add(await GetChannelItemEntityAsync(
+                            info,
+                            channel,
+                            internalChannel.Id,
+                            internalChannel,
+                            cancellationToken).ConfigureAwait(false));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "GetLatestMedia failed for channel {Channel}", channel.Name);
+                    await RefreshLatestChannelItems(channel, cancellationToken).ConfigureAwait(false);
+                }
+            }
+
+            if (latestFromProvider.Count > 0)
+            {
+                var start = query.StartIndex ?? 0;
+                var take = query.Limit ?? latestFromProvider.Count;
+                var page = latestFromProvider.Skip(start).Take(take).ToArray();
+                return new QueryResult<BaseItem>(start, latestFromProvider.Count, page);
+            }
+
             foreach (var channel in channels)
             {
                 await RefreshLatestChannelItems(channel, cancellationToken).ConfigureAwait(false);
@@ -651,7 +700,36 @@ namespace Jellyfin.LiveTv.Channels
                 };
             }
 
-            return _libraryManager.GetItemsResult(query);
+            var result = _libraryManager.GetItemsResult(query);
+            if (result.Items.Count == 0)
+            {
+                return result;
+            }
+
+            var filtered = result.Items.Where(i => !IsPlayToDownloadClip(i)).ToArray();
+            return new QueryResult<BaseItem>(result.StartIndex, filtered.Length, filtered);
+        }
+
+        private static bool IsPlayToDownloadClip(ChannelItemInfo info)
+        {
+            if (info.Type != ChannelItemType.Media)
+            {
+                return false;
+            }
+
+            var id = info.Id ?? string.Empty;
+            var name = info.Name ?? string.Empty;
+            return id.StartsWith("grab::", StringComparison.Ordinal)
+                   || name.Contains("Start download", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsPlayToDownloadClip(BaseItem item)
+        {
+            var id = item.ExternalId ?? string.Empty;
+            var name = item.Name ?? string.Empty;
+            return id.StartsWith("grab::", StringComparison.Ordinal)
+                   || id.Contains("grab::", StringComparison.Ordinal)
+                   || name.Contains("Start download", StringComparison.OrdinalIgnoreCase);
         }
 
         private async Task RefreshLatestChannelItems(IChannel channel, CancellationToken cancellationToken)

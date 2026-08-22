@@ -51,3 +51,21 @@ public class DownloadTitleTests
         Assert.Equal("1080pwebdl", GrabService.NameKey("1080p · WEB-DL"));
     }
 }
+
+public class GrabRecordListTests
+{
+    [Fact]
+    public void ListRecent_DedupesByTitle_NewestFirst()
+    {
+        var service = new GrabService(null!, null!, new Microsoft.Extensions.Logging.Abstractions.NullLogger<GrabService>());
+        service.RegisterGrab(new[] { "nzo-old" }, "Silo", null, "Silo", "720p", "g1", "tv");
+        service.RegisterGrab(new[] { "nzo-new" }, "Silo", "https://img/silo.jpg", "Silo", "1080p", "g2", "tv");
+        service.RegisterGrab(new[] { "nzo-oak" }, "The End of Oak Street", null, "The End of Oak Street", "1080p", "g3", "movie");
+
+        var recent = service.ListRecent(10);
+        Assert.Equal(2, recent.Count);
+        Assert.Contains(recent, r => r.Title == "The End of Oak Street");
+        var silo = Assert.Single(recent, r => r.Title == "Silo");
+        Assert.Equal("nzo-new", silo.NzoId);
+    }
+}

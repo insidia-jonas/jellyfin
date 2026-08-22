@@ -61,6 +61,13 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
 - To run it in the dev server, copy `bin/Release/net10.0/Jellyfin.Plugin.TreasureMaps.dll`
   (only that DLL) into `~/.local/share/jellyfin/plugins/Treasure-Maps/` next to a `meta.json`
   (`assemblies` restricts loading to that DLL; `targetAbi` must be `12.0.0.0`), then restart.
+- Home "Recently added in Treasure-Maps" must **not** list play-to-download clips
+  (`grab::` / "⬇ Start download"). Jellyfin's default Latest walk treats every non-folder
+  channel video as latest; this fork's `ChannelManager.GetLatestChannelItemsInternal`
+  calls `ISupportsLatestMedia.GetLatestMedia` and keeps BoxSet title cards (recent grabs
+  first). Clicking a latest tile opens the title/download details page, not the
+  confirmation video. The confirmation clip stays only on the release "Start download"
+  play action.
 - Channel items are cached by the channel's `DataVersion`. After changing item mapping (e.g.
   `ChannelItemType`) you must **bump `DataVersion`** (in `TreasureMapsChannel`) or Jellyfin will
   keep serving stale cached items/images. Clearing `~/.local/share/jellyfin/metadata/channels`

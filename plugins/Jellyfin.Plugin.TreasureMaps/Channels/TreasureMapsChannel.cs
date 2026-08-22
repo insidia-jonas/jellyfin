@@ -1167,21 +1167,62 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, IDisableMedia
     /// <inheritdoc />
     public async Task<IEnumerable<ChannelItemInfo>> GetLatestMedia(ChannelLatestMediaSearch request, CancellationToken cancellationToken)
     {
+        // Home "Recently added in Treasure-Maps" must be title cards (BoxSets), never the
+        // play-to-download confirmation clips — those are Media items named "Start download".
+        var items = new List<ChannelItemInfo>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var order = 0;
+        foreach (var rec in _grabService.ListRecent(16))
+        {
+            var title = DownloadTitle.Resolve(null, rec.Title);
+            if (string.IsNullOrWhiteSpace(title) || !seen.Add(title))
+            {
+                continue;
+            }
+
+            var fake = new SabnzbdClient.SabDownloadStatus
+            {
+                Id = rec.NzoId,
+                Name = rec.Title,
+                Status = "Completed",
+                Percent = 100
+            };
+            items.Add(DownloadCard(fake, order++, null));
+        }
+
         if (!TreasureMapsApiClient.IsConfigured)
         {
-            return Array.Empty<ChannelItemInfo>();
+            return items;
         }
 
         try
         {
             var movies = await _client.SearchMoviesAsync(null, null, PageSize, cancellationToken).ConfigureAwait(false);
-            return BuildGroupCards(movies?.Items, "latest").Items;
+            foreach (var card in BuildGroupCards(movies?.Items, "latest").Items)
+            {
+                if (card.Type == ChannelItemType.Media)
+                {
+                    continue;
+                }
+
+                if (!seen.Add(card.Name ?? card.Id))
+                {
+                    continue;
+                }
+
+                items.Add(card);
+                if (items.Count >= 24)
+                {
+                    break;
+                }
+            }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to load latest Treasure-Maps media");
-            return Array.Empty<ChannelItemInfo>();
         }
+
+        return items;
     }
 
     /// <summary>

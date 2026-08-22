@@ -133,6 +133,27 @@ public class GrabService
     public bool IsTracked(string? nzoId, string? name) => Lookup(nzoId, name) is not null;
 
     /// <summary>
+    /// Recent Treasure-Maps grabs, newest first, one row per title.
+    /// </summary>
+    /// <param name="max">The maximum number of records.</param>
+    /// <returns>The grab records.</returns>
+    public IReadOnlyList<GrabRecord> ListRecent(int max)
+    {
+        EnsureLoaded();
+        return _byNzo.Values
+            .Concat(_byName.Values)
+            .GroupBy(r =>
+            {
+                var titleKey = NameKey(r.Title);
+                return titleKey.Length > 0 ? titleKey : (r.NzoId ?? r.NameKey ?? string.Empty);
+            }, StringComparer.Ordinal)
+            .Select(g => g.OrderByDescending(r => r.GrabbedAt).First())
+            .OrderByDescending(r => r.GrabbedAt)
+            .Take(max)
+            .ToList();
+    }
+
+    /// <summary>
     /// Registers the cover for a set of SABnzbd jobs (used by grab paths that queue directly).
     /// </summary>
     /// <param name="nzoIds">The SABnzbd job ids.</param>
