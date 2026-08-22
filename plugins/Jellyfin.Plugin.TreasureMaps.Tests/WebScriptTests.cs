@@ -34,6 +34,8 @@ public class WebScriptTests
         Assert.Contains("min-height:7.25rem", js, StringComparison.Ordinal);
         Assert.Contains("params.title = movieTitle", js, StringComparison.Ordinal);
         Assert.Contains("#/details?id=", js, StringComparison.Ordinal);
+        Assert.Contains("Download complete|Download failed|Downloading|SABnzbd|Treasure-Maps download", js, StringComparison.Ordinal);
+        Assert.DoesNotContain("return looksQuality(item.Name);", js, StringComparison.Ordinal);
     }
 
     [Fact]

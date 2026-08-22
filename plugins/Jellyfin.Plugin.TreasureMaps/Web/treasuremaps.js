@@ -134,10 +134,10 @@
 
     function isDownloadItem(item) {
         if (!item || !item.ChannelId) { return false; }
-        var ext = String(item.ExternalId || item.Path || item.Id || '');
+        var ext = String(item.ExternalId || item.Path || '');
         if (/DL::|dl::|dlinfo/i.test(ext)) { return true; }
-        if (item.ProviderIds && item.ProviderIds.TreasureMapsTitle && looksQuality(item.Name)) { return true; }
-        return looksQuality(item.Name);
+        var overview = item.Overview || '';
+        return item.Type === 'BoxSet' && /Download complete|Download failed|Downloading|SABnzbd|Treasure-Maps download/i.test(overview);
     }
 
     /* ---- Movie/show title page: replace the generic children row with a release LIST ---- */
