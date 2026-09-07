@@ -13,6 +13,8 @@ namespace MediaBrowser.Model.LiveTv
             AllowStreamSharing = true;
             AllowFmp4TranscodingContainer = false;
             FallbackMaxStreamingBitrate = 30000000;
+            AlternateUrls = [];
+            HangTimeoutSeconds = 10;
         }
 
         public string Id { get; set; }
@@ -52,6 +54,22 @@ namespace MediaBrowser.Model.LiveTv
         /// Gets or sets an XMLTV/EPG URL imported from the M3U header or set by the user.
         /// </summary>
         public string EpgUrl { get; set; }
+
+        /// <summary>
+        /// Gets or sets additional playlist URLs (other ingest servers) used for health scoring and failover.
+        /// The primary <see cref="Url"/> field may also contain pipe-separated URLs.
+        /// </summary>
+        public string[] AlternateUrls { get; set; }
+
+        /// <summary>
+        /// Gets or sets the playlist URL currently selected by health checks.
+        /// </summary>
+        public string ActiveUrl { get; set; }
+
+        /// <summary>
+        /// Gets or sets how many seconds without data before a live stream is treated as hung.
+        /// </summary>
+        public int HangTimeoutSeconds { get; set; }
 
         public bool IgnoreDts { get; set; }
 

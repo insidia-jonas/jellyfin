@@ -135,6 +135,8 @@ namespace Jellyfin.LiveTv.TunerHosts
 
         public async Task Validate(TunerHostInfo info)
         {
+            M3uUrlFailover.NormalizeTunerUrls(info);
+
             var playlist = await new M3uParser(Logger, _httpClientFactory)
                 .ParsePlaylist(info, GetFullChannelIdPrefix(info), CancellationToken.None)
                 .ConfigureAwait(false);
@@ -149,7 +151,9 @@ namespace Jellyfin.LiveTv.TunerHosts
 
         protected virtual MediaSourceInfo CreateMediaSourceInfo(TunerHostInfo info, ChannelInfo channel)
         {
-            var path = channel.Path;
+            var path = M3uUrlFailover.RewriteStreamUrl(
+                channel.Path,
+                M3uUrlFailover.GetPrimaryUrl(info));
 
             var supportsDirectPlay = !info.EnableStreamLooping && info.TunerCount == 0;
             var supportsDirectStream = !info.EnableStreamLooping;

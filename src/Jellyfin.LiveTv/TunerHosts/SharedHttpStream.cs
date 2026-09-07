@@ -23,6 +23,7 @@ namespace Jellyfin.LiveTv.TunerHosts
     {
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IServerApplicationHost _appHost;
+        private readonly TunerHostInfo _tunerHostInfo;
 
         public SharedHttpStream(
             MediaSourceInfo mediaSource,
@@ -38,6 +39,7 @@ namespace Jellyfin.LiveTv.TunerHosts
         {
             _httpClientFactory = httpClientFactory;
             _appHost = appHost;
+            _tunerHostInfo = tunerHostInfo;
             OriginalStreamId = originalStreamId;
         }
 
@@ -89,6 +91,11 @@ namespace Jellyfin.LiveTv.TunerHosts
                         await using (fileStream.ConfigureAwait(false))
                         {
                             var attempt = 0;
+                            var originalUrl = url;
+                            var currentPlaylistUrl = M3uUrlFailover.GetPrimaryUrl(_tunerHostInfo);
+                            var hangTimeout = M3uUrlFailover.GetHangTimeout(_tunerHostInfo);
+                            var candidates = M3uUrlFailover.GetCandidateUrls(_tunerHostInfo);
+
                             while (!cancellationToken.IsCancellationRequested)
                             {
                                 attempt++;
@@ -112,6 +119,7 @@ namespace Jellyfin.LiveTv.TunerHosts
                                                 fileStream,
                                                 IODefaults.CopyToBufferSize,
                                                 () => Resolve(openTaskCompletionSource),
+                                                hangTimeout,
                                                 cancellationToken).ConfigureAwait(false);
                                         }
                                     }
@@ -128,6 +136,10 @@ namespace Jellyfin.LiveTv.TunerHosts
                                     Logger.LogInformation("Copying of {StreamType} to {FilePath} was canceled", GetType().Name, TempFilePath);
                                     break;
                                 }
+                                catch (TimeoutException)
+                                {
+                                    Logger.LogWarning("Hang detected on {Url} after {Timeout}. Switching ingest server. Attempt {Attempt}", url, hangTimeout, attempt);
+                                }
                                 catch (Exception ex)
                                 {
                                     Logger.LogWarning(ex, "Error copying live stream {StreamType} to {FilePath}. Attempt {Attempt}", GetType().Name, TempFilePath, attempt);
@@ -142,6 +154,13 @@ namespace Jellyfin.LiveTv.TunerHosts
                                 if (cancellationToken.IsCancellationRequested)
                                 {
                                     break;
+                                }
+
+                                if (candidates.Count > 1)
+                                {
+                                    currentPlaylistUrl = M3uUrlFailover.GetNextUrl(candidates, currentPlaylistUrl);
+                                    url = M3uUrlFailover.RewriteStreamUrl(originalUrl, currentPlaylistUrl);
+                                    Logger.LogInformation("Failing over live stream to {Url}", url);
                                 }
 
                                 var delayMs = Math.Min(1000 * attempt, 5000);

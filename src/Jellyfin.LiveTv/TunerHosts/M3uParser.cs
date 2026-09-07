@@ -54,12 +54,13 @@ namespace Jellyfin.LiveTv.TunerHosts
         {
             ArgumentNullException.ThrowIfNull(info);
 
-            if (!info.Url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            var listingsUrl = M3uUrlFailover.GetPrimaryUrl(info);
+            if (!listingsUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
             {
-                return AsyncFile.OpenRead(info.Url);
+                return AsyncFile.OpenRead(listingsUrl);
             }
 
-            using var requestMessage = new HttpRequestMessage(HttpMethod.Get, info.Url);
+            using var requestMessage = new HttpRequestMessage(HttpMethod.Get, listingsUrl);
             if (!string.IsNullOrEmpty(info.UserAgent))
             {
                 requestMessage.Headers.UserAgent.TryParseAdd(info.UserAgent);
@@ -113,7 +114,10 @@ namespace Jellyfin.LiveTv.TunerHosts
                     }
 
                     var channel = GetChannelInfo(extInf, tunerHostId, trimmedLine);
-                    channel.Id = channelIdPrefix + trimmedLine.GetMD5().ToString("N", CultureInfo.InvariantCulture);
+                    var stableKey = string.IsNullOrWhiteSpace(channel.TunerChannelId)
+                        ? M3uUrlFailover.StableStreamKey(trimmedLine)
+                        : channel.TunerChannelId;
+                    channel.Id = channelIdPrefix + stableKey.GetMD5().ToString("N", CultureInfo.InvariantCulture);
 
                     channel.Path = trimmedLine;
                     playlist.Channels.Add(channel);
