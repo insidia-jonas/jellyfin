@@ -154,7 +154,7 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
 - Category tiles must stay uniform (plain colored tiles): Jellyfin's `FolderImageProvider` used to
   compose folder images from child posters, making half the category tiles look like movie cards.
   Channel-sourced folders are excluded from that provider (server patch), and the category folder
-  ids carry a generation prefix (`c3-`, stripped in `GetChannelItems`) that is bumped when the
+  ids carry a generation prefix (`c4-`, stripped in `GetChannelItems`) that is bumped when the
   folder entities must be recreated (old collage images, then missing images). Category folders
   now set `ImageUrl` to a generated poster (`ChannelArtwork`) so Fire TV is not a grid of empty
   blue tiles; the channel itself implements `GetChannelImage`. If tiles look stale, bump the prefix.
@@ -172,6 +172,12 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   so the client uses a 30s timeout and pages are fetched fault-tolerantly (one failed page must not
   blank the view). CRITICAL: if a channel folder returns an *empty* result, Jellyfin **caches it as
   empty for hours** — on total failure the channel must THROW (it does), never return empty.
+  Sparse/no-match folders (letter, genre, For You resolve-miss, search:) return a **hint tile**
+  instead of an empty list. For You is omitted from the root when AI is disabled (no dead tile).
+  Title cards are filled by `MetadataCatalog` (optional OMDb key, else iTunes Search + picbit)
+  so Fire TV details pages get posters, plot, year, rating and cast. Live search fetches two
+  pages of movie + TV and ranks with year/token scoring (`TreasureMapsSearch`). AI For You
+  requests `ForYouCount` (default 24) and keeps up to 18 resolved titles.
 - The API client keeps a 5-minute in-memory response cache (1h for caps), which is what makes
   channel navigation fast (~30ms cached vs 4-60s cold). Restarting the server clears it; Jellyfin's
   own channel item cache persists across restarts (bump `DataVersion` to bust it).
@@ -266,8 +272,9 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   `AiBaseUrl` overrides the endpoint (OpenRouter/local LLMs/mocks — testing uses an
   OpenAI-compatible mock on 127.0.0.1:8092, `/tmp/ai_mock.py`, tmux `ai-mock`). Replies are parsed
   tolerantly (`ParseRecommendations` extracts the JSON array from prose/fences); each rec is
-  resolved against the indexer by title (normalized match) and skipped when unavailable; the AI's
-  reason is prepended to the card overview ("✨ ..."). Recommendations are cached per user+history
+  resolved against the indexer by title + year (and the other kind as fallback); unresolved titles
+  become a hint tile, never an empty cached folder. The AI's reason is prepended to the card
+  overview ("✨ ..."). Request count is `ForYouCount` (default 24). Cached per user+history
   hash (`ForYouCacheHours`, default 6h) so browsing doesn't burn tokens. `GET TreasureMaps/Ai/Test`
   validates the key with a tiny prompt. Channel query's `UserId` provides per-user personalization.
 - FIRE TV / native clients (the user's PRIMARY device): no injected JS/CSS there — everything

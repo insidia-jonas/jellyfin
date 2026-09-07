@@ -54,5 +54,7 @@ public class AiRecommenderTests
         Assert.Contains("Severance", prompt, StringComparison.Ordinal);
         Assert.Contains("exactly 12", prompt, StringComparison.Ordinal);
         Assert.Contains("JSON array", prompt, StringComparison.Ordinal);
+        Assert.Contains("IMDb", prompt, StringComparison.Ordinal);
+        Assert.Contains("60% movies", prompt, StringComparison.Ordinal);
     }
 }

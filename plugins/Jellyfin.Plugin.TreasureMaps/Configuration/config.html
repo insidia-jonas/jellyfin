@@ -83,6 +83,14 @@
                             <input is="emby-input" type="text" id="aiBaseUrl" label="API base URL override (optional)" />
                             <div class="fieldDescription">For OpenAI-compatible gateways (OpenRouter, local LLMs, ...). Empty uses the provider's official endpoint.</div>
                         </div>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="number" id="forYouCount" pattern="[0-9]*" min="12" max="40" label="Recommendations to request" />
+                            <div class="fieldDescription">How many titles the AI should suggest (12–40). Treasure-Maps keeps the ones it can resolve on the indexer.</div>
+                        </div>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="password" id="omdbApiKey" label="OMDb API key (optional)" autocomplete="new-password" />
+                            <div class="fieldDescription">Fills IMDb-quality posters, plots and cast on title cards. Free key at omdbapi.com. Empty uses iTunes artwork as fallback.</div>
+                        </div>
                         <button is="emby-button" type="button" id="testAi" class="raised block"><span>Save &amp; test AI provider</span></button>
                         <div id="aiResult" class="fieldDescription" style="margin-top:0.5em;"></div>
                     </div>
@@ -215,6 +223,8 @@
                 config.AiApiKey = document.querySelector('#aiApiKey').value.trim();
                 config.AiModel = document.querySelector('#aiModel').value.trim();
                 config.AiBaseUrl = document.querySelector('#aiBaseUrl').value.trim();
+                config.ForYouCount = parseInt(document.querySelector('#forYouCount').value, 10) || 24;
+                config.OmdbApiKey = document.querySelector('#omdbApiKey').value.trim();
                 config.EnableOpenSubtitles = document.querySelector('#enableOpenSubtitles').checked;
                 config.OpenSubtitlesApiKey = document.querySelector('#openSubtitlesApiKey').value.trim();
                 config.OpenSubtitlesUsername = document.querySelector('#openSubtitlesUsername').value.trim();
@@ -249,6 +259,8 @@
                         document.querySelector('#aiApiKey').value = config.AiApiKey || '';
                         document.querySelector('#aiModel').value = config.AiModel || '';
                         document.querySelector('#aiBaseUrl').value = config.AiBaseUrl || '';
+                        document.querySelector('#forYouCount').value = config.ForYouCount || 24;
+                        document.querySelector('#omdbApiKey').value = config.OmdbApiKey || '';
                         document.querySelector('#enableOpenSubtitles').checked = !!config.EnableOpenSubtitles;
                         document.querySelector('#openSubtitlesApiKey').value = config.OpenSubtitlesApiKey || '';
                         document.querySelector('#openSubtitlesUsername').value = config.OpenSubtitlesUsername || '';

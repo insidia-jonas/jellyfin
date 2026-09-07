@@ -40,6 +40,9 @@ public sealed class ReleaseGroup
     /// <summary>Gets or sets the tagline.</summary>
     public string? Tagline { get; set; }
 
+    /// <summary>Gets or sets the director.</summary>
+    public string? Director { get; set; }
+
     /// <summary>Gets or sets the newest posted date of the releases in this group.</summary>
     public DateTimeOffset? Posted { get; set; }
 
@@ -117,6 +120,8 @@ public static class ReleaseGrouper
             {
                 group.Genres.AddRange(genres);
             }
+
+            group.Director ??= release.Movie?.Director;
 
             if (release.PostedAt.HasValue && (!group.Posted.HasValue || release.PostedAt > group.Posted))
             {

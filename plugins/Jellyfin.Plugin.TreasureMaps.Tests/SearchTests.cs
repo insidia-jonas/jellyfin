@@ -17,6 +17,7 @@ public class SearchTests
     [InlineData("The Bear King of the Kitchen", "the bear", 75f)]
     [InlineData("Inception", "cept", 55f)]
     [InlineData("Inception", "xyz", 0f)]
+    [InlineData("The Lord of the Rings", "lord rings", 62f)]
     public void ScoreTitle_RanksMatches(string title, string query, float expected)
     {
         Assert.Equal(expected, TreasureMapsSearch.ScoreTitle(title, query));
@@ -82,6 +83,22 @@ public class SearchTests
         Assert.Equal(TimeSpan.FromMinutes(5), TreasureMapsApiClient.CacheTtlForQuery("A"));
         Assert.Equal(TimeSpan.FromSeconds(20), TreasureMapsApiClient.CacheTtlForQuery("ma"));
         Assert.Equal(TimeSpan.FromSeconds(20), TreasureMapsApiClient.CacheTtlForQuery("matrix"));
+    }
+
+    [Fact]
+    public void ParseQuery_SplitsTrailingYear()
+    {
+        var parsed = TreasureMapsSearch.ParseQuery("The Matrix 1999");
+        Assert.Equal("The Matrix", parsed.Text);
+        Assert.Equal(1999, parsed.Year);
+        Assert.Null(TreasureMapsSearch.ParseQuery("Matrix").Year);
+    }
+
+    [Fact]
+    public void ScoreTitle_BoostsMatchingYear()
+    {
+        Assert.True(TreasureMapsSearch.ScoreTitle("The Matrix", "Matrix 1999", 1999)
+                    > TreasureMapsSearch.ScoreTitle("The Matrix Reloaded", "Matrix 1999", 2003));
     }
 
     [Fact]

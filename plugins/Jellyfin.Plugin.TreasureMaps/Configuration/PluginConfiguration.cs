@@ -46,6 +46,17 @@ public class PluginConfiguration : BasePluginConfiguration
     public int ForYouCacheHours { get; set; } = 6;
 
     /// <summary>
+    /// Gets or sets how many AI recommendations to request (resolved against the indexer).
+    /// </summary>
+    public int ForYouCount { get; set; } = 24;
+
+    /// <summary>
+    /// Gets or sets an optional OMDb API key used to fill IMDb-quality posters, plots and cast
+    /// on Treasure-Maps title cards. Empty falls back to the public iTunes Search API.
+    /// </summary>
+    public string OmdbApiKey { get; set; } = string.Empty;
+
+    /// <summary>
     /// Gets or sets the API key sent as the <c>X-API-Key</c> header.
     /// </summary>
     public string ApiKey { get; set; } = string.Empty;

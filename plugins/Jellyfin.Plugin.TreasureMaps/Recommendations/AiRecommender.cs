@@ -143,8 +143,16 @@ public class AiRecommender
         sb.AppendLine("Favorites / downloaded:");
         sb.AppendLine(favorites.Count > 0 ? string.Join("\n", favorites.Select(t => "- " + t)) : "- (none)");
         sb.AppendLine();
-        sb.Append("Recommend exactly ").Append(count).AppendLine(" titles: a mix of movies and TV shows matching the user's taste.");
-        sb.AppendLine("Do NOT recommend titles already listed above. Prefer well-known, obtainable releases.");
+        sb.Append("Recommend exactly ").Append(count).AppendLine(" titles the user does not already have.");
+        sb.AppendLine("Rules:");
+        sb.AppendLine("- Mix about 60% movies and 40% TV shows.");
+        sb.AppendLine("- Mix widely known titles with strong lesser-known ones that still exist on Usenet.");
+        sb.AppendLine("- If the history is German-heavy, include German-language or well-dubbed titles.");
+        sb.AppendLine("- Use the official English (or original) title as shown on IMDb.");
+        sb.AppendLine("- year must be the original theatrical / first-aired year.");
+        sb.AppendLine("- type must be exactly \"movie\" or \"tv\".");
+        sb.AppendLine("- reason: one short sentence (max 18 words) that names the taste overlap.");
+        sb.AppendLine("- Do NOT recommend anything listed above.");
         sb.AppendLine("Reply with ONLY a JSON array, no other text, in this shape:");
         sb.AppendLine("[{\"title\":\"...\",\"year\":2024,\"type\":\"movie\",\"reason\":\"one short sentence\"}]");
         return sb.ToString();
@@ -225,7 +233,7 @@ public class AiRecommender
         var payload = new
         {
             model,
-            max_tokens = 2048,
+            max_tokens = 4096,
             messages = new[] { new { role = "user", content = prompt } }
         };
 
