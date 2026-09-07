@@ -99,9 +99,10 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   A sidecar `{name}.{lang}.srt` is written next to the video; if it already exists, GetSubtitles
   loads it for 0 USD. Web: details panel `#tmSubtitles` (`GET TreasureMaps/Subtitles/Search`,
   `POST …/Generate` after `window.confirm` of the quote, `POST …/Download` for OpenSubtitles).
-  Config: `EnableAiSubtitles`, `WhisperApiKey` (fallback `AiApiKey`), `WhisperBaseUrl`,
-  `WhisperModel`, quote rates `WhisperUsdPerMinute` (0.006) / `TranslationUsdPerMillionTokens`
-  (0.15). Grok/Anthropic cannot run Whisper — set a Whisper key (OpenAI/Groq). Long films can
+  Config: `EnableAiSubtitles`, `WhisperApiKey` (fallback `AiApiKey`), `WhisperBaseUrl`
+  (OpenAI unless set — never the chat `AiBaseUrl`), `WhisperModel`, quote rates
+  `WhisperUsdPerMinute` (0.006) / `TranslationUsdPerMillionTokens` (0.15). Grok/Anthropic
+  cannot run Whisper — set a Whisper key (OpenAI/Groq). Long films can
   take minutes; Fire TV `GetSubtitles` may time out even though the sidecar still finishes
   writing.
 - Pi deployment: `scripts/pi/full-redeploy.sh` is the one-shot for a Raspberry Pi — it stops

@@ -224,11 +224,10 @@ public sealed class AiSubtitleService
         }
 
         var model = string.IsNullOrWhiteSpace(config.WhisperModel) ? "whisper-1" : config.WhisperModel;
+        // Do not reuse AiBaseUrl: Grok/Anthropic/OpenRouter chat endpoints are not Whisper.
         var root = !string.IsNullOrWhiteSpace(config.WhisperBaseUrl)
             ? config.WhisperBaseUrl.TrimEnd('/')
-            : !string.IsNullOrWhiteSpace(config.AiBaseUrl)
-                ? config.AiBaseUrl.TrimEnd('/')
-                : "https://api.openai.com/v1";
+            : "https://api.openai.com/v1";
         if (root.EndsWith("/audio/transcriptions", StringComparison.OrdinalIgnoreCase)
             || root.EndsWith("/audio/translations", StringComparison.OrdinalIgnoreCase))
         {
