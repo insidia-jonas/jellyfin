@@ -12,6 +12,8 @@
         <item name="editTextStyle">@style/Widget.JellyfinFireTv.EditText</item>
     </style>
 
+    <style name="Widget.JellyfinFireTv" parent="@android:style/Widget" />
+
     <style name="Widget.JellyfinFireTv.EditText" parent="Widget.AppCompat.EditText">
         <item name="android:textColor">@color/text_primary</item>
         <item name="android:textColorHint">@color/text_secondary</item>
