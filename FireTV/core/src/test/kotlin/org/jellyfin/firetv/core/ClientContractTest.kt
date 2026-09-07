@@ -80,6 +80,7 @@ class NativeAssetTest {
     @Test
     fun `es modules must be served as text javascript`() {
         assertEquals("text/javascript", NativeAsset.mimeType("ExoPlayerPlugin.js"))
+        assertEquals("text/css", NativeAsset.mimeType("tv-cinema.css"))
         assertTrue(NativeAsset.responseHeaders("ExoPlayerPlugin.js")["Content-Type"]!!.startsWith("text/javascript"))
     }
 }

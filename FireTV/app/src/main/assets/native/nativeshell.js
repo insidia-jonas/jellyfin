@@ -12,6 +12,8 @@
  * Do not patch HTMLImageElement.src or ApiClient image URLs: Amazon WebView
  * re-enters the setter (freeze on Search) and dropping fillWidth/fillHeight
  * makes library posters such as Treasure Maps fail to load.
+ *
+ * Cinema UX lives in /native/tv-cinema.css and /native/tvExperience.js.
  */
 (function () {
     function forceTvViewport() {
@@ -100,6 +102,26 @@
         parent.appendChild(style);
     }
 
+    function loadCinemaLayer() {
+        var parent = document.head || document.documentElement;
+        if (!parent) {
+            return;
+        }
+        if (!document.getElementById("firetv-cinema-css")) {
+            var link = document.createElement("link");
+            link.id = "firetv-cinema-css";
+            link.rel = "stylesheet";
+            link.href = "/native/tv-cinema.css";
+            parent.appendChild(link);
+        }
+        if (!document.querySelector('script[src="/native/tvExperience.js"]')) {
+            var script = document.createElement("script");
+            script.src = "/native/tvExperience.js";
+            script.async = true;
+            parent.appendChild(script);
+        }
+    }
+
     function patchHtml5Media() {
         if (window.__firetvMediaPatched) {
             return;
@@ -163,11 +185,13 @@
     window.FireTvGuard = function () {
         forceTvViewport();
         injectPerformanceCss();
+        loadCinemaLayer();
         patchHtml5Media();
     };
 
     forceTvViewport();
     injectPerformanceCss();
+    loadCinemaLayer();
     patchHtml5Media();
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", window.FireTvGuard);
@@ -191,7 +215,7 @@
             deviceId: "firetv-web",
             deviceName: "Fire TV",
             appName: "Jellyfin Fire TV",
-            appVersion: "1.4.0"
+            appVersion: "1.5.0"
         };
     }
 

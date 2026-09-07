@@ -1,0 +1,231 @@
+/* Plex-grade TV skin for hosted jellyfin-web.
+   Do not add extra card outline rings — jellyfin-web already draws TV focus.
+   Do not rewrite image URLs. */
+html.layout-tv,
+.layout-tv body,
+.layout-tv .backgroundContainer,
+.layout-tv .backdropContainer {
+    background: #07090f !important;
+}
+
+.layout-tv,
+.layout-tv body {
+    cursor: none !important;
+}
+
+.layout-tv .skinHeader {
+    background: linear-gradient(180deg, rgba(7, 9, 15, 0.96) 0%, rgba(7, 9, 15, 0.78) 70%, transparent 100%) !important;
+    border-bottom: 0 !important;
+    box-shadow: none !important;
+}
+
+.layout-tv .headerHomeButton,
+.layout-tv .headerUserButton,
+.layout-tv .headerSearchButton {
+    opacity: 0.92;
+}
+
+.layout-tv .homeSectionsContainer,
+.layout-tv .homePage,
+.layout-tv .sections {
+    padding-top: 0.4em;
+}
+
+.layout-tv .homeSectionsContainer .verticalSection,
+.layout-tv .padded-top-page .verticalSection {
+    margin-bottom: 1.7em !important;
+}
+
+.layout-tv .sectionTitle,
+.layout-tv .sectionTitleTextButton {
+    font-size: 1.55em !important;
+    font-weight: 650 !important;
+    letter-spacing: 0.02em !important;
+    color: #f4f7fb !important;
+    margin-bottom: 0.4em !important;
+}
+
+.layout-tv .cardImageContainer,
+.layout-tv .cardImage,
+.layout-tv .coveredImage {
+    background-size: cover !important;
+    background-position: center 12% !important;
+    background-repeat: no-repeat !important;
+}
+
+.layout-tv .cardPadder-portrait,
+.layout-tv .cardPadder-overflowPortrait {
+    border-radius: 6px;
+}
+
+.layout-tv .cardBox,
+.layout-tv .cardContent {
+    border-radius: 8px;
+}
+
+.layout-tv .cardText,
+.layout-tv .cardText-first {
+    font-size: 0.92em !important;
+    font-weight: 600 !important;
+    color: #e8edf4 !important;
+}
+
+.layout-tv .cardText-secondary {
+    color: #9aa6b6 !important;
+    font-weight: 500 !important;
+}
+
+.layout-tv .focused .cardImageContainer,
+.layout-tv .focused .cardBox {
+    filter: brightness(1.07);
+}
+
+.layout-tv .itemBackdrop {
+    mask-image: linear-gradient(180deg, #000 46%, transparent 100%);
+    -webkit-mask-image: linear-gradient(180deg, #000 46%, transparent 100%);
+}
+
+.layout-tv .itemName,
+.layout-tv .nameContainer h1,
+.layout-tv .parentName {
+    font-weight: 750 !important;
+    letter-spacing: 0.01em !important;
+    text-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+}
+
+.layout-tv .itemName {
+    font-size: 2.5em !important;
+    line-height: 1.12 !important;
+}
+
+.layout-tv .itemMiscInfo,
+.layout-tv .mediaInfoItem,
+.layout-tv .starRatingContainer,
+.layout-tv .itemCommunityRating {
+    font-size: 1.12em !important;
+    font-weight: 600 !important;
+}
+
+.layout-tv .tagline {
+    font-size: 1.15em !important;
+    font-style: italic !important;
+    color: #d5dde8 !important;
+    opacity: 0.92;
+}
+
+.layout-tv .overview,
+.layout-tv .detail-clamp-text,
+.layout-tv .itemOverview {
+    font-size: 1.05em !important;
+    line-height: 1.45 !important;
+    color: #d7deea !important;
+    max-width: 52em;
+}
+
+.layout-tv .mainDetailButtons .emby-button,
+.layout-tv .detailButton {
+    min-height: 3.2em;
+    border-radius: 10px !important;
+}
+
+.layout-tv .searchfields-input,
+.layout-tv input[type="search"],
+.layout-tv .searchFields input {
+    font-size: 1.35em !important;
+    letter-spacing: 0.01em;
+}
+
+#firetv-smart-results {
+    padding: 0.4em 0 1.2em;
+}
+
+#firetv-smart-results .firetv-smart-title {
+    font-size: 1.45em;
+    font-weight: 700;
+    color: #f4f7fb;
+    margin: 0 0 0.55em;
+    letter-spacing: 0.02em;
+}
+
+#firetv-smart-results .firetv-smart-row {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 1.05em;
+    padding: 0.35em 0 0.7em;
+}
+
+#firetv-smart-results .firetv-card {
+    flex: 0 0 11.4em;
+    width: 11.4em;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    color: #fff;
+    text-align: left;
+    outline: none;
+}
+
+#firetv-smart-results .firetv-poster {
+    width: 100%;
+    padding-bottom: 150%;
+    border-radius: 8px;
+    background: #151a24 center 12% / cover no-repeat;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+#firetv-smart-results .firetv-card.focused .firetv-poster {
+    filter: brightness(1.08);
+    transform: scale(1.05);
+}
+
+#firetv-smart-results .firetv-card-title {
+    margin-top: 0.45em;
+    font-size: 0.95em;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+#firetv-smart-results .firetv-card-meta {
+    margin-top: 0.15em;
+    color: #9aa6b6;
+    font-size: 0.82em;
+    font-weight: 600;
+}
+
+.firetv-imdb {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.7em 1em;
+    margin: 0.55em 0 0.8em;
+    font-size: 1.12em;
+    font-weight: 650;
+    color: #e8edf4;
+}
+
+.firetv-imdb-star {
+    color: #f5c518;
+    letter-spacing: 0.02em;
+}
+
+.firetv-imdb-chip {
+    padding: 0.18em 0.55em;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #d7deea;
+}
+
+.firetv-imdb-plot {
+    max-width: 52em;
+    margin: 0 0 1em;
+    font-size: 1.06em;
+    line-height: 1.45;
+    color: #d7deea;
+}
+
+.layout-tv .verticalSection[data-firetv-hidden="1"],
+.layout-tv .homeSection[data-firetv-hidden="1"],
+.layout-tv [data-firetv-hidden="1"] {
+    display: none !important;
+}
