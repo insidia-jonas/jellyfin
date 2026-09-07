@@ -90,6 +90,8 @@ public class TunerHostManager : ITunerHostManager
             config.TunerHosts[index] = info;
         }
 
+        EnsureImportedXmlTv(config, info);
+
         _config.SaveConfiguration("livetv", config);
 
         if (dataSourceChanged)
@@ -177,6 +179,40 @@ public class TunerHostManager : ITunerHostManager
                 await SaveTunerHost(configuredDevice).ConfigureAwait(false);
             }
         }
+    }
+
+    /// <summary>
+    /// Adds an XMLTV listings provider when an M3U playlist advertises an EPG URL that is not already configured.
+    /// </summary>
+    /// <param name="config">The Live TV configuration being saved.</param>
+    /// <param name="info">The tuner that may include an imported EPG URL.</param>
+    internal static void EnsureImportedXmlTv(LiveTvOptions config, TunerHostInfo info)
+    {
+        if (!string.Equals(info.Type, "m3u", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(info.EpgUrl)
+            || string.IsNullOrWhiteSpace(info.Id))
+        {
+            return;
+        }
+
+        if (config.ListingProviders.Any(provider =>
+                string.Equals(provider.Type, "xmltv", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(provider.Path, info.EpgUrl, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        var listing = new ListingsProviderInfo
+        {
+            Id = Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture),
+            Type = "xmltv",
+            Path = info.EpgUrl,
+            UserAgent = info.UserAgent,
+            EnableAllTuners = false,
+            EnabledTuners = [info.Id]
+        };
+
+        config.ListingProviders = [.. config.ListingProviders, listing];
     }
 
     private async Task<IList<TunerHostInfo>> DiscoverDevices(ITunerHost host, int discoveryDurationMs, CancellationToken cancellationToken)

@@ -43,6 +43,16 @@ namespace MediaBrowser.Model.LiveTv
 
         public string UserAgent { get; set; }
 
+        /// <summary>
+        /// Gets or sets an HTTP Referer sent with playlist and stream requests.
+        /// </summary>
+        public string Referrer { get; set; }
+
+        /// <summary>
+        /// Gets or sets an XMLTV/EPG URL imported from the M3U header or set by the user.
+        /// </summary>
+        public string EpgUrl { get; set; }
+
         public bool IgnoreDts { get; set; }
 
         public bool ReadAtNativeFramerate { get; set; }

@@ -70,9 +70,12 @@ namespace Jellyfin.LiveTv.TunerHosts
         {
             var channelIdPrefix = GetFullChannelIdPrefix(tuner);
 
-            return await new M3uParser(Logger, _httpClientFactory)
-                .Parse(tuner, channelIdPrefix, cancellationToken)
+            var playlist = await new M3uParser(Logger, _httpClientFactory)
+                .ParsePlaylist(tuner, channelIdPrefix, cancellationToken)
                 .ConfigureAwait(false);
+
+            ApplyPlaylistMetadata(tuner, playlist);
+            return playlist.Channels;
         }
 
         protected override async Task<ILiveStream> GetChannelStream(TunerHostInfo tunerHost, ChannelInfo channel, string streamId, IList<ILiveStream> currentLiveStreams, CancellationToken cancellationToken)
@@ -103,6 +106,7 @@ namespace Jellyfin.LiveTv.TunerHosts
                     try
                     {
                         using var message = new HttpRequestMessage(HttpMethod.Head, mediaSource.Path);
+                        ApplyRequiredHeaders(message, mediaSource.RequiredHttpHeaders);
                         using var response = await _httpClientFactory.CreateClient(NamedClient.Default)
                             .SendAsync(message, cancellationToken)
                             .ConfigureAwait(false);
@@ -131,9 +135,11 @@ namespace Jellyfin.LiveTv.TunerHosts
 
         public async Task Validate(TunerHostInfo info)
         {
-            using (await new M3uParser(Logger, _httpClientFactory).GetListingsStream(info, CancellationToken.None).ConfigureAwait(false))
-            {
-            }
+            var playlist = await new M3uParser(Logger, _httpClientFactory)
+                .ParsePlaylist(info, GetFullChannelIdPrefix(info), CancellationToken.None)
+                .ConfigureAwait(false);
+
+            ApplyPlaylistMetadata(info, playlist);
         }
 
         protected override Task<List<MediaSourceInfo>> GetChannelStreamMediaSources(TunerHostInfo tuner, ChannelInfo channel, CancellationToken cancellationToken)
@@ -164,12 +170,18 @@ namespace Jellyfin.LiveTv.TunerHosts
                 httpHeaders[HeaderNames.UserAgent] = string.IsNullOrWhiteSpace(info.UserAgent) ?
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" :
                     info.UserAgent;
+
+                if (!string.IsNullOrWhiteSpace(info.Referrer))
+                {
+                    httpHeaders[HeaderNames.Referer] = info.Referrer;
+                }
             }
 
             var mediaSource = new MediaSourceInfo
             {
                 Path = path,
                 Protocol = protocol,
+                Container = InferLiveContainer(path),
                 MediaStreams = new MediaStream[]
                 {
                     new MediaStream
@@ -197,6 +209,9 @@ namespace Jellyfin.LiveTv.TunerHosts
                 IsRemote = isRemote,
 
                 IgnoreDts = info.IgnoreDts,
+                GenPtsInput = true,
+                AnalyzeDurationMs = 5000,
+                BufferMs = 3000,
                 SupportsDirectPlay = supportsDirectPlay,
                 SupportsDirectStream = supportsDirectStream,
 
@@ -213,6 +228,67 @@ namespace Jellyfin.LiveTv.TunerHosts
         public Task<List<TunerHostInfo>> DiscoverDevices(int discoveryDurationMs, CancellationToken cancellationToken)
         {
             return Task.FromResult(new List<TunerHostInfo>());
+        }
+
+        private static void ApplyPlaylistMetadata(TunerHostInfo info, M3uPlaylist playlist)
+        {
+            if (string.IsNullOrWhiteSpace(info.UserAgent) && !string.IsNullOrWhiteSpace(playlist.UserAgent))
+            {
+                info.UserAgent = playlist.UserAgent;
+            }
+
+            if (string.IsNullOrWhiteSpace(info.Referrer) && !string.IsNullOrWhiteSpace(playlist.Referrer))
+            {
+                info.Referrer = playlist.Referrer;
+            }
+
+            if (string.IsNullOrWhiteSpace(info.EpgUrl) && !string.IsNullOrWhiteSpace(playlist.EpgUrl))
+            {
+                info.EpgUrl = playlist.EpgUrl;
+            }
+        }
+
+        private static void ApplyRequiredHeaders(HttpRequestMessage request, IDictionary<string, string> headers)
+        {
+            if (headers is null)
+            {
+                return;
+            }
+
+            foreach (var header in headers)
+            {
+                if (string.IsNullOrWhiteSpace(header.Key) || string.IsNullOrWhiteSpace(header.Value))
+                {
+                    continue;
+                }
+
+                request.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+        }
+
+        private static string InferLiveContainer(string path)
+        {
+            if (!Uri.TryCreate(path, UriKind.Absolute, out var uri))
+            {
+                return null;
+            }
+
+            var relativePath = uri.AbsolutePath;
+            if (relativePath.Contains("m3u8", StringComparison.OrdinalIgnoreCase)
+                || relativePath.Contains("/hls", StringComparison.OrdinalIgnoreCase))
+            {
+                return "hls";
+            }
+
+            if (relativePath.EndsWith(".ts", StringComparison.OrdinalIgnoreCase)
+                || relativePath.EndsWith(".m2t", StringComparison.OrdinalIgnoreCase)
+                || relativePath.EndsWith(".mp2t", StringComparison.OrdinalIgnoreCase)
+                || relativePath.Contains("mpegts", StringComparison.OrdinalIgnoreCase))
+            {
+                return "mpegts";
+            }
+
+            return null;
         }
     }
 }
