@@ -31,6 +31,7 @@ public static class LiveTvServiceCollectionExtensions
 
         services.AddSingleton<ILiveTvManager, LiveTvManager>();
         services.AddSingleton<IChannelManager, ChannelManager>();
+        services.AddSingleton<IChannel, LiveTvLibraryChannel>();
         services.AddSingleton<IStreamHelper, StreamHelper>();
         services.AddSingleton<ITunerHostManager, TunerHostManager>();
         services.AddSingleton<IListingsManager, ListingsManager>();
