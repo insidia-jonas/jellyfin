@@ -69,6 +69,25 @@
         '.tmDownloadHero .tmDlBar>span{display:block;height:100%;background:#0a84ff;border-radius:99px}' +
         '.tmDownloadHero .tmDlRemove{border:1px solid rgba(255,255,255,.38);background:transparent;color:#fff;' +
         'border-radius:999px;min-height:2.5rem;padding:.45em 1.1em;font-weight:600;font-family:inherit;cursor:pointer}' +
+        '#tmSubtitles{margin:1.2em 0 1.6em;max-width:52rem;box-sizing:border-box}' +
+        '#tmSubtitles h2{font-size:1.15em;margin:0 0 .55em}' +
+        '#tmSubtitles .tmSubBar{display:flex;flex-wrap:wrap;gap:.55em;align-items:center;margin:0 0 .75em}' +
+        '#tmSubtitles .tmSubBar select,#tmSubtitles .tmSubBar button,#tmSubtitles .tmSubAi button,' +
+        '#tmSubtitles .tmSubDl{border:none;border-radius:999px;min-height:2.4rem;padding:.4em 1em;' +
+        'font-weight:600;font-family:inherit;cursor:pointer}' +
+        '#tmSubtitles .tmSubBar select{background:rgba(255,255,255,.1);color:inherit;border:1px solid rgba(255,255,255,.2)}' +
+        '#tmSubtitles .tmSubSearch,#tmSubtitles .tmSubGen,#tmSubtitles .tmSubDl{background:#0a84ff;color:#fff}' +
+        '#tmSubtitles .tmSubSearch:disabled,#tmSubtitles .tmSubGen:disabled,#tmSubtitles .tmSubDl:disabled{opacity:.45;cursor:default}' +
+        '#tmSubtitles .tmSubAi{padding:.85em 1em;margin:0 0 .65em;border-radius:14px;' +
+        'background:rgba(10,132,255,.12);border:1px solid rgba(10,132,255,.35)}' +
+        '#tmSubtitles .tmSubQuote{font-weight:700;line-height:1.35;margin:0 0 .35em}' +
+        '#tmSubtitles .tmSubHint{opacity:.85;font-size:.92em;margin:0 0 .65em}' +
+        '#tmSubtitles .tmSubRow{display:flex;flex-wrap:wrap;align-items:flex-start;gap:.55em .75em;' +
+        'padding:.65em .8em;margin:.35em 0;border-radius:12px;background:rgba(255,255,255,.07);' +
+        'border:1px solid rgba(255,255,255,.1)}' +
+        '#tmSubtitles .tmSubName{flex:1 1 12rem;min-width:0;overflow-wrap:anywhere;line-height:1.35}' +
+        '#tmSubtitles .tmSubMeta{font-size:.9em;opacity:.85}' +
+        '#tmSubtitles .tmSubEmpty{opacity:.75;margin:.4em 0}' +
         '@media (max-width:700px){' +
         '#tmDownloads .tmDlRow{flex-wrap:wrap}' +
         '#tmDownloads .tmDlActions{width:100%}' +
@@ -102,6 +121,9 @@
                     enhanceTitlePage(item);
                 } else if (item.ProviderIds && item.ProviderIds.TreasureMaps) {
                     enhanceReleasePage(item);
+                }
+                if (item.Type === 'Movie' || item.Type === 'Episode') {
+                    enhanceSubtitles(item);
                 }
             }).catch(function () { });
         } else if (/search/i.test(hash) && searchQueryFromHash(hash)) {
@@ -172,6 +194,215 @@
                 })
                 .catch(function () { });
         });
+    }
+
+    function enhanceSubtitles(item) {
+        if (!item || !item.Id || (item.Type !== 'Movie' && item.Type !== 'Episode')) { return; }
+        if (item.ChannelId && !item.Path) { return; }
+        whenReady('.itemName,.nameContainer,.detailSection,.detailImageContainer', 16, function (page) {
+            if (!page || page.getAttribute('data-tm-subs') === item.Id) { return; }
+            page.setAttribute('data-tm-subs', item.Id);
+            var old = page.querySelector('#tmSubtitles');
+            if (old) { old.remove(); }
+
+            var box = document.createElement('div');
+            box.id = 'tmSubtitles';
+            var h = document.createElement('h2');
+            h.textContent = 'Untertitel';
+            box.appendChild(h);
+
+            var bar = document.createElement('div');
+            bar.className = 'tmSubBar';
+            var sel = document.createElement('select');
+            sel.setAttribute('aria-label', 'Sprache');
+            [['de', 'Deutsch'], ['en', 'English'], ['es', 'Español'], ['fr', 'Français'], ['it', 'Italiano'], ['pl', 'Polski'], ['nl', 'Nederlands']].forEach(function (pair) {
+                var opt = document.createElement('option');
+                opt.value = pair[0];
+                opt.textContent = pair[1];
+                sel.appendChild(opt);
+            });
+            var searchBtn = document.createElement('button');
+            searchBtn.type = 'button';
+            searchBtn.className = 'tmSubSearch';
+            searchBtn.textContent = 'Suchen';
+            bar.appendChild(sel);
+            bar.appendChild(searchBtn);
+            box.appendChild(bar);
+
+            var aiBox = document.createElement('div');
+            aiBox.className = 'tmSubAi';
+            var quoteEl = document.createElement('div');
+            quoteEl.className = 'tmSubQuote';
+            quoteEl.textContent = 'Kosten werden ermittelt…';
+            var hintEl = document.createElement('div');
+            hintEl.className = 'tmSubHint';
+            hintEl.textContent = 'KI-Erzeugung startet erst, nachdem die groben Kosten bestätigt wurden.';
+            var genBtn = document.createElement('button');
+            genBtn.type = 'button';
+            genBtn.className = 'tmSubGen';
+            genBtn.textContent = 'KI erzeugen';
+            genBtn.disabled = true;
+            aiBox.appendChild(quoteEl);
+            aiBox.appendChild(hintEl);
+            aiBox.appendChild(genBtn);
+            box.appendChild(aiBox);
+
+            var list = document.createElement('div');
+            list.className = 'tmSubList';
+            box.appendChild(list);
+
+            var anchor = page.querySelector('.nameContainer, .itemName, .detailSection') || page;
+            if (anchor.parentNode) {
+                anchor.parentNode.insertBefore(box, anchor.nextSibling);
+            } else {
+                page.insertBefore(box, page.firstChild);
+            }
+
+            var lastQuote = null;
+
+            function setQuote(res) {
+                lastQuote = res && res.quote ? res.quote : res;
+                if (!lastQuote || lastQuote.ok === false) {
+                    quoteEl.textContent = (lastQuote && lastQuote.message) || 'KI-Untertitel nicht konfiguriert (Whisper-Key im Plugin).';
+                    genBtn.disabled = true;
+                    return;
+                }
+                quoteEl.textContent = lastQuote.summary || 'Keine Kostenschätzung.';
+                hintEl.textContent = lastQuote.alreadyExists
+                    ? 'Datei liegt schon neben dem Video. Erzeugen überschreibt sie (erneute Kosten).'
+                    : ('Whisper ' + formatUsd(lastQuote.whisperUsd)
+                        + (lastQuote.includesTranslation ? ' + Übersetzung ' + formatUsd(lastQuote.translationUsd) : '')
+                        + ' · Startet erst nach Bestätigung.');
+                genBtn.disabled = lastQuote.enabled === false;
+                if (res && res.aiEnabled === false) {
+                    quoteEl.textContent = 'KI-Untertitel sind aus oder ohne API-Key.';
+                    genBtn.disabled = true;
+                }
+            }
+
+            function formatUsd(n) {
+                var v = Number(n || 0);
+                return v.toFixed(2) + ' USD';
+            }
+
+            function renderHits(hits) {
+                list.innerHTML = '';
+                if (!hits || !hits.length) {
+                    var empty = document.createElement('div');
+                    empty.className = 'tmSubEmpty';
+                    empty.textContent = 'Keine OpenSubtitles-Treffer. KI-Erzeugung steht oben bereit.';
+                    list.appendChild(empty);
+                    return;
+                }
+                hits.forEach(function (hit) {
+                    var row = document.createElement('div');
+                    row.className = 'tmSubRow';
+                    var name = document.createElement('div');
+                    name.className = 'tmSubName';
+                    name.textContent = hit.name || 'OpenSubtitles';
+                    var meta = document.createElement('div');
+                    meta.className = 'tmSubMeta';
+                    meta.textContent = [hit.hashMatch ? 'Exakte Datei' : null, hit.comment, hit.downloads ? hit.downloads + '×' : null]
+                        .filter(Boolean).join(' · ');
+                    var dl = document.createElement('button');
+                    dl.type = 'button';
+                    dl.className = 'tmSubDl';
+                    dl.textContent = 'Übernehmen';
+                    dl.addEventListener('click', function () {
+                        dl.disabled = true;
+                        dl.textContent = 'Lädt…';
+                        api().ajax({
+                            url: api().getUrl('TreasureMaps/Subtitles/Download', { itemId: item.Id, id: hit.id }),
+                            type: 'POST'
+                        }).then(function (res) {
+                            dl.textContent = res && res.ok ? 'Gespeichert' : 'Fehler';
+                            if (!res || !res.ok) {
+                                dl.disabled = false;
+                                hintEl.textContent = (res && res.message) || 'Download fehlgeschlagen.';
+                            }
+                        }, function () {
+                            dl.disabled = false;
+                            dl.textContent = 'Übernehmen';
+                        });
+                    });
+                    row.appendChild(name);
+                    row.appendChild(meta);
+                    row.appendChild(dl);
+                    list.appendChild(row);
+                });
+            }
+
+            function search() {
+                searchBtn.disabled = true;
+                quoteEl.textContent = 'Suche und Kostenschätzung…';
+                api().ajax({
+                    url: api().getUrl('TreasureMaps/Subtitles/Search', { itemId: item.Id, language: sel.value }),
+                    type: 'GET'
+                }).then(function (res) {
+                    searchBtn.disabled = false;
+                    if (!res || !res.ok) {
+                        quoteEl.textContent = (res && res.message) || 'Suche fehlgeschlagen.';
+                        renderHits([]);
+                        genBtn.disabled = true;
+                        return;
+                    }
+                    setQuote(res);
+                    renderHits(res.opensubtitles);
+                }, function () {
+                    searchBtn.disabled = false;
+                    quoteEl.textContent = 'Suche fehlgeschlagen.';
+                });
+            }
+
+            searchBtn.addEventListener('click', search);
+            sel.addEventListener('change', search);
+            genBtn.addEventListener('click', function () {
+                var q = lastQuote || {};
+                var line = q.summary || ('ca. ' + formatUsd(q.totalUsd));
+                if (!window.confirm('KI-Untertitel jetzt erzeugen?\n\n' + line + '\n\nDie Erstellung kann bei langen Filmen mehrere Minuten dauern.')) {
+                    return;
+                }
+                genBtn.disabled = true;
+                genBtn.textContent = 'Erzeugt…';
+                hintEl.textContent = 'Whisper läuft. Bitte das Fenster offen lassen.';
+                api().ajax({
+                    url: api().getUrl('TreasureMaps/Subtitles/Generate', { itemId: item.Id, language: sel.value, force: 'true' }),
+                    type: 'POST'
+                }).then(function (res) {
+                    if (res && res.ok) {
+                        genBtn.textContent = 'Fertig';
+                        hintEl.textContent = (res.alreadyExists ? 'Vorhandene Datei geladen. ' : '')
+                            + (res.sidecar ? 'Gespeichert: ' + res.sidecar : 'Untertitel gespeichert.');
+                    } else {
+                        genBtn.disabled = false;
+                        genBtn.textContent = 'KI erzeugen';
+                        hintEl.textContent = (res && res.message) || 'Erzeugung fehlgeschlagen.';
+                    }
+                }, function () {
+                    genBtn.disabled = false;
+                    genBtn.textContent = 'KI erzeugen';
+                    hintEl.textContent = 'Erzeugung fehlgeschlagen (Timeout bei sehr langen Filmen möglich).';
+                });
+            });
+
+            preferredSubLang(function (lang) {
+                if (lang && sel.querySelector('option[value="' + lang + '"]')) {
+                    sel.value = lang;
+                }
+                search();
+            });
+        });
+    }
+
+    function preferredSubLang(cb) {
+        api().getCurrentUser().then(function (user) {
+            var raw = (user && user.Configuration && user.Configuration.SubtitleLanguagePreference) || '';
+            var lang = String(raw).toLowerCase();
+            if (lang.indexOf('de') === 0 || lang.indexOf('ger') === 0) { cb('de'); return; }
+            if (lang.indexOf('en') === 0 || lang.indexOf('eng') === 0) { cb('en'); return; }
+            if (lang.length >= 2) { cb(lang.slice(0, 2)); return; }
+            cb('de');
+        }).catch(function () { cb('de'); });
     }
 
     function whenReady(selector, tries, callback) {

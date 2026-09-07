@@ -62,17 +62,29 @@ public class WebScriptTests
     }
 
     [Fact]
+    public void SubtitlePanel_QuotesCostBeforeGenerate()
+    {
+        var js = File.ReadAllText(ScriptPath());
+        Assert.Contains("#tmSubtitles", js, StringComparison.Ordinal);
+        Assert.Contains("enhanceSubtitles", js, StringComparison.Ordinal);
+        Assert.Contains("TreasureMaps/Subtitles/Search", js, StringComparison.Ordinal);
+        Assert.Contains("TreasureMaps/Subtitles/Generate", js, StringComparison.Ordinal);
+        Assert.Contains("window.confirm", js, StringComparison.Ordinal);
+        Assert.Contains("Kosten werden ermittelt", js, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ApplyScriptTag_InsertsThenUpgradesVersion()
     {
         var html = "<html><body>hi</body></html>";
         var first = WebScriptInjector.ApplyScriptTag(html);
         Assert.NotNull(first);
-        Assert.Contains("TreasureMaps/ClientScript?v=6", first, StringComparison.Ordinal);
+        Assert.Contains("TreasureMaps/ClientScript?v=7", first, StringComparison.Ordinal);
 
-        var stale = first!.Replace("ClientScript?v=6", "ClientScript?v=3", StringComparison.Ordinal);
+        var stale = first!.Replace("ClientScript?v=7", "ClientScript?v=3", StringComparison.Ordinal);
         var upgraded = WebScriptInjector.ApplyScriptTag(stale);
         Assert.NotNull(upgraded);
-        Assert.Contains("ClientScript?v=6", upgraded, StringComparison.Ordinal);
+        Assert.Contains("ClientScript?v=7", upgraded, StringComparison.Ordinal);
         Assert.Equal(1, CountOccurrences(upgraded!, "plugin=\"TreasureMaps\""));
     }
 

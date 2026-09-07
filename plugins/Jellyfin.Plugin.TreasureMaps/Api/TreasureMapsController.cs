@@ -5,13 +5,20 @@ using System.Linq;
 using System.Net.Mime;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Text;
 using Jellyfin.Data;
+using Jellyfin.Plugin.TreasureMaps.Languages;
 using Jellyfin.Plugin.TreasureMaps.ReleaseNaming;
 using Jellyfin.Plugin.TreasureMaps;
+using Jellyfin.Plugin.TreasureMaps.Subtitles;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.Channels;
 using MediaBrowser.Controller.Configuration;
+using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.Providers;
+using MediaBrowser.Controller.Subtitles;
 using MediaBrowser.Model.Branding;
 using MediaBrowser.Model.Configuration;
 using MediaBrowser.Model.Entities;
@@ -111,6 +118,308 @@ public class TreasureMapsController : ControllerBase
             return Ok(new { ok = false, message = ex.Message });
         }
     }
+
+    /// <summary>
+    /// Quotes AI subtitle creation for a library item. Does not start Whisper.
+    /// </summary>
+    /// <param name="itemId">The Jellyfin item id.</param>
+    /// <param name="language">The target language (ISO 639-1).</param>
+    /// <param name="ai">The AI subtitle service.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The cost quote.</returns>
+    [HttpGet("Subtitles/Quote")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> QuoteSubtitles(
+        [FromQuery] string itemId,
+        [FromQuery] string? language,
+        [FromServices] AiSubtitleService ai,
+        CancellationToken cancellationToken)
+    {
+        var (item, path, error) = ResolveVideo(itemId);
+        if (path is null)
+        {
+            return Ok(new { ok = false, message = error });
+        }
+
+        var lang = ResolveSubLanguage(language);
+        try
+        {
+            var quote = await ai.QuoteAsync(path, lang, item?.Name, item?.RunTimeTicks, cancellationToken).ConfigureAwait(false);
+            return Ok(QuotePayload(true, quote, path));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AI subtitle quote failed for {Item}", itemId);
+            return Ok(new { ok = false, message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Searches OpenSubtitles and returns an AI cost quote (generation is not started).
+    /// </summary>
+    /// <param name="itemId">The Jellyfin item id.</param>
+    /// <param name="language">The target language.</param>
+    /// <param name="ai">The AI subtitle service.</param>
+    /// <param name="openSubtitles">The OpenSubtitles provider.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>OpenSubtitles hits plus the AI quote.</returns>
+    [HttpGet("Subtitles/Search")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> SearchSubtitles(
+        [FromQuery] string itemId,
+        [FromQuery] string? language,
+        [FromServices] AiSubtitleService ai,
+        [FromServices] OpenSubtitlesProvider openSubtitles,
+        CancellationToken cancellationToken)
+    {
+        var (item, path, error) = ResolveVideo(itemId);
+        if (item is null || path is null)
+        {
+            return Ok(new { ok = false, message = error, opensubtitles = Array.Empty<object>() });
+        }
+
+        var lang = ResolveSubLanguage(language);
+        object? quotePayload = null;
+        if (AiSubtitleService.IsEnabled)
+        {
+            try
+            {
+                var quote = await ai.QuoteAsync(path, lang, item.Name, item.RunTimeTicks, cancellationToken).ConfigureAwait(false);
+                quotePayload = QuotePayload(true, quote, path);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "AI subtitle quote failed during search for {Item}", itemId);
+                quotePayload = new { ok = false, message = ex.Message };
+            }
+        }
+
+        var hits = Array.Empty<object>();
+        if (OpenSubtitlesClient.IsEnabled)
+        {
+            try
+            {
+                var request = BuildSubtitleRequest(item, path, lang);
+                var results = await openSubtitles.Search(request, cancellationToken).ConfigureAwait(false);
+                hits = results.Select(h => (object)new
+                {
+                    id = h.Id,
+                    name = h.Name,
+                    comment = h.Comment,
+                    downloads = h.DownloadCount,
+                    hashMatch = h.IsHashMatch == true,
+                    language = h.ThreeLetterISOLanguageName,
+                    hearingImpaired = h.HearingImpaired == true
+                }).ToArray();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "OpenSubtitles search via API failed for {Item}", itemId);
+            }
+        }
+
+        return Ok(new
+        {
+            ok = true,
+            language = lang,
+            path,
+            sidecar = SubtitleFiles.SidecarPath(path, lang),
+            alreadyExists = SubtitleFiles.TryRead(path, lang, out _),
+            aiEnabled = AiSubtitleService.IsEnabled,
+            quote = quotePayload,
+            opensubtitles = hits
+        });
+    }
+
+    /// <summary>
+    /// Downloads an OpenSubtitles hit next to the video as a sidecar.
+    /// </summary>
+    /// <param name="itemId">The Jellyfin item id.</param>
+    /// <param name="id">The provider id (<c>fileId|lang</c>).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The written sidecar path.</returns>
+    [HttpPost("Subtitles/Download")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> DownloadSubtitle(
+        [FromQuery] string itemId,
+        [FromQuery] string id,
+        CancellationToken cancellationToken)
+    {
+        var (_, path, error) = ResolveVideo(itemId);
+        if (path is null)
+        {
+            return Ok(new { ok = false, message = error });
+        }
+
+        if (!OpenSubtitlesProvider.TryParseId(id, out var fileId, out var language))
+        {
+            return Ok(new { ok = false, message = "Invalid OpenSubtitles id." });
+        }
+
+        try
+        {
+            var download = await _openSubtitles.RequestDownloadAsync(fileId, cancellationToken).ConfigureAwait(false);
+            if (download?.Link is null)
+            {
+                return Ok(new { ok = false, message = "OpenSubtitles did not return a download link (check your login/quota)." });
+            }
+
+            var bytes = await _openSubtitles.DownloadContentAsync(download.Link, cancellationToken).ConfigureAwait(false);
+            var text = Encoding.UTF8.GetString(bytes);
+            var sidecar = SubtitleFiles.Write(path, language, text);
+            return Ok(new { ok = true, sidecar, bytes = bytes.Length });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "OpenSubtitles download failed for {Item} / {Id}", itemId, id);
+            return Ok(new { ok = false, message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Creates AI subtitles after the client has shown the cost quote. Writes a sidecar next to the video.
+    /// </summary>
+    /// <param name="itemId">The Jellyfin item id.</param>
+    /// <param name="language">The target language.</param>
+    /// <param name="force">When true, regenerates even if a sidecar already exists.</param>
+    /// <param name="ai">The AI subtitle service.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The generation result.</returns>
+    [HttpPost("Subtitles/Generate")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> GenerateSubtitles(
+        [FromQuery] string itemId,
+        [FromQuery] string? language,
+        [FromQuery] bool force,
+        [FromServices] AiSubtitleService ai,
+        CancellationToken cancellationToken)
+    {
+        var (item, path, error) = ResolveVideo(itemId);
+        if (path is null)
+        {
+            return Ok(new { ok = false, message = error });
+        }
+
+        if (!AiSubtitleService.IsEnabled)
+        {
+            return Ok(new { ok = false, message = "Enable AI subtitles and set a Whisper or AI API key first." });
+        }
+
+        var lang = ResolveSubLanguage(language);
+        try
+        {
+            var quote = await ai.QuoteAsync(path, lang, item?.Name, item?.RunTimeTicks, cancellationToken).ConfigureAwait(false);
+            if (!force && quote.AlreadyExists)
+            {
+                return Ok(new
+                {
+                    ok = true,
+                    alreadyExists = true,
+                    summary = quote.Summary,
+                    totalUsd = 0m,
+                    sidecar = SubtitleFiles.SidecarPath(path, lang)
+                });
+            }
+
+            quote.AlreadyExists = false;
+            var srt = await ai.GenerateAsync(quote, cancellationToken).ConfigureAwait(false);
+            return Ok(new
+            {
+                ok = true,
+                alreadyExists = false,
+                summary = quote.Summary,
+                totalUsd = quote.TotalUsd,
+                sidecar = SubtitleFiles.SidecarPath(path, lang),
+                bytes = Encoding.UTF8.GetByteCount(srt)
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AI subtitle generation failed for {Item}", itemId);
+            return Ok(new { ok = false, message = ex.Message });
+        }
+    }
+
+    private (BaseItem? Item, string? Path, string Error) ResolveVideo(string? itemId)
+    {
+        if (!Guid.TryParse(itemId, out var id))
+        {
+            return (null, null, "itemId is invalid.");
+        }
+
+        var item = _libraryManager.GetItemById(id);
+        if (item is null)
+        {
+            return (null, null, "Item not found.");
+        }
+
+        var path = SubtitleFiles.ResolveMediaPath(item);
+        return path is null
+            ? (item, null, "No video file on disk yet. Download it first, then create subtitles.")
+            : (item, path, string.Empty);
+    }
+
+    private static string ResolveSubLanguage(string? language)
+    {
+        var normalized = LanguageMatcher.Normalize(language);
+        if (!string.IsNullOrEmpty(normalized))
+        {
+            return normalized;
+        }
+
+        var primary = LanguageMatcher.Normalize(Plugin.Instance?.Configuration.PrimaryLanguage);
+        return string.IsNullOrEmpty(primary) ? "de" : primary;
+    }
+
+    private static SubtitleSearchRequest BuildSubtitleRequest(BaseItem item, string path, string language)
+    {
+        var request = new SubtitleSearchRequest
+        {
+            MediaPath = path,
+            Name = item.Name,
+            Language = language,
+            TwoLetterISOLanguageName = language,
+            ProductionYear = item.ProductionYear,
+            RuntimeTicks = item.RunTimeTicks,
+            ContentType = item is Episode ? VideoContentType.Episode : VideoContentType.Movie
+        };
+
+        if (item.ProviderIds is not null)
+        {
+            foreach (var pair in item.ProviderIds)
+            {
+                request.ProviderIds[pair.Key] = pair.Value;
+            }
+        }
+
+        if (item is Episode episode)
+        {
+            request.SeriesName = episode.SeriesName;
+            request.ParentIndexNumber = episode.ParentIndexNumber;
+            request.IndexNumber = episode.IndexNumber;
+        }
+
+        return request;
+    }
+
+    private static object QuotePayload(bool ok, SubtitleQuote quote, string path)
+        => new
+        {
+            ok,
+            enabled = AiSubtitleService.IsEnabled,
+            language = quote.Language,
+            minutes = quote.Minutes,
+            seconds = quote.Seconds,
+            chunks = quote.Chunks,
+            whisperModel = quote.WhisperModel,
+            whisperUsd = quote.WhisperUsd,
+            translationUsd = quote.TranslationUsd,
+            totalUsd = quote.TotalUsd,
+            includesTranslation = quote.IncludesTranslation,
+            alreadyExists = quote.AlreadyExists,
+            summary = quote.Summary,
+            sidecar = SubtitleFiles.SidecarPath(path, quote.Language)
+        };
 
     /// <summary>
     /// Validates the configured Base URL and API key by calling the provider's user endpoint.

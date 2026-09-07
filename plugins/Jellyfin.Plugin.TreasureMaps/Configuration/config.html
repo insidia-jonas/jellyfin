@@ -136,6 +136,40 @@
                         <div id="osResult" class="fieldDescription" style="margin-top:.5em;"></div>
                     </div>
                     <div class="verticalSection">
+                        <h2>AI subtitles (Whisper)</h2>
+                        <div class="fieldDescription" style="margin-bottom:1em;">
+                            Adds a <strong>Treasure-Maps KI</strong> row to the native Subtitles → Search list (Fire TV / iOS / web).
+                            The row shows the <em>estimated cost before anything is billed</em>. Choosing it transcribes the file
+                            with Whisper and, for languages other than English, translates via your AI provider.
+                            Grok/Anthropic cannot run Whisper — set a Whisper key (OpenAI or Groq) below.
+                            Created files are saved next to the video as <code>{name}.{lang}.srt</code>.
+                        </div>
+                        <label class="checkboxContainer">
+                            <input is="emby-checkbox" type="checkbox" id="enableAiSubtitles" />
+                            <span>Enable AI subtitle creation (cost is always shown first).</span>
+                        </label>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="password" id="whisperApiKey" label="Whisper API key (optional)" autocomplete="new-password" />
+                            <div class="fieldDescription">Empty uses the AI API key above. Required when the AI provider is Grok or Anthropic.</div>
+                        </div>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="text" id="whisperBaseUrl" label="Whisper API base URL (optional)" />
+                            <div class="fieldDescription">OpenAI-compatible, e.g. <code>https://api.groq.com/openai/v1</code>. Empty uses OpenAI.</div>
+                        </div>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="text" id="whisperModel" label="Whisper model" />
+                            <div class="fieldDescription">Default <code>whisper-1</code>. Groq example: <code>whisper-large-v3</code>.</div>
+                        </div>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="number" id="whisperUsdPerMinute" min="0" max="1" step="0.001" label="Whisper USD per minute (quote)" />
+                            <div class="fieldDescription">Used only for the pre-start estimate. OpenAI Whisper is $0.006/min.</div>
+                        </div>
+                        <div class="inputContainer inputContainer-withDescription">
+                            <input is="emby-input" type="number" id="translationUsdPerMillionTokens" min="0" max="50" step="0.01" label="Translation USD per 1M tokens (quote)" />
+                            <div class="fieldDescription">Used only for the pre-start estimate when the target language is not English.</div>
+                        </div>
+                    </div>
+                    <div class="verticalSection">
                         <h2>Download (SABnzbd)</h2>
                         <label class="checkboxContainer">
                             <input is="emby-checkbox" type="checkbox" id="grabOnFavorite" />
@@ -229,6 +263,12 @@
                 config.OpenSubtitlesApiKey = document.querySelector('#openSubtitlesApiKey').value.trim();
                 config.OpenSubtitlesUsername = document.querySelector('#openSubtitlesUsername').value.trim();
                 config.OpenSubtitlesPassword = document.querySelector('#openSubtitlesPassword').value;
+                config.EnableAiSubtitles = document.querySelector('#enableAiSubtitles').checked;
+                config.WhisperApiKey = document.querySelector('#whisperApiKey').value.trim();
+                config.WhisperBaseUrl = document.querySelector('#whisperBaseUrl').value.trim();
+                config.WhisperModel = document.querySelector('#whisperModel').value.trim() || 'whisper-1';
+                config.WhisperUsdPerMinute = parseFloat(document.querySelector('#whisperUsdPerMinute').value) || 0.006;
+                config.TranslationUsdPerMillionTokens = parseFloat(document.querySelector('#translationUsdPerMillionTokens').value) || 0.15;
                 config.NzbDropFolder = document.querySelector('#nzbDropFolder').value;
                 config.SabnzbdUrl = document.querySelector('#sabnzbdUrl').value;
                 config.SabnzbdApiKey = document.querySelector('#sabnzbdApiKey').value;
@@ -265,6 +305,12 @@
                         document.querySelector('#openSubtitlesApiKey').value = config.OpenSubtitlesApiKey || '';
                         document.querySelector('#openSubtitlesUsername').value = config.OpenSubtitlesUsername || '';
                         document.querySelector('#openSubtitlesPassword').value = config.OpenSubtitlesPassword || '';
+                        document.querySelector('#enableAiSubtitles').checked = config.EnableAiSubtitles !== false;
+                        document.querySelector('#whisperApiKey').value = config.WhisperApiKey || '';
+                        document.querySelector('#whisperBaseUrl').value = config.WhisperBaseUrl || '';
+                        document.querySelector('#whisperModel').value = config.WhisperModel || 'whisper-1';
+                        document.querySelector('#whisperUsdPerMinute').value = config.WhisperUsdPerMinute || 0.006;
+                        document.querySelector('#translationUsdPerMillionTokens').value = config.TranslationUsdPerMillionTokens || 0.15;
                         document.querySelector('#nzbDropFolder').value = config.NzbDropFolder || '';
                         document.querySelector('#sabnzbdUrl').value = config.SabnzbdUrl || '';
                         document.querySelector('#sabnzbdApiKey').value = config.SabnzbdApiKey || '';

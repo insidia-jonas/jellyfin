@@ -61,72 +61,111 @@ public class OpenSubtitlesProvider : ISubtitleProvider, IHasOrder
         }
 
         var language = ResolveLanguage(request);
-        var isEpisode = request.ContentType == VideoContentType.Episode;
-
-        var parameters = new Dictionary<string, string?>
-        {
-            ["languages"] = language,
-            ["type"] = isEpisode ? "episode" : "movie"
-        };
-
-        // Best signal: exact file match via movie-hash.
-        var hash = MovieHasher.ComputeHash(request.MediaPath);
-        if (!string.IsNullOrEmpty(hash))
-        {
-            parameters["moviehash"] = hash;
-        }
-
-        if (request.ProviderIds.TryGetValue("Imdb", out var imdb) && !string.IsNullOrWhiteSpace(imdb))
-        {
-            parameters["imdb_id"] = imdb.TrimStart('t', 'T');
-        }
-
-        if (request.ProviderIds.TryGetValue("Tmdb", out var tmdb) && !string.IsNullOrWhiteSpace(tmdb))
-        {
-            parameters["tmdb_id"] = tmdb;
-        }
-
-        var queryText = isEpisode ? request.SeriesName : request.Name;
-        if (!string.IsNullOrWhiteSpace(queryText))
-        {
-            parameters["query"] = queryText;
-        }
-
-        if (isEpisode)
-        {
-            if (request.ParentIndexNumber.HasValue)
-            {
-                parameters["season_number"] = request.ParentIndexNumber.Value.ToString(CultureInfo.InvariantCulture);
-            }
-
-            if (request.IndexNumber.HasValue)
-            {
-                parameters["episode_number"] = request.IndexNumber.Value.ToString(CultureInfo.InvariantCulture);
-            }
-        }
-        else if (request.ProductionYear.HasValue)
-        {
-            parameters["year"] = request.ProductionYear.Value.ToString(CultureInfo.InvariantCulture);
-        }
 
         try
         {
-            var response = await _client.SearchAsync(parameters, cancellationToken).ConfigureAwait(false);
-            var results = (response?.Data ?? Enumerable.Empty<OsSubtitle>())
-                .Select(Map)
-                .Where(r => r is not null)
-                .Select(r => r!)
-                // Intelligent ranking: exact hash matches first, then most-downloaded.
+            var results = await SearchPassesAsync(request, language, cancellationToken).ConfigureAwait(false);
+            if (results.Count == 0 && !string.Equals(language, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                results = await SearchPassesAsync(request, "en", cancellationToken).ConfigureAwait(false);
+            }
+
+            return results
                 .OrderByDescending(r => r.IsHashMatch == true)
                 .ThenByDescending(r => r.DownloadCount ?? 0)
                 .ToList();
-            return results;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "OpenSubtitles search failed");
             return Enumerable.Empty<RemoteSubtitleInfo>();
         }
+    }
+
+    private async Task<List<RemoteSubtitleInfo>> SearchPassesAsync(
+        SubtitleSearchRequest request,
+        string language,
+        CancellationToken cancellationToken)
+    {
+        var seen = new HashSet<int>();
+        var merged = new List<RemoteSubtitleInfo>();
+
+        async Task AddAsync(Dictionary<string, string?> parameters)
+        {
+            parameters["languages"] = language;
+            var response = await _client.SearchAsync(parameters, cancellationToken).ConfigureAwait(false);
+            foreach (var mapped in (response?.Data ?? Enumerable.Empty<OsSubtitle>()).Select(Map))
+            {
+                if (mapped is null || !TryParseId(mapped.Id, out var fileId, out _))
+                {
+                    continue;
+                }
+
+                if (!seen.Add(fileId))
+                {
+                    continue;
+                }
+
+                merged.Add(mapped);
+            }
+        }
+
+        var isEpisode = request.ContentType == VideoContentType.Episode;
+        Dictionary<string, string?> Core()
+        {
+            var parameters = new Dictionary<string, string?>
+            {
+                ["type"] = isEpisode ? "episode" : "movie"
+            };
+            if (isEpisode)
+            {
+                if (request.ParentIndexNumber.HasValue)
+                {
+                    parameters["season_number"] = request.ParentIndexNumber.Value.ToString(CultureInfo.InvariantCulture);
+                }
+
+                if (request.IndexNumber.HasValue)
+                {
+                    parameters["episode_number"] = request.IndexNumber.Value.ToString(CultureInfo.InvariantCulture);
+                }
+            }
+            else if (request.ProductionYear.HasValue)
+            {
+                parameters["year"] = request.ProductionYear.Value.ToString(CultureInfo.InvariantCulture);
+            }
+
+            return parameters;
+        }
+
+        var hash = MovieHasher.ComputeHash(request.MediaPath);
+        if (!string.IsNullOrEmpty(hash))
+        {
+            var hashed = Core();
+            hashed["moviehash"] = hash;
+            await AddAsync(hashed).ConfigureAwait(false);
+        }
+
+        if (request.ProviderIds.TryGetValue("Imdb", out var imdb) && !string.IsNullOrWhiteSpace(imdb))
+        {
+            var byId = Core();
+            byId["imdb_id"] = imdb.TrimStart('t', 'T');
+            if (request.ProviderIds.TryGetValue("Tmdb", out var tmdb) && !string.IsNullOrWhiteSpace(tmdb))
+            {
+                byId["tmdb_id"] = tmdb;
+            }
+
+            await AddAsync(byId).ConfigureAwait(false);
+        }
+
+        var queryText = isEpisode ? request.SeriesName : request.Name;
+        if (!string.IsNullOrWhiteSpace(queryText))
+        {
+            var byQuery = Core();
+            byQuery["query"] = queryText;
+            await AddAsync(byQuery).ConfigureAwait(false);
+        }
+
+        return merged;
     }
 
     /// <inheritdoc />
@@ -163,7 +202,23 @@ public class OpenSubtitlesProvider : ISubtitleProvider, IHasOrder
 
         var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
         var primary = LanguageMatcher.Normalize(config.PrimaryLanguage);
-        return string.IsNullOrEmpty(primary) ? "en" : primary;
+        return string.IsNullOrEmpty(primary) ? "de" : primary;
+    }
+
+    /// <summary>
+    /// Maps a 2-letter (or already 3-letter) language code to ISO 639-2.
+    /// </summary>
+    /// <param name="two">The language code.</param>
+    /// <returns>The three-letter code.</returns>
+    public static string ToThreeLetter(string two)
+    {
+        if (string.IsNullOrWhiteSpace(two))
+        {
+            return "ger";
+        }
+
+        var key = two.Trim().ToLowerInvariant();
+        return _twoToThree.TryGetValue(key, out var three) ? three : key;
     }
 
     private static RemoteSubtitleInfo? Map(OsSubtitle sub)
@@ -176,13 +231,20 @@ public class OpenSubtitlesProvider : ISubtitleProvider, IHasOrder
         }
 
         var lang2 = (attr.Language ?? "en").ToLowerInvariant();
+        var release = string.IsNullOrWhiteSpace(attr.Release) ? file.FileName : attr.Release;
+        if (string.IsNullOrWhiteSpace(release))
+        {
+            release = "OpenSubtitles";
+        }
+
+        var extra = attr.DownloadCount > 0 ? " · " + attr.DownloadCount + "×" : string.Empty;
         return new RemoteSubtitleInfo
         {
             Id = EncodeId(file.FileId, lang2),
             ProviderName = "OpenSubtitles (Treasure-Maps)",
-            Name = string.IsNullOrWhiteSpace(attr.Release) ? file.FileName : attr.Release,
+            Name = release.Trim() + extra,
             Format = "srt",
-            ThreeLetterISOLanguageName = _twoToThree.TryGetValue(lang2, out var three) ? three : lang2,
+            ThreeLetterISOLanguageName = ToThreeLetter(lang2),
             DownloadCount = attr.DownloadCount,
             CommunityRating = (float)attr.Ratings,
             IsHashMatch = attr.MoviehashMatch,
@@ -191,12 +253,48 @@ public class OpenSubtitlesProvider : ISubtitleProvider, IHasOrder
             MachineTranslated = attr.MachineTranslated,
             Forced = attr.ForeignPartsOnly,
             DateCreated = DateTime.TryParse(attr.UploadDate, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out var d) ? d : null,
-            Comment = attr.MoviehashMatch ? "Exact file match" : null
+            Comment = CommentFor(attr, lang2)
         };
+    }
+
+    private static string? CommentFor(OsSubtitleAttributes attr, string lang2)
+    {
+        var bits = new List<string>();
+        if (attr.MoviehashMatch)
+        {
+            bits.Add("Exakte Datei");
+        }
+
+        if (attr.HearingImpaired)
+        {
+            bits.Add("Hörgeschädigt");
+        }
+
+        if (!string.IsNullOrWhiteSpace(lang2))
+        {
+            bits.Add(lang2.ToUpperInvariant());
+        }
+
+        return bits.Count == 0 ? null : string.Join(" · ", bits);
     }
 
     private static string EncodeId(int fileId, string language)
         => fileId.ToString(CultureInfo.InvariantCulture) + "|" + language;
+
+    /// <summary>
+    /// Parses an OpenSubtitles provider id (<c>fileId|lang</c>).
+    /// </summary>
+    /// <param name="id">The id.</param>
+    /// <param name="fileId">The file id.</param>
+    /// <param name="language">The language.</param>
+    /// <returns>True when the id is valid.</returns>
+    public static bool TryParseId(string? id, out int fileId, out string language)
+    {
+        var (parsedId, parsedLanguage) = DecodeId(id ?? string.Empty);
+        fileId = parsedId;
+        language = parsedLanguage;
+        return parsedId > 0;
+    }
 
     private static (int FileId, string Language) DecodeId(string id)
     {

@@ -21,8 +21,12 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<GrabService>();
         serviceCollection.AddSingleton<Xrel.XrelClient>();
         serviceCollection.AddSingleton<Subtitles.OpenSubtitlesClient>();
+        serviceCollection.AddSingleton<Subtitles.OpenSubtitlesProvider>();
+        serviceCollection.AddSingleton<Subtitles.AiSubtitleService>();
+        serviceCollection.AddSingleton<Subtitles.AiSubtitleProvider>();
         serviceCollection.AddSingleton<IChannel, TreasureMapsChannel>();
-        serviceCollection.AddSingleton<MediaBrowser.Controller.Subtitles.ISubtitleProvider, Subtitles.OpenSubtitlesProvider>();
+        serviceCollection.AddSingleton<MediaBrowser.Controller.Subtitles.ISubtitleProvider>(sp => sp.GetRequiredService<Subtitles.OpenSubtitlesProvider>());
+        serviceCollection.AddSingleton<MediaBrowser.Controller.Subtitles.ISubtitleProvider>(sp => sp.GetRequiredService<Subtitles.AiSubtitleProvider>());
         serviceCollection.AddHostedService<GrabOnFavoriteService>();
         serviceCollection.AddHostedService<WebScriptInjector>();
         serviceCollection.AddHostedService<PeopleImageService>();

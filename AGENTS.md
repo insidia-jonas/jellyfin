@@ -86,12 +86,24 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   open one of them. The plugin therefore prefixes item ids with a per-folder scope
   (`"movies|<guid>"`, `"latest|<guid>"`, …). Keep leaf item ids unique per folder.
 - OpenSubtitles: `OpenSubtitlesProvider` implements Jellyfin's `ISubtitleProvider` (registered in
-  `PluginServiceRegistrator`), so it appears in each item's native "Subtitles → Search". It matches
-  by OSDB **movie-hash** (exact file, computed by `MovieHasher` from the item's `MediaPath`) first,
-  then IMDb id / query, ranked by hash-match then download count. Search needs the OpenSubtitles API
-  key; downloading needs the account login. The REST <c>POST /login</c> wants the
-  **opensubtitles.com username, not the email** (email → HTTP 400). Config + "test" button on the
-  plugin config page.
+  `PluginServiceRegistrator`), so it appears in each item's native "Subtitles → Search". It searches
+  in passes (hash, then IMDb, then title+year) so a single over-constrained query does not hide
+  hits; if the preferred language is empty it also tries English. Ranked by hash-match then
+  download count. Search needs the OpenSubtitles API key; downloading needs the account login. The
+  REST <c>POST /login</c> wants the **opensubtitles.com username, not the email** (email → HTTP
+  400). Config + "test" button on the plugin config page.
+- AI subtitles: `AiSubtitleProvider` (`Treasure-Maps KI`, Order 2) adds **one** native search row
+  whose `Name` is the pre-start cost quote (`KI erzeugen · ca. 0.71 USD · …`). Search never bills.
+  Choosing the row (`GetSubtitles`) runs Whisper on 15-min audio slices, then optional LLM
+  translation when the target language is not English; English uses Whisper `/audio/translations`.
+  A sidecar `{name}.{lang}.srt` is written next to the video; if it already exists, GetSubtitles
+  loads it for 0 USD. Web: details panel `#tmSubtitles` (`GET TreasureMaps/Subtitles/Search`,
+  `POST …/Generate` after `window.confirm` of the quote, `POST …/Download` for OpenSubtitles).
+  Config: `EnableAiSubtitles`, `WhisperApiKey` (fallback `AiApiKey`), `WhisperBaseUrl`,
+  `WhisperModel`, quote rates `WhisperUsdPerMinute` (0.006) / `TranslationUsdPerMillionTokens`
+  (0.15). Grok/Anthropic cannot run Whisper — set a Whisper key (OpenAI/Groq). Long films can
+  take minutes; Fire TV `GetSubtitles` may time out even though the sidecar still finishes
+  writing.
 - Pi deployment: `scripts/pi/full-redeploy.sh` is the one-shot for a Raspberry Pi — it stops
   `jellyfin` / `jellyfin12`, deletes every known old Treasure-Maps plugin dir and channel cache,
   checks out `BRANCH` (default `cursor/set-up-dev-environment-0947`), publishes Jellyfin 12,

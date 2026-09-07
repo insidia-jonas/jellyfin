@@ -179,4 +179,38 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Gets or sets the OpenSubtitles API base URL. Defaults to the public REST API.
     /// </summary>
     public string OpenSubtitlesBaseUrl { get; set; } = "https://api.opensubtitles.com/api/v1";
+
+    /// <summary>
+    /// Gets or sets a value indicating whether AI subtitle creation (Whisper + optional translation) is enabled.
+    /// </summary>
+    public bool EnableAiSubtitles { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets an optional OpenAI-compatible Whisper base URL (for example Groq).
+    /// Empty uses OpenAI, or <see cref="AiBaseUrl"/> when that is set.
+    /// </summary>
+    public string WhisperBaseUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the Whisper model name.
+    /// </summary>
+    public string WhisperModel { get; set; } = "whisper-1";
+
+    /// <summary>
+    /// Gets or sets a dedicated Whisper API key. Empty falls back to <see cref="AiApiKey"/>.
+    /// Grok/Anthropic keys cannot call Whisper — set this (and optionally <see cref="WhisperBaseUrl"/>) separately.
+    /// </summary>
+    public string WhisperApiKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the estimated Whisper price per audio minute (OpenAI default is $0.006).
+    /// Shown in the pre-start cost quote.
+    /// </summary>
+    public decimal WhisperUsdPerMinute { get; set; } = 0.006m;
+
+    /// <summary>
+    /// Gets or sets the estimated chat-translation price per 1M tokens (in+out) when the target
+    /// language is not English.
+    /// </summary>
+    public decimal TranslationUsdPerMillionTokens { get; set; } = 0.15m;
 }
