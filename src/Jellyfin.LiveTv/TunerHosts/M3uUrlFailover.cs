@@ -11,6 +11,11 @@ namespace Jellyfin.LiveTv.TunerHosts;
 /// </summary>
 internal static class M3uUrlFailover
 {
+    /// <summary>
+    /// Number of consecutive confirmed hangs required before switching ingest servers.
+    /// </summary>
+    public const int ConfirmedHangsBeforeSwitch = 2;
+
     private static readonly char[] UrlSeparators = ['|', '\n', '\r'];
 
     /// <summary>
@@ -189,5 +194,68 @@ internal static class M3uUrlFailover
         }
 
         return TimeSpan.FromSeconds(seconds);
+    }
+
+    /// <summary>
+    /// Determines whether the 15-minute health check should change the active playlist URL.
+    /// Switches when the current ingest failed and another succeeded, or when another score is better.
+    /// </summary>
+    /// <param name="currentUrl">The URL currently selected.</param>
+    /// <param name="current">The probe result for the current URL, if any.</param>
+    /// <param name="best">The best probe result from this round.</param>
+    /// <returns><c>true</c> if the active URL should change.</returns>
+    public static bool ShouldSwitchActiveUrl(string? currentUrl, M3uPlaylistHealthResult? current, M3uPlaylistHealthResult best)
+    {
+        ArgumentNullException.ThrowIfNull(best);
+
+        if (!best.Success)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(currentUrl)
+            || string.Equals(currentUrl, best.Url, StringComparison.OrdinalIgnoreCase))
+        {
+            return !string.Equals(currentUrl, best.Url, StringComparison.OrdinalIgnoreCase) && best.Success;
+        }
+
+        // Current ingest failed or was not probed: switch on doubt.
+        if (current is null || !current.Success)
+        {
+            return true;
+        }
+
+        return best.Score > current.Score;
+    }
+
+    /// <summary>
+    /// Determines whether a live hang is certain enough to change ingest servers.
+    /// One idle timeout reconnects the same URL; a second consecutive hang switches.
+    /// </summary>
+    /// <param name="consecutiveConfirmedHangs">How many idle timeouts happened in a row.</param>
+    /// <returns><c>true</c> if the ingest URL should change.</returns>
+    public static bool ShouldSwitchAfterHang(int consecutiveConfirmedHangs)
+        => consecutiveConfirmedHangs >= ConfirmedHangsBeforeSwitch;
+
+    /// <summary>
+    /// Returns true when the media path is HLS rather than MPEG-TS.
+    /// </summary>
+    /// <param name="path">The stream or playlist path.</param>
+    /// <param name="container">Optional container hint.</param>
+    /// <returns><c>true</c> if the stream is HLS.</returns>
+    public static bool IsHls(string? path, string? container = null)
+    {
+        if (string.Equals(container, "hls", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        return path.Contains("m3u8", StringComparison.OrdinalIgnoreCase)
+               || path.Contains("/hls", StringComparison.OrdinalIgnoreCase);
     }
 }

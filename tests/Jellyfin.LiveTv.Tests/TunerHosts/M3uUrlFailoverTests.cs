@@ -58,4 +58,44 @@ public class M3uUrlFailoverTests
         Assert.Equal(TimeSpan.FromSeconds(10), M3uUrlFailover.GetHangTimeout(new TunerHostInfo { HangTimeoutSeconds = 0 }));
         Assert.Equal(TimeSpan.FromSeconds(12), M3uUrlFailover.GetHangTimeout(new TunerHostInfo { HangTimeoutSeconds = 12 }));
     }
+
+    [Fact]
+    public void ShouldSwitchActiveUrl_SwitchesWhenCurrentFailed()
+    {
+        var current = new M3uPlaylistHealthResult { Url = "http://a", Success = false, Score = -1 };
+        var best = new M3uPlaylistHealthResult { Url = "http://b", Success = true, Score = 1.5 };
+
+        Assert.True(M3uUrlFailover.ShouldSwitchActiveUrl("http://a", current, best));
+    }
+
+    [Fact]
+    public void ShouldSwitchActiveUrl_SwitchesWhenOtherScoreIsBetter()
+    {
+        var current = new M3uPlaylistHealthResult { Url = "http://a", Success = true, Score = 0.4 };
+        var best = new M3uPlaylistHealthResult { Url = "http://b", Success = true, Score = 1.2 };
+
+        Assert.True(M3uUrlFailover.ShouldSwitchActiveUrl("http://a", current, best));
+    }
+
+    [Fact]
+    public void ShouldSwitchActiveUrl_KeepsCurrentWhenItIsBest()
+    {
+        var current = new M3uPlaylistHealthResult { Url = "http://a", Success = true, Score = 2 };
+        Assert.False(M3uUrlFailover.ShouldSwitchActiveUrl("http://a", current, current));
+    }
+
+    [Fact]
+    public void ShouldSwitchAfterHang_RequiresTwoConfirmedHangs()
+    {
+        Assert.False(M3uUrlFailover.ShouldSwitchAfterHang(1));
+        Assert.True(M3uUrlFailover.ShouldSwitchAfterHang(2));
+    }
+
+    [Fact]
+    public void IsHls_DetectsPlaylistAndPath()
+    {
+        Assert.True(M3uUrlFailover.IsHls("http://s/live.m3u8"));
+        Assert.True(M3uUrlFailover.IsHls("http://s/stream", "hls"));
+        Assert.False(M3uUrlFailover.IsHls("http://s/iptv/token/12"));
+    }
 }

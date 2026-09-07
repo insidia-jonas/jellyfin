@@ -4,9 +4,11 @@
 using System;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.LiveTv.Configuration;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Net;
 using MediaBrowser.Controller;
@@ -24,6 +26,7 @@ namespace Jellyfin.LiveTv.TunerHosts
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IServerApplicationHost _appHost;
         private readonly TunerHostInfo _tunerHostInfo;
+        private readonly IConfigurationManager _configurationManager;
 
         public SharedHttpStream(
             MediaSourceInfo mediaSource,
@@ -40,6 +43,7 @@ namespace Jellyfin.LiveTv.TunerHosts
             _httpClientFactory = httpClientFactory;
             _appHost = appHost;
             _tunerHostInfo = tunerHostInfo;
+            _configurationManager = configurationManager;
             OriginalStreamId = originalStreamId;
         }
 
@@ -91,6 +95,7 @@ namespace Jellyfin.LiveTv.TunerHosts
                         await using (fileStream.ConfigureAwait(false))
                         {
                             var attempt = 0;
+                            var consecutiveHangs = 0;
                             var originalUrl = url;
                             var currentPlaylistUrl = M3uUrlFailover.GetPrimaryUrl(_tunerHostInfo);
                             var hangTimeout = M3uUrlFailover.GetHangTimeout(_tunerHostInfo);
@@ -118,7 +123,11 @@ namespace Jellyfin.LiveTv.TunerHosts
                                                 stream,
                                                 fileStream,
                                                 IODefaults.CopyToBufferSize,
-                                                () => Resolve(openTaskCompletionSource),
+                                                () =>
+                                                {
+                                                    consecutiveHangs = 0;
+                                                    Resolve(openTaskCompletionSource);
+                                                },
                                                 hangTimeout,
                                                 cancellationToken).ConfigureAwait(false);
                                         }
@@ -138,7 +147,14 @@ namespace Jellyfin.LiveTv.TunerHosts
                                 }
                                 catch (TimeoutException)
                                 {
-                                    Logger.LogWarning("Hang detected on {Url} after {Timeout}. Switching ingest server. Attempt {Attempt}", url, hangTimeout, attempt);
+                                    consecutiveHangs++;
+                                    Logger.LogWarning(
+                                        "Confirmed idle hang {HangCount}/{Required} on {Url} after {Timeout}. Attempt {Attempt}",
+                                        consecutiveHangs,
+                                        M3uUrlFailover.ConfirmedHangsBeforeSwitch,
+                                        url,
+                                        hangTimeout,
+                                        attempt);
                                 }
                                 catch (Exception ex)
                                 {
@@ -156,11 +172,17 @@ namespace Jellyfin.LiveTv.TunerHosts
                                     break;
                                 }
 
-                                if (candidates.Count > 1)
+                                if (M3uUrlFailover.ShouldSwitchAfterHang(consecutiveHangs) && candidates.Count > 1)
                                 {
-                                    currentPlaylistUrl = M3uUrlFailover.GetNextUrl(candidates, currentPlaylistUrl);
-                                    url = M3uUrlFailover.RewriteStreamUrl(originalUrl, currentPlaylistUrl);
-                                    Logger.LogInformation("Failing over live stream to {Url}", url);
+                                    var nextPlaylistUrl = M3uUrlFailover.GetNextUrl(candidates, currentPlaylistUrl);
+                                    if (!string.IsNullOrWhiteSpace(nextPlaylistUrl))
+                                    {
+                                        currentPlaylistUrl = nextPlaylistUrl;
+                                        url = M3uUrlFailover.RewriteStreamUrl(originalUrl, currentPlaylistUrl);
+                                        PersistActiveUrl(currentPlaylistUrl);
+                                        consecutiveHangs = 0;
+                                        Logger.LogInformation("Hang confirmed. Failing over live stream to {Url}", url);
+                                    }
                                 }
 
                                 var delayMs = Math.Min(1000 * attempt, 5000);
@@ -185,6 +207,34 @@ namespace Jellyfin.LiveTv.TunerHosts
                     await DeleteTempFiles(TempFilePath).ConfigureAwait(false);
                 },
                 CancellationToken.None);
+        }
+
+        private void PersistActiveUrl(string playlistUrl)
+        {
+            if (string.IsNullOrWhiteSpace(playlistUrl) || string.IsNullOrWhiteSpace(_tunerHostInfo.Id))
+            {
+                return;
+            }
+
+            _tunerHostInfo.ActiveUrl = playlistUrl;
+
+            try
+            {
+                var config = _configurationManager.GetLiveTvConfiguration();
+                var tuner = config.TunerHosts.FirstOrDefault(item =>
+                    string.Equals(item.Id, _tunerHostInfo.Id, StringComparison.OrdinalIgnoreCase));
+                if (tuner is null)
+                {
+                    return;
+                }
+
+                tuner.ActiveUrl = playlistUrl;
+                _configurationManager.SaveConfiguration("livetv", config);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Unable to persist M3U failover URL {Url}", playlistUrl);
+            }
         }
 
         private static void ApplyRequiredHeaders(HttpRequestMessage request, System.Collections.Generic.Dictionary<string, string> headers)

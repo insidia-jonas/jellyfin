@@ -30,9 +30,6 @@ namespace Jellyfin.LiveTv.TunerHosts
 {
     public class M3UTunerHost : BaseTunerHost, ITunerHost, IConfigurableTunerHost
     {
-        private static readonly string[] _mimeTypesCanShareHttpStream = ["video/MP2T"];
-        private static readonly string[] _extensionsCanShareHttpStream = [".ts", ".tsv", ".m2t"];
-
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IServerApplicationHost _appHost;
         private readonly INetworkManager _networkManager;
@@ -97,37 +94,13 @@ namespace Jellyfin.LiveTv.TunerHosts
 
             var mediaSource = sources[0];
 
-            if (tunerHost.AllowStreamSharing && mediaSource.Protocol == MediaProtocol.Http && !mediaSource.RequiresLooping)
+            // MPEG-TS IPTV must go through the HTTP proxy so hang detection can fail over ingest hosts.
+            // HLS playlists stay on ffmpeg, which already has HTTP reconnect flags.
+            if (mediaSource.Protocol == MediaProtocol.Http
+                && !mediaSource.RequiresLooping
+                && !M3uUrlFailover.IsHls(mediaSource.Path, mediaSource.Container))
             {
-                var extension = Path.GetExtension(new UriBuilder(mediaSource.Path).Path);
-
-                if (string.IsNullOrEmpty(extension))
-                {
-                    try
-                    {
-                        using var message = new HttpRequestMessage(HttpMethod.Head, mediaSource.Path);
-                        ApplyRequiredHeaders(message, mediaSource.RequiredHttpHeaders);
-                        using var response = await _httpClientFactory.CreateClient(NamedClient.Default)
-                            .SendAsync(message, cancellationToken)
-                            .ConfigureAwait(false);
-
-                        if (response.IsSuccessStatusCode)
-                        {
-                            if (_mimeTypesCanShareHttpStream.Contains(response.Content.Headers.ContentType?.MediaType, StringComparison.OrdinalIgnoreCase))
-                            {
-                                return new SharedHttpStream(mediaSource, tunerHost, streamId, FileSystem, _httpClientFactory, Logger, Config, _appHost, _streamHelper);
-                            }
-                        }
-                    }
-                    catch (Exception)
-                    {
-                        Logger.LogWarning("HEAD request to check MIME type failed, shared stream disabled");
-                    }
-                }
-                else if (_extensionsCanShareHttpStream.Contains(extension, StringComparison.OrdinalIgnoreCase))
-                {
-                    return new SharedHttpStream(mediaSource, tunerHost, streamId, FileSystem, _httpClientFactory, Logger, Config, _appHost, _streamHelper);
-                }
+                return new SharedHttpStream(mediaSource, tunerHost, streamId, FileSystem, _httpClientFactory, Logger, Config, _appHost, _streamHelper);
             }
 
             return new LiveStream(mediaSource, tunerHost, FileSystem, Logger, Config, _streamHelper);
@@ -249,24 +222,6 @@ namespace Jellyfin.LiveTv.TunerHosts
             if (string.IsNullOrWhiteSpace(info.EpgUrl) && !string.IsNullOrWhiteSpace(playlist.EpgUrl))
             {
                 info.EpgUrl = playlist.EpgUrl;
-            }
-        }
-
-        private static void ApplyRequiredHeaders(HttpRequestMessage request, IDictionary<string, string> headers)
-        {
-            if (headers is null)
-            {
-                return;
-            }
-
-            foreach (var header in headers)
-            {
-                if (string.IsNullOrWhiteSpace(header.Key) || string.IsNullOrWhiteSpace(header.Value))
-                {
-                    continue;
-                }
-
-                request.Headers.TryAddWithoutValidation(header.Key, header.Value);
             }
         }
 

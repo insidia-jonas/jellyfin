@@ -119,6 +119,9 @@ public class M3uPlaylistHealthScheduledTask : IScheduledTask, IConfigurableSched
         }
 
         M3uPlaylistHealthResult? best = null;
+        M3uPlaylistHealthResult? current = null;
+        var currentUrl = M3uUrlFailover.GetPrimaryUrl(tuner);
+
         foreach (var url in candidates)
         {
             var result = await _healthChecker.ProbeAsync(url, tuner, cancellationToken).ConfigureAwait(false);
@@ -130,20 +133,24 @@ public class M3uPlaylistHealthScheduledTask : IScheduledTask, IConfigurableSched
                 result.ElapsedMs,
                 result.BytesRead);
 
+            if (string.Equals(url, currentUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                current = result;
+            }
+
             if (best is null || result.Score > best.Score)
             {
                 best = result;
             }
         }
 
-        if (best is null || !best.Success)
+        if (best is null || !M3uUrlFailover.ShouldSwitchActiveUrl(currentUrl, current, best))
         {
-            _logger.LogWarning("No healthy M3U ingest URL found for tuner {TunerId}", tuner.Id);
-            return false;
-        }
+            if (best is null || !best.Success)
+            {
+                _logger.LogWarning("No healthy M3U ingest URL found for tuner {TunerId}", tuner.Id);
+            }
 
-        if (string.Equals(tuner.ActiveUrl, best.Url, StringComparison.OrdinalIgnoreCase))
-        {
             return false;
         }
 
