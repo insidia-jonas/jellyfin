@@ -25,6 +25,7 @@ class NativeShellAssetTest {
         assertTrue(script.contains("import(\"/native/ExoPlayerPlugin.js\")") || script.contains("import('/native/ExoPlayerPlugin.js')"))
         assertTrue(script.contains("HTMLVideoElement"))
         assertTrue(script.contains("localStorage.setItem(\"layout\", \"tv\")"))
+        assertTrue(script.contains("fitVisualViewport"))
         val plugin = locate("ExoPlayerPlugin.js")
         val pluginText = plugin.readText()
         assertTrue(pluginText.contains("export class ExoPlayerPlugin"))
