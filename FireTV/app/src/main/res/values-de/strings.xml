@@ -2,8 +2,10 @@
 <resources>
     <string name="app_name">Jellyfin</string>
     <string name="app_version_label">Version %1$s</string>
-    <string name="connect_title">Jellyfin auf Fire TV</string>
-    <string name="connect_subtitle">Volle Jellyfin-Oberfläche, für die Fernbedienung gemacht. Wiedergabe läuft über den Fire-TV-Player. Im Film: Hoch für Ton und Untertitel — inkl. Online-Suche. Downloads bleiben in der App.</string>
+    <string name="connect_kicker">Fire TV</string>
+    <string name="connect_title">Deine Mediathek. Kinoformat.</string>
+    <string name="connect_subtitle">Die volle Jellyfin-Oberfläche, für die Fernbedienung. Wiedergabe läuft über den Fire-TV-Player. Im Film: Hoch für Ton und Untertitel.</string>
+    <string name="connect_form_title">Server verbinden</string>
     <string name="server_url_hint">http://192.168.1.10:8096</string>
     <string name="server_url_label">Serveradresse</string>
     <string name="connect">Verbinden</string>
@@ -11,7 +13,7 @@
     <string name="discovering">Suche Server…</string>
     <string name="no_servers_found">Keine Server gefunden. Adresse mit der Fernbedienung eingeben.</string>
     <string name="ignore_ssl">Selbstsignierte Zertifikate erlauben</string>
-    <string name="connecting">Verbinde mit Jellyfin…</string>
+    <string name="connecting">Mediathek wird geöffnet…</string>
     <string name="connection_failed">Unter dieser Adresse wurde kein Jellyfin-Server erreicht.</string>
     <string name="invalid_url">Gültige Adresse eingeben, z. B. 192.168.1.10 oder https://jellyfin.example.com</string>
     <string name="found_servers">Server in diesem Netzwerk</string>
@@ -22,8 +24,8 @@
     <string name="download_failed">Download konnte nicht gestartet werden.</string>
     <string name="download_duplicate">Dieser Download läuft bereits.</string>
     <string name="downloads_unavailable">Die Download-App ist auf diesem Gerät nicht verfügbar.</string>
-    <string name="downloads_help">Dateien landen in Downloads/Jellyfin auf diesem Stick. Der Fortschritt steht hier — du musst Jellyfin nicht verlassen.</string>
-    <string name="downloads_empty">Noch keine Downloads. Am Titel Download wählen — es startet sofort.</string>
+    <string name="downloads_help">Dateien landen in Downloads/Jellyfin. Der Fortschritt bleibt hier.</string>
+    <string name="downloads_empty">Noch keine Downloads. Am Titel Download wählen.</string>
     <string name="download_status_running">Lädt · %1$d%%</string>
     <string name="download_status_pending">Wartet…</string>
     <string name="download_status_success">Fertig</string>
@@ -32,8 +34,9 @@
     <string name="close">Schließen</string>
     <string name="exit">Beenden</string>
     <string name="client_menu">Jellyfin</string>
-    <string name="client_menu_help">Im Film: Hoch öffnet Ton und Untertitel. Zurück schließt Dialoge, zweimal vom Home beendet.</string>
-    <string name="webview_error">Die Web-Oberfläche konnte nicht geladen werden. Prüfe, ob der Server läuft und dieser Fire TV Stick ihn erreicht.</string>
+    <string name="client_menu_help">Menü öffnet diese Leiste. Im Film: Hoch für Ton und Untertitel. Zweimal Zurück vom Home beendet.</string>
+    <string name="webview_error_title">Mediathek nicht erreichbar</string>
+    <string name="webview_error">Die Web-Oberfläche konnte nicht geladen werden. Prüfe, ob der Server läuft und dieser Fire TV ihn erreicht.</string>
     <string name="press_back_again">Nochmal Zurück zum Beenden</string>
     <string name="connected_as">Verbunden mit %1$s</string>
     <string name="preparing_playback">Wiedergabe startet…</string>
@@ -41,14 +44,15 @@
     <string name="playback_timeout">Der Server hat zu lange gebraucht, um den Titel zu starten. Netz prüfen und erneut versuchen.</string>
     <string name="webview_recovered">Die Oberfläche wurde nach einem Grafikfehler neu geladen.</string>
     <string name="player_hints">OK Pause · Links/Rechts springen · Hoch Ton &amp; Untertitel</string>
+    <string name="player_remaining">−%1$s</string>
     <string name="tracks_title">Ton &amp; Untertitel</string>
-    <string name="tracks_subtitle">Spur wählen oder online suchen und ohne den Film zu verlassen hinzufügen.</string>
+    <string name="tracks_subtitle">Spur wählen oder online suchen, ohne den Film zu verlassen.</string>
     <string name="track_audio">Ton</string>
     <string name="track_subtitles">Untertitel</string>
     <string name="subtitle_off">Aus</string>
     <string name="subtitle_search">Online suchen…</string>
     <string name="subtitle_search_title">Untertitel hinzufügen</string>
-    <string name="subtitle_search_pick_language">Sprache wählen. Braucht das Open-Subtitles-Plugin auf dem Server und Rechte für Untertitel.</string>
+    <string name="subtitle_search_pick_language">Sprache wählen. Braucht das Open-Subtitles-Plugin und Rechte für Untertitel.</string>
     <string name="subtitle_search_searching">Suche…</string>
     <string name="subtitle_search_empty">Keine Untertitel für diese Sprache gefunden.</string>
     <string name="subtitle_search_forbidden">Dieser Benutzer darf keine Untertitel hinzufügen. Auf dem Server: Open Subtitles installieren und Untertitel-Rechte geben.</string>

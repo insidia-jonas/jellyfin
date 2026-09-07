@@ -62,7 +62,11 @@ class ConnectActivity : AppCompatActivity() {
                 ServerReachability.findReachable(raw, binding.ignoreSsl.isChecked)
             }
             if (result == null) {
-                setBusy(false, getString(if (raw.isBlank()) R.string.invalid_url else R.string.connection_failed))
+                setBusy(
+                    false,
+                    getString(if (raw.isBlank()) R.string.invalid_url else R.string.connection_failed),
+                    R.color.error,
+                )
                 if (!auto) {
                     Toast.makeText(this@ConnectActivity, R.string.connection_failed, Toast.LENGTH_LONG).show()
                 }
@@ -72,7 +76,7 @@ class ConnectActivity : AppCompatActivity() {
             val (url, info) = result
             preferences.serverUrl = url
             preferences.ignoreSslErrors = binding.ignoreSsl.isChecked
-            setBusy(false, getString(R.string.connected_as, info.serverName ?: url))
+            setBusy(false, getString(R.string.connected_as, info.serverName ?: url), R.color.success)
             startActivity(
                 Intent(this@ConnectActivity, WebClientActivity::class.java).apply {
                     putExtra(WebClientActivity.EXTRA_SERVER_URL, url)
@@ -92,7 +96,11 @@ class ConnectActivity : AppCompatActivity() {
             val servers = withContext(Dispatchers.IO) {
                 runCatching { LocalServerDiscovery.findServers(this@ConnectActivity) }.getOrDefault(emptyList())
             }
-            setBusy(false, if (servers.isEmpty()) getString(R.string.no_servers_found) else null)
+            setBusy(
+                false,
+                if (servers.isEmpty()) getString(R.string.no_servers_found) else null,
+                if (servers.isEmpty()) R.color.error else R.color.text_secondary,
+            )
             renderServers(servers)
         }
     }
@@ -116,16 +124,13 @@ class ConnectActivity : AppCompatActivity() {
         }
     }
 
-    private fun setBusy(busy: Boolean, status: String?) {
+    private fun setBusy(busy: Boolean, status: String?, colorRes: Int = R.color.text_secondary) {
         binding.loading.isVisible = busy
         binding.connectButton.isEnabled = !busy
         binding.discoverButton.isEnabled = !busy
         binding.statusText.isVisible = !status.isNullOrBlank()
         binding.statusText.text = status
-        val error = status == getString(R.string.connection_failed) ||
-            status == getString(R.string.invalid_url) ||
-            status == getString(R.string.no_servers_found)
-        binding.statusText.setTextColor(getColor(if (error) R.color.error else R.color.text_secondary))
+        binding.statusText.setTextColor(getColor(colorRes))
     }
 
     companion object {

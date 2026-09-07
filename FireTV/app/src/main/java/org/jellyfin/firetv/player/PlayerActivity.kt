@@ -59,8 +59,17 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private var pausedBySystem: Boolean = false
     private val mainHandler = Handler(Looper.getMainLooper())
     private val hideOsd = Runnable {
-        if (!binding.trackPanel.isVisible && !binding.searchPanel.isVisible) {
+        if (!binding.trackPanel.isVisible && !binding.searchPanel.isVisible && player?.isPlaying == true) {
             binding.osd.isVisible = false
+        }
+    }
+    private val osdTick = object : Runnable {
+        override fun run() {
+            if (!binding.osd.isVisible) {
+                return
+            }
+            updateOsd()
+            mainHandler.postDelayed(this, 400)
         }
     }
     private val stallWatchdog = Runnable {
@@ -119,7 +128,8 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         originalPayload = payload
         resolveJob?.cancel()
         binding.loading.isVisible = true
-        binding.loadingTitle.setText(R.string.preparing_playback)
+        binding.loadingTitle.setText(R.string.app_name)
+        binding.loadingHint.setText(R.string.preparing_playback)
         resolveJob = lifecycleScope.launch {
             val resolved = withContext(Dispatchers.IO) {
                 runCatching {
@@ -174,6 +184,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         reporter = PlaybackReporter(resolved)
         binding.osdTitle.text = resolved.title
         binding.loadingTitle.text = resolved.title
+        binding.loadingHint.setText(R.string.preparing_playback)
         val headers = linkedMapOf<String, String>()
         if (resolved.accessToken.isNotBlank()) {
             headers["X-Emby-Token"] = resolved.accessToken
@@ -377,8 +388,13 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         binding.osd.isVisible = true
         updateOsd()
         mainHandler.removeCallbacks(hideOsd)
-        if (!binding.trackPanel.isVisible && !binding.searchPanel.isVisible) {
-            mainHandler.postDelayed(hideOsd, 4_000)
+        mainHandler.removeCallbacks(osdTick)
+        mainHandler.post(osdTick)
+        val keepOpen = binding.trackPanel.isVisible ||
+            binding.searchPanel.isVisible ||
+            player?.isPlaying == false
+        if (!keepOpen) {
+            mainHandler.postDelayed(hideOsd, 4_500)
         }
     }
 
@@ -388,7 +404,12 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         val position = exo.currentPosition.coerceAtLeast(0)
         binding.osdSeek.max = 1000
         binding.osdSeek.progress = if (duration > 0) ((position * 1000) / duration).toInt() else 0
-        binding.osdTime.text = "${formatTime(position)} / ${formatTime(duration)}"
+        binding.osdPlayState.text = if (exo.isPlaying) "▶" else "❚❚"
+        binding.osdTime.text = "${formatTime(position)}  /  ${formatTime(duration)}"
+        binding.osdRemaining.isVisible = duration > 0
+        if (duration > 0) {
+            binding.osdRemaining.text = getString(R.string.player_remaining, formatTime(duration - position))
+        }
         binding.osdMeta.text = trackSummary()
     }
 
@@ -465,10 +486,11 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
 
     private fun addHeading(parent: LinearLayout, text: String) {
         val view = TextView(this)
-        view.text = text
-        view.setTextColor(getColor(R.color.text_secondary))
-        view.textSize = 14f
-        view.setPadding(8, 18, 8, 4)
+        view.text = text.uppercase(Locale.getDefault())
+        view.setTextColor(getColor(R.color.accent_soft))
+        view.textSize = 13f
+        view.letterSpacing = 0.08f
+        view.setPadding(8, 20, 8, 6)
         parent.addView(view)
     }
 
@@ -728,6 +750,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private fun releasePlayer(clearPlayback: Boolean = true) {
         mainHandler.removeCallbacks(progressTick)
         mainHandler.removeCallbacks(hideOsd)
+        mainHandler.removeCallbacks(osdTick)
         mainHandler.removeCallbacks(stallWatchdog)
         binding.playerView.player = null
         player?.release()

@@ -74,12 +74,26 @@
         var style = document.createElement("style");
         style.id = "firetv-perf-css";
         style.textContent = [
-            "html,body{width:100%!important;height:100%!important;overflow:hidden!important;background:#0B0E14!important;}",
+            "html,body{width:100%!important;height:100%!important;overflow:hidden!important;background:#07090F!important;}",
+            ".layout-tv,.layout-tv body{cursor:none!important;}",
+            ".layout-tv ::-webkit-scrollbar{width:0!important;height:0!important;}",
             ".layout-tv .backdrop-container,.layout-tv .backgroundContainer,.layout-tv .backdropContainer{",
-            "  filter:none!important;transform:none!important;background:#0B0E14!important;",
+            "  filter:none!important;transform:none!important;background:#07090F!important;",
             "}",
             ".layout-tv .backdropContainer .backdropImage,.layout-tv .backgroundContainer .backdropImage{",
-            "  opacity:.16!important;filter:none!important;",
+            "  opacity:.18!important;filter:none!important;",
+            "}",
+            ".layout-tv .skinHeader{",
+            "  background-color:rgba(7,9,15,.92)!important;",
+            "  border-bottom:1px solid rgba(255,255,255,.06)!important;",
+            "}",
+            ".layout-tv .sectionTitle,.layout-tv .sectionTitleTextButton{",
+            "  letter-spacing:.02em!important;",
+            "}",
+            ".layout-tv .dialog{",
+            "  background:#151A24!important;",
+            "  border-radius:16px!important;",
+            "  box-shadow:0 24px 80px rgba(0,0,0,.55)!important;",
             "}",
             "video,audio[controls]{display:none!important;width:0!important;height:0!important;}"
         ].join("");
@@ -177,7 +191,7 @@
             deviceId: "firetv-web",
             deviceName: "Fire TV",
             appName: "Jellyfin Fire TV",
-            appVersion: "1.3.3"
+            appVersion: "1.4.0"
         };
     }
 

@@ -11,8 +11,8 @@ android {
         applicationId = "org.jellyfin.firetvweb"
         minSdk = 25
         targetSdk = 34
-        versionCode = 8
-        versionName = "1.3.3"
+        versionCode = 9
+        versionName = "1.4.0"
     }
 
     buildTypes {

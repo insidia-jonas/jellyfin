@@ -71,6 +71,7 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
         hideSystemBars()
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
+        binding.menuVersion.text = getString(R.string.app_version_label, BuildConfig.VERSION_NAME)
         binding.retryButton.setOnClickListener { loadWebClient() }
         binding.errorChangeServerButton.setOnClickListener { openServerSelection() }
         binding.menuReload.setOnClickListener {
@@ -279,6 +280,16 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
                 DownloadIndex.Row.Status.SUCCESS -> getString(R.string.download_status_success)
                 DownloadIndex.Row.Status.FAILED -> getString(R.string.download_status_failed)
             }
+            item.downloadStatus.setTextColor(
+                getColor(
+                    when (row.status) {
+                        DownloadIndex.Row.Status.SUCCESS -> R.color.success
+                        DownloadIndex.Row.Status.FAILED -> R.color.error
+                        DownloadIndex.Row.Status.RUNNING -> R.color.accent_soft
+                        else -> R.color.text_secondary
+                    },
+                ),
+            )
             item.downloadProgress.isIndeterminate = row.progressPercent < 0 && row.status == DownloadIndex.Row.Status.RUNNING
             item.downloadProgress.progress = row.progressPercent.coerceAtLeast(0)
             binding.downloadsList.addView(item.root)
