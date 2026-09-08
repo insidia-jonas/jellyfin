@@ -105,11 +105,16 @@ confirm() {
 
 stop_unit() {
     local unit="$1"
+    local disable="${2:-0}"
     if systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "$unit.service" \
         || systemctl is-active --quiet "$unit" 2>/dev/null; then
         log "Stoppe $unit"
         run_cmd sudo systemctl stop "$unit" || true
-        run_cmd sudo systemctl disable "$unit" || true
+        # Never disable jellyfin12 here. A crash mid-deploy would leave the Pi
+        # with a built server that does not come back after reboot.
+        if [ "$disable" -eq 1 ]; then
+            run_cmd sudo systemctl disable "$unit" || true
+        fi
     fi
 }
 
@@ -162,8 +167,8 @@ log "1/8  Alten Server stoppen"
 if [ -n "${SKIP_STOP:-}" ]; then
     warn "SKIP_STOP gesetzt — lasse laufende Prozesse unangetastet"
 else
-    stop_unit "$SERVICE_NAME"
-    stop_unit jellyfin
+    stop_unit "$SERVICE_NAME" 0
+    stop_unit jellyfin 1
     kill_jellyfin_pids
     if [ "$DRY_RUN" -eq 0 ]; then
         sleep 1
