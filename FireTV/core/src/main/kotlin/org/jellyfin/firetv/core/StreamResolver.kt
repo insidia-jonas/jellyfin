@@ -37,7 +37,11 @@ object StreamResolver {
         subtitleStreamIndex: Int? = null,
     ): ResolvedPlayback {
         val itemId = PlaybackPayload.itemId(payload) ?: error("No items to play")
-        val title = PlaybackPayload.itemName(payload)
+        val title = LiveTvNowNextText.channelTitle(
+            PlaybackPayload.itemName(payload),
+            PlaybackPayload.itemOriginalTitle(payload),
+            PlaybackPayload.itemOverview(payload),
+        ).ifBlank { PlaybackPayload.itemName(payload) }
         val server = PlaybackPayload.serverAddress(payload) ?: error("Missing server address")
         val token = PlaybackPayload.accessToken(payload)
         val userId = PlaybackPayload.userId(payload)
@@ -191,7 +195,7 @@ object StreamResolver {
             if (!openToken.isNullOrBlank()) {
                 append("\"OpenToken\":").append(jsonEscape(openToken)).append(',')
             }
-            append("\"DeviceProfile\":").append(DEVICE_PROFILE)
+            append("\"DeviceProfile\":").append(DeviceProfile.JSON)
             append('}')
         }
         val response = JellyfinHttp.post(
@@ -244,32 +248,8 @@ object StreamResolver {
             if (!mediaSourceId.isNullOrBlank()) {
                 append("\"MediaSourceId\":").append(jsonEscape(mediaSourceId)).append(',')
             }
-            append("\"DeviceProfile\":").append(DEVICE_PROFILE)
+            append("\"DeviceProfile\":").append(DeviceProfile.JSON)
             append('}')
         }
     }
-
-    private val DEVICE_PROFILE = """
-        {
-          "Name": "Jellyfin Fire TV ExoPlayer",
-          "MaxStreamingBitrate": 120000000,
-          "DirectPlayProfiles": [
-            {"Container":"mp4,m4v,mov,mkv,webm,ts,mpegts,avi","Type":"Video","VideoCodec":"h264,hevc,vp8,vp9,av1,mpeg2video,mpeg4","AudioCodec":"aac,mp3,ac3,eac3,flac,opus,pcm,dts"},
-            {"Container":"mp3,aac,flac,wav,ogg,opus,m4a","Type":"Audio"}
-          ],
-          "TranscodingProfiles": [
-            {"Container":"ts","Type":"Video","VideoCodec":"h264","AudioCodec":"aac,ac3","Protocol":"hls","Context":"Streaming","MaxAudioChannels":"6","MinSegments":"1","BreakOnNonKeyFrames":true},
-            {"Container":"mp3","Type":"Audio","AudioCodec":"mp3","Protocol":"http","Context":"Streaming"}
-          ],
-          "SubtitleProfiles": [
-            {"Format":"vtt","Method":"External"},
-            {"Format":"srt","Method":"External"},
-            {"Format":"subrip","Method":"External"},
-            {"Format":"ttml","Method":"External"},
-            {"Format":"ass","Method":"External"},
-            {"Format":"ssa","Method":"Encode"},
-            {"Format":"pgssub","Method":"Encode"}
-          ]
-        }
-    """.trimIndent()
 }

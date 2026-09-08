@@ -2,8 +2,10 @@
  * Fire TV cinema layer for hosted jellyfin-web.
  *
  * - Hides empty / failed home categories (including plugin "Failed to retrieve" rows)
+ * - Does not hide official Live TV / Guide sections (few cards, Guide buttons)
+ * - Restyles Live TV library-channel tiles as landscape now/next rows
  * - Smart-searches mixed libraries such as Treasure Maps (jellyfin-web skips those)
- * - Ranks hits like a TV catalogue and paints IMDb-style detail facts
+ * - Ranks SearchTerm results only — does not change 12.0 recursive-on-filter semantics
  *
  * Do not patch image element sources or ApiClient image URL helpers.
  * Do not add extra card outline rings.
@@ -177,6 +179,183 @@
         return hash.indexOf("details") !== -1 || hash.indexOf("item") !== -1;
     }
 
+    function isLiveTvPage() {
+        var hash = String(location.hash || "").toLowerCase();
+        return hash.indexOf("livetv") !== -1 ||
+            hash.indexOf("live-tv") !== -1 ||
+            !!$(".liveTvPage, .liveTvGuidePage, .channelsPage, .guidePage");
+    }
+
+    function pageHeading() {
+        var node = $(".libraryPage .pageTitle, .headerTitle, h1, .sectionTitle");
+        return node ? String(node.textContent || "").replace(/\s+/g, " ").trim() : "";
+    }
+
+    function isLiveTvContext() {
+        if (isLiveTvPage()) {
+            return true;
+        }
+        return /live[\s-]?tv|live tv/i.test(pageHeading());
+    }
+
+    function isLiveTvProtectedSection(section) {
+        if (isLiveTvPage()) {
+            return true;
+        }
+        var title = section.querySelector(".sectionTitle, .sectionTitleTextButton, h2");
+        var text = ((title && title.textContent) || "").replace(/\s+/g, " ").trim().toLowerCase();
+        if (/live[\s-]?tv|live tv|sender|channels|guide|epg|programm/.test(text)) {
+            return true;
+        }
+        return !!(section.querySelector(".btnGuide, .guideButton, a[href*='livetv'], .programCell, .guide-channelHeaderCell, .channelPrograms"));
+    }
+
+    function cardPlainText(card) {
+        return String(card.textContent || "").replace(/\s+/g, " ").trim();
+    }
+
+    function parseLabeled(text, labels) {
+        var lines = String(text || "").split(/\r?\n/);
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].trim();
+            for (var j = 0; j < labels.length; j++) {
+                if (line.toLowerCase().indexOf(labels[j].toLowerCase()) === 0) {
+                    var rest = line.slice(labels[j].length).trim();
+                    if (!rest) {
+                        continue;
+                    }
+                    var range = "";
+                    var match = rest.match(/\(([^)]+)\)\s*$/);
+                    if (match) {
+                        range = match[1];
+                        rest = rest.slice(0, match.index).trim();
+                    }
+                    return { title: rest, range: range };
+                }
+            }
+        }
+        return null;
+    }
+
+    function parseLiveTvCard(card) {
+        var firstNode = card.querySelector(".cardText-first, .cardText, .firetv-card-title");
+        var secondNode = card.querySelector(".cardText-secondary, .firetv-card-meta");
+        var first = ((firstNode && firstNode.textContent) || "").replace(/\s+/g, " ").trim();
+        var second = ((secondNode && secondNode.textContent) || "").trim();
+        var blob = cardPlainText(card);
+        var type = String(card.getAttribute("data-type") || "").toLowerCase();
+        var dotted = first.split("  ·  ");
+        var jetzt = parseLabeled(second, ["Jetzt:", "Now:"]) || parseLabeled(blob, ["Jetzt:", "Now:"]);
+        var danach = parseLabeled(second, ["Danach:", "Next:"]) || parseLabeled(blob, ["Danach:", "Next:"]);
+        var sender = blob.match(/\b(\d+)\s+Sender\b/i);
+        var folder = !!(sender && !jetzt);
+        var looksTyped = type === "tvchannel" || type === "livetvprogram" || type === "program";
+        var looksGuide = !!(jetzt || danach || folder);
+        var looksDotted = dotted.length === 2 && dotted[0] && dotted[1];
+        if (!looksTyped && !looksGuide && !looksDotted) {
+            return null;
+        }
+        var channel = dotted[0] || first;
+        var now = (jetzt && jetzt.title) || (folder ? "" : (dotted[1] || ""));
+        if (folder && dotted[1] && /^\d+$/.test(dotted[1].trim())) {
+            now = "";
+        }
+        return {
+            channel: channel,
+            now: now,
+            nowRange: (jetzt && jetzt.range) || "",
+            next: (danach && danach.title) || "",
+            nextRange: (danach && danach.range) || "",
+            folderLabel: sender ? sender[0] : "",
+            isFolder: folder
+        };
+    }
+
+    function looksLiveTvCard(card) {
+        var type = String(card.getAttribute("data-type") || "").toLowerCase();
+        if (type === "tvchannel" || type === "livetvprogram" || type === "program") {
+            return true;
+        }
+        var text = cardPlainText(card);
+        if (/Jetzt:|Danach:|\bNow:|\bNext:|\b\d+\s+Sender\b/i.test(text)) {
+            return true;
+        }
+        return isLiveTvContext() && text.indexOf("  ·  ") !== -1;
+    }
+
+    function germanUi() {
+        var lang = String((document.documentElement && document.documentElement.lang) || navigator.language || "").toLowerCase();
+        return lang.indexOf("de") === 0;
+    }
+
+    function paintLiveTvCard(card) {
+        var parsed = parseLiveTvCard(card);
+        if (!parsed) {
+            return;
+        }
+        var sig = [parsed.channel, parsed.now, parsed.next, parsed.folderLabel].join("|");
+        card.setAttribute("data-firetv-livetv", "1");
+        if (card.getAttribute("data-firetv-livetv-sig") === sig) {
+            return;
+        }
+        card.setAttribute("data-firetv-livetv-sig", sig);
+        var first = card.querySelector(".cardText-first") || card.querySelector(".cardText");
+        var second = card.querySelector(".cardText-secondary");
+        var host = first && first.parentNode;
+        if (first && parsed.channel) {
+            first.textContent = parsed.channel;
+        }
+        var nowLine = parsed.isFolder
+            ? parsed.folderLabel
+            : (parsed.now
+                ? ((germanUi() ? "Jetzt: " : "Now: ") + parsed.now + (parsed.nowRange ? " (" + parsed.nowRange + ")" : ""))
+                : "");
+        if (nowLine) {
+            if (!second && host) {
+                second = document.createElement("div");
+                second.className = "cardText cardText-secondary";
+                host.appendChild(second);
+            }
+            if (second) {
+                second.textContent = nowLine;
+            }
+        }
+        var nextHost = card.querySelector(".firetv-livetv-next");
+        if (parsed.next) {
+            if (!nextHost && host) {
+                nextHost = document.createElement("div");
+                nextHost.className = "cardText firetv-livetv-next";
+                host.appendChild(nextHost);
+            }
+            if (nextHost) {
+                nextHost.textContent = (germanUi() ? "Danach: " : "Next: ") + parsed.next +
+                    (parsed.nextRange ? " (" + parsed.nextRange + ")" : "");
+            }
+        } else if (nextHost) {
+            nextHost.textContent = "";
+        }
+    }
+
+    function restyleLiveTvCards() {
+        var cards = all(".card, .posterItem");
+        var marked = [];
+        cards.forEach(function (card) {
+            if (looksLiveTvCard(card)) {
+                paintLiveTvCard(card);
+                marked.push(card);
+            }
+        });
+        if (marked.length || isLiveTvContext()) {
+            return;
+        }
+        var dotted = cards.filter(function (card) {
+            return cardPlainText(card).indexOf("  ·  ") !== -1;
+        });
+        if (dotted.length >= 4 && dotted.length >= cards.length * 0.55) {
+            dotted.forEach(paintLiveTvCard);
+        }
+    }
+
     function hideFailedSections() {
         var roots = all(".homeSectionsContainer, .homePage, .modularHome, .sections, .searchResults, .searchResultsContainer");
         if (!roots.length && isHomePage()) {
@@ -185,6 +364,10 @@
         roots.forEach(function (root) {
             all(".verticalSection, .homeSection, .customHomeSection", root).forEach(function (section) {
                 if (section.id === "firetv-smart-results") {
+                    return;
+                }
+                if (isLiveTvProtectedSection(section)) {
+                    section.removeAttribute("data-firetv-hidden");
                     return;
                 }
                 var busy = section.querySelector(".busy, .loading, .progressring, .emby-progress, paper-spinner-lite");
@@ -204,6 +387,7 @@
                 }
             });
         });
+        restyleLiveTvCards();
     }
 
     function scheduleHide() {
@@ -236,6 +420,7 @@
             var preferred = currentParentId();
             var local = {};
             Object.keys(opts).forEach(function (key) { local[key] = opts[key]; });
+            // 12.0 already applies Recursive with filters + includeItemTypes; keep it on for search ranking only.
             local.Recursive = true;
             if (!local.ParentId && preferred && isSearchPage()) {
                 local.ParentId = preferred;
@@ -339,6 +524,9 @@
             var card = document.createElement("button");
             card.type = "button";
             card.className = "firetv-card card";
+            if (item.Type) {
+                card.setAttribute("data-type", item.Type);
+            }
             card.setAttribute("data-id", item.Id);
             card.tabIndex = 0;
             var poster = document.createElement("div");
@@ -349,10 +537,25 @@
             }
             var name = document.createElement("div");
             name.className = "firetv-card-title";
-            name.textContent = item.Name || "";
+            var live = !!(item.IsLiveStream || item.Type === "TvChannel" || item.Type === "LiveTvProgram" || item.Type === "Program" ||
+                (item.Overview && /Jetzt:|Danach:|\bNow:|\bNext:/.test(item.Overview)));
+            if (live) {
+                card.setAttribute("data-firetv-livetv", "1");
+            }
+            name.textContent = live
+                ? (item.OriginalTitle || String(item.Name || "").split("  ·  ")[0] || item.Name || "")
+                : (item.Name || "");
             var meta = document.createElement("div");
             meta.className = "firetv-card-meta";
             var bits = [];
+            if (live && item.Overview) {
+                var nowHit = String(item.Overview).split(/\r?\n/).filter(function (line) {
+                    return /Jetzt:|Now:/i.test(line);
+                })[0];
+                if (nowHit) {
+                    bits.push(nowHit.trim());
+                }
+            }
             if (item.ProductionYear) {
                 bits.push(String(item.ProductionYear));
             }
@@ -400,7 +603,7 @@
         var uid = client.getCurrentUserId && client.getCurrentUserId();
         var parent = currentParentId();
         var getItems = originalGetItems(client);
-        var fields = "PrimaryImageAspectRatio,ProductionYear,CommunityRating,OfficialRating,ProviderIds,Overview,Genres,RunTimeTicks,ParentId";
+        var fields = "PrimaryImageAspectRatio,ProductionYear,CommunityRating,OfficialRating,ProviderIds,Overview,OriginalTitle,Genres,RunTimeTicks,ParentId";
         var requests = [];
         queryVariants(query).forEach(function (term) {
             var base = {

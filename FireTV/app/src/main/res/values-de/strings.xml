@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">Jellyfin</string>
     <string name="app_version_label">Version %1$s</string>
-    <string name="connect_kicker">Fire TV · 2.0</string>
+    <string name="connect_kicker">Fire TV · 2.1</string>
     <string name="connect_title">Das Kino für deinen Server.</string>
     <string name="connect_subtitle">Die komplette Jellyfin-Web-UI, passend zu diesem Server. Filme, Serien, Musik und Live-TV laufen über den Fire-TV-Player. Hoch öffnet Ton und Untertitel. Menü öffnet die Client-Leiste.</string>
     <string name="connect_form_title">Server verbinden</string>

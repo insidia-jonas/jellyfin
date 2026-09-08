@@ -10,6 +10,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import org.jellyfin.firetv.core.DisplayScale
+import org.jellyfin.firetv.core.JellyfinHttp
 import org.jellyfin.firetv.core.NativeAsset
 import org.jellyfin.firetv.core.NativeShellInjector
 import org.jellyfin.firetv.core.ResourceKind
@@ -139,6 +140,9 @@ class JellyfinWebViewClient(
             if (!key.equals("Accept-Encoding", ignoreCase = true)) {
                 connection.setRequestProperty(key, value)
             }
+        }
+        if (request.requestHeaders.keys.none { it.equals("Accept-Language", ignoreCase = true) }) {
+            connection.setRequestProperty("Accept-Language", JellyfinHttp.acceptLanguage())
         }
         CookieManager.getInstance().getCookie(url)?.let { connection.setRequestProperty("Cookie", it) }
         if (ignoreSslErrors && connection is HttpsURLConnection) {

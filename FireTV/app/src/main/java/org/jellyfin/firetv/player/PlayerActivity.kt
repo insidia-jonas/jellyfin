@@ -39,6 +39,7 @@ import kotlinx.coroutines.withTimeout
 import org.jellyfin.firetv.R
 import org.jellyfin.firetv.core.JellyfinHttp
 import org.jellyfin.firetv.core.LivePlayback
+import org.jellyfin.firetv.core.LiveTvNowNextText
 import org.jellyfin.firetv.core.MediaTrack
 import org.jellyfin.firetv.core.MediaTracks
 import org.jellyfin.firetv.core.PlaybackPayload
@@ -205,10 +206,11 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         releasePlayer(clearPlayback = false)
         playback = resolved
         reporter = PlaybackReporter(resolved, ignoreSsl)
-        binding.osdTitle.text = resolved.title
+        binding.osdTitle.text = liveChannelTitle() ?: resolved.title
         binding.loadingTitle.text = resolved.title
         binding.loadingHint.setText(R.string.preparing_playback)
         val headers = linkedMapOf<String, String>()
+        headers["Accept-Language"] = JellyfinHttp.acceptLanguage()
         if (resolved.accessToken.isNotBlank()) {
             headers["X-Emby-Token"] = resolved.accessToken
             headers["Authorization"] = JellyfinHttp.authorization(
@@ -522,7 +524,29 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             }
             binding.osdHints.setText(R.string.player_hints)
         }
-        binding.osdMeta.text = trackSummary()
+        binding.osdMeta.text = listOfNotNull(liveGuideLine(), trackSummary())
+            .filter { it.isNotBlank() }
+            .joinToString("  ·  ")
+    }
+
+    private fun liveGuide(): LiveTvNowNextText.Guide? {
+        val payload = originalPayload ?: return null
+        if (playback?.isLive != true && !LivePlayback.isLivePayload(payload)) {
+            return null
+        }
+        return LiveTvNowNextText.parse(
+            PlaybackPayload.itemName(payload),
+            PlaybackPayload.itemOriginalTitle(payload),
+            PlaybackPayload.itemOverview(payload),
+        )
+    }
+
+    private fun liveChannelTitle(): String? {
+        return liveGuide()?.channelName?.takeIf { it.isNotBlank() }
+    }
+
+    private fun liveGuideLine(): String? {
+        return liveGuide()?.nowLine()
     }
 
     private fun trackSummary(): String {

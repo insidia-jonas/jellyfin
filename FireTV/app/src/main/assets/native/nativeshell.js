@@ -215,7 +215,7 @@
             deviceId: "firetv-web",
             deviceName: "Fire TV",
             appName: "Jellyfin Fire TV",
-            appVersion: "2.0.0"
+            appVersion: "2.1.0"
         };
     }
 
@@ -259,6 +259,16 @@
         ],
         TranscodingProfiles: [
             {
+                Container: "mp4",
+                Type: "Video",
+                VideoCodec: "h264,hevc,av1",
+                AudioCodec: "aac,ac3,eac3",
+                Protocol: "http",
+                Context: "Streaming",
+                MaxAudioChannels: "8",
+                CopyTimestamps: true
+            },
+            {
                 Container: "ts",
                 Type: "Video",
                 VideoCodec: "h264",
@@ -284,7 +294,14 @@
                 Codec: "h264",
                 Conditions: [
                     { Condition: "EqualsAny", Property: "VideoProfile", Value: "high|main|baseline|constrained baseline", IsRequired: false },
-                    { Condition: "LessThanEqual", Property: "VideoLevel", Value: "51", IsRequired: false }
+                    { Condition: "LessThanEqual", Property: "VideoLevel", Value: "51", IsRequired: false },
+                    { Condition: "EqualsAny", Property: "VideoRotation", Value: "0|90|180|270", IsRequired: false }
+                ]
+            },
+            {
+                Type: "Video",
+                Conditions: [
+                    { Condition: "EqualsAny", Property: "VideoRotation", Value: "0|90|180|270", IsRequired: false }
                 ]
             }
         ],
@@ -294,8 +311,12 @@
             { Format: "ttml", Method: "External" },
             { Format: "subrip", Method: "External" },
             { Format: "ass", Method: "External" },
+            { Format: "vobsub", Method: "External" },
+            { Format: "dvdsub", Method: "External" },
             { Format: "ssa", Method: "Encode" },
-            { Format: "pgssub", Method: "Encode" }
+            { Format: "pgssub", Method: "Encode" },
+            { Format: "vobsub", Method: "Encode" },
+            { Format: "dvdsub", Method: "Encode" }
         ],
         ResponseProfiles: []
     };
@@ -338,6 +359,8 @@
                     MediaType: item.MediaType,
                     IsLiveStream: !!(item.IsLiveStream || item.Type === "TvChannel" || item.Type === "Program"),
                     ChannelId: item.ChannelId,
+                    OriginalTitle: item.OriginalTitle,
+                    Overview: item.Overview,
                     RunTimeTicks: item.RunTimeTicks,
                     ProductionYear: item.ProductionYear
                 };

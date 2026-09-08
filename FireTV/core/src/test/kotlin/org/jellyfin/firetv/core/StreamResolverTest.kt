@@ -12,7 +12,9 @@ class StreamResolverTest {
     fun `resolves direct stream url from a local jellyfin-compatible server`() {
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         var capturedBody = ""
+        var capturedLanguage = ""
         server.createContext("/Items/movie-1/PlaybackInfo") { exchange ->
+            capturedLanguage = exchange.requestHeaders.getFirst("Accept-Language").orEmpty()
             capturedBody = exchange.requestBody.readBytes().toString(Charsets.UTF_8)
             val json = """
                 {
@@ -61,6 +63,10 @@ class StreamResolverTest {
             assertTrue(resolved.url.contains("api_key=secret-token"))
             assertTrue(capturedBody.contains("\"EnableDirectPlay\":true"))
             assertTrue(capturedBody.contains("DeviceProfile"))
+            assertTrue(capturedBody.contains("VideoRotation"))
+            assertTrue(capturedBody.contains("vobsub"))
+            assertTrue(capturedBody.contains("\"Container\":\"mp4\""))
+            assertTrue(capturedLanguage.isNotBlank())
             assertEquals(1, resolved.audioTracks.size)
             assertEquals(1, resolved.subtitleTracks.size)
             assertEquals("German", resolved.subtitleTracks[0].displayTitle)

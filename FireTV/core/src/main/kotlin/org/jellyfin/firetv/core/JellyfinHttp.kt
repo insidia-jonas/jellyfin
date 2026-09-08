@@ -4,6 +4,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
+import java.util.Locale
 import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLContext
@@ -89,6 +90,7 @@ object JellyfinHttp {
             connection.requestMethod = method
             connection.instanceFollowRedirects = true
             connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Accept-Language", acceptLanguage())
             connection.setRequestProperty(
                 "Authorization",
                 authorization(appName, deviceName, deviceId, appVersion, accessToken),
@@ -110,6 +112,15 @@ object JellyfinHttp {
             return Response(code, text)
         } finally {
             connection.disconnect()
+        }
+    }
+
+    fun acceptLanguage(locale: Locale = Locale.getDefault()): String {
+        val tag = locale.toLanguageTag().ifBlank { "en" }
+        val language = locale.language
+        return when {
+            language.isBlank() || tag.equals(language, ignoreCase = true) -> tag
+            else -> "$tag,$language;q=0.8,en;q=0.6"
         }
     }
 

@@ -270,6 +270,85 @@ html.layout-tv,
     background: #07090f !important;
 }
 
+.layout-tv .card[data-firetv-livetv="1"] .cardImageContainer,
+.layout-tv .card[data-firetv-livetv="1"] .cardImage,
+.layout-tv .card[data-firetv-livetv="1"] .coveredImage,
+.layout-tv .firetv-card[data-firetv-livetv="1"] .firetv-poster {
+    background-size: contain !important;
+    background-position: center !important;
+    background-color: #10141c !important;
+}
+
+.layout-tv .itemsContainer .card[data-firetv-livetv="1"],
+.layout-tv .verticalSection .card[data-firetv-livetv="1"] {
+    width: 100% !important;
+    max-width: 72em;
+    margin: 0 0 0.55em !important;
+}
+
+.layout-tv .emby-scroller .card[data-firetv-livetv="1"],
+.layout-tv .scrollX .card[data-firetv-livetv="1"] {
+    width: 22em !important;
+    max-width: 22em;
+    flex: 0 0 22em !important;
+    margin: 0 0.7em 0 0 !important;
+}
+
+.layout-tv .card[data-firetv-livetv="1"] .cardBox,
+.layout-tv .card[data-firetv-livetv="1"] .cardContent {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    width: 100%;
+    min-height: 5.4em;
+}
+
+.layout-tv .card[data-firetv-livetv="1"] .cardScalable {
+    flex: 0 0 5.6em;
+    width: 5.6em !important;
+    max-width: 5.6em;
+}
+
+.layout-tv .card[data-firetv-livetv="1"] .cardPadder,
+.layout-tv .card[data-firetv-livetv="1"] .cardPadder-portrait,
+.layout-tv .card[data-firetv-livetv="1"] .cardPadder-overflowPortrait,
+.layout-tv .card[data-firetv-livetv="1"] .cardPadder-backdrop,
+.layout-tv .card[data-firetv-livetv="1"] .cardPadder-square {
+    padding-bottom: 100% !important;
+}
+
+.layout-tv .card[data-firetv-livetv="1"] .cardFooter,
+.layout-tv .card[data-firetv-livetv="1"] .cardText {
+    text-align: left !important;
+    white-space: normal !important;
+}
+
+.layout-tv .card[data-firetv-livetv="1"] .cardText-first {
+    font-size: 1.05em !important;
+    font-weight: 700 !important;
+}
+
+.layout-tv .card[data-firetv-livetv="1"] .cardText-secondary,
+.layout-tv .card[data-firetv-livetv="1"] .firetv-livetv-next {
+    color: #9aa6b6 !important;
+    font-weight: 550 !important;
+    line-height: 1.3 !important;
+}
+
+.layout-tv .card[data-firetv-livetv="1"] .firetv-livetv-next {
+    font-size: 0.86em !important;
+    opacity: 0.92;
+}
+
+.layout-tv #firetv-smart-results .firetv-card[data-firetv-livetv="1"] {
+    flex: 0 0 16em;
+    width: 16em;
+}
+
+.layout-tv #firetv-smart-results .firetv-card[data-firetv-livetv="1"] .firetv-poster {
+    padding-bottom: 56%;
+}
+
 .layout-tv .headerTabs,
 .layout-tv .emby-tabs-slider {
     background: transparent !important;

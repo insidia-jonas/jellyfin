@@ -26,6 +26,18 @@ object PlaybackPayload {
         return name?.takeIf { it.isNotBlank() } ?: "Jellyfin"
     }
 
+    fun itemOriginalTitle(json: String): String? {
+        return jsonArrayObjects(json, "items").firstOrNull()?.let {
+            jsonStringField(it, "OriginalTitle") ?: jsonStringField(it, "originalTitle")
+        }?.takeIf { it.isNotBlank() }
+    }
+
+    fun itemOverview(json: String): String? {
+        return jsonArrayObjects(json, "items").firstOrNull()?.let {
+            jsonStringField(it, "Overview") ?: jsonStringField(it, "overview")
+        }?.takeIf { it.isNotBlank() }
+    }
+
     fun serverAddress(json: String): String? {
         return jsonStringField(json, "serverAddress")?.trim()?.trimEnd('/')
     }
@@ -78,6 +90,8 @@ object PlaybackPayload {
             (jsonStringField(item, "Id") ?: jsonStringField(item, "id")) == itemId
         }
         val name = match?.let { jsonStringField(it, "Name") ?: jsonStringField(it, "name") } ?: itemId
+        val original = match?.let { jsonStringField(it, "OriginalTitle") ?: jsonStringField(it, "originalTitle") }
+        val overview = match?.let { jsonStringField(it, "Overview") ?: jsonStringField(it, "overview") }
         val type = match?.let { jsonStringField(it, "Type") ?: jsonStringField(it, "type") }
         val media = match?.let { jsonStringField(it, "MediaType") ?: jsonStringField(it, "mediaType") }
         val live = match?.let { jsonBooleanField(it, "IsLiveStream") } == true
@@ -87,6 +101,12 @@ object PlaybackPayload {
             append("\"items\":[{")
             append("\"Id\":").append(jsonEscape(itemId)).append(',')
             append("\"Name\":").append(jsonEscape(name))
+            if (!original.isNullOrBlank()) {
+                append(",\"OriginalTitle\":").append(jsonEscape(original))
+            }
+            if (!overview.isNullOrBlank()) {
+                append(",\"Overview\":").append(jsonEscape(overview))
+            }
             if (!type.isNullOrBlank()) {
                 append(",\"Type\":").append(jsonEscape(type))
             }

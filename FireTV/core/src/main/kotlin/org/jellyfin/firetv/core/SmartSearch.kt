@@ -70,6 +70,7 @@ object SmartSearch {
         }
         when (candidate.type.lowercase()) {
             "movie", "series", "boxset" -> points += 10f
+            "tvchannel", "livetvprogram", "program" -> points += 8f
             "folder", "collectionfolder" -> points -= 6f
             "episode", "season" -> points -= 4f
         }

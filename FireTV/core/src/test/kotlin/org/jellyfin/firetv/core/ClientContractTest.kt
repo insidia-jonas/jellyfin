@@ -71,11 +71,40 @@ class PlaybackPayloadTest {
     }
 
     @Test
+    fun `reads original title and overview for live tiles`() {
+        val json = """{"items":[{"Id":"ch-1","Name":"Das Erste  ·  Tagesschau","OriginalTitle":"Das Erste","Overview":"Jetzt: Tagesschau (20:00–20:15)","IsLiveStream":true}]}"""
+        assertEquals("Das Erste", PlaybackPayload.itemOriginalTitle(json))
+        assertTrue(PlaybackPayload.itemOverview(json)!!.contains("Jetzt:"))
+        assertEquals("Das Erste", LiveTvNowNextText.channelTitle(
+            PlaybackPayload.itemName(json),
+            PlaybackPayload.itemOriginalTitle(json),
+            PlaybackPayload.itemOverview(json),
+        ))
+    }
+
+    @Test
     fun `falls back to ids when items were stripped`() {
         val json = """{"ids":["item-2"],"accessToken":"t","userId":"u"}"""
         assertEquals("item-2", PlaybackPayload.itemId(json))
         assertEquals("t", PlaybackPayload.accessToken(json))
         assertEquals("u", PlaybackPayload.userId(json))
+    }
+}
+
+class JellyfinHttpContractTest {
+    @Test
+    fun `sends modern media browser auth and a locale accept language`() {
+        val auth = JellyfinHttp.authorization("Jellyfin Fire TV", "Fire TV", "dev", "2.1.0", "tok")
+        assertTrue(auth.startsWith("MediaBrowser "))
+        assertTrue(auth.contains("Token=\"tok\""))
+        assertFalse(auth.contains("/emby"))
+        val german = JellyfinHttp.acceptLanguage(java.util.Locale.GERMANY)
+        assertTrue(german.startsWith("de"))
+        assertTrue(DeviceProfile.JSON.contains("VideoRotation"))
+        assertTrue(DeviceProfile.JSON.contains("vobsub"))
+        assertTrue(DeviceProfile.JSON.contains("\"Container\":\"mp4\""))
+        assertEquals("2.1.0", FireTvClient.APP_VERSION)
+        assertEquals("tv", FireTvClient.DEFAULT_LAYOUT)
     }
 }
 
