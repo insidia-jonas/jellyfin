@@ -241,7 +241,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                 }
                 if (playbackState == Player.STATE_ENDED) {
                     if (resolved.isLive) {
-                        retryLive(R.string.playback_failed)
+                        retryLive(getString(R.string.playback_failed))
                     } else {
                         stopAndClose()
                     }
