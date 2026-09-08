@@ -187,6 +187,11 @@ internal static class M3uUrlFailover
             return streamUrl;
         }
 
+        if (!ShouldRewriteStreamHost(stream, playlist))
+        {
+            return streamUrl;
+        }
+
         var builder = new UriBuilder(stream)
         {
             Scheme = playlist.Scheme,
@@ -195,6 +200,47 @@ internal static class M3uUrlFailover
         };
 
         return builder.Uri.AbsoluteUri;
+    }
+
+    /// <summary>
+    /// Returns false when <paramref name="target"/> is a listing playlist on another host
+    /// and the stream path is not the same style (CDN playlist + regional MPEG-TS).
+    /// </summary>
+    /// <param name="stream">The channel stream URL.</param>
+    /// <param name="target">The playlist or ingest URL whose host would be applied.</param>
+    /// <returns><c>true</c> if the stream host should be rewritten onto <paramref name="target"/>.</returns>
+    internal static bool ShouldRewriteStreamHost(Uri stream, Uri target)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentNullException.ThrowIfNull(target);
+
+        // Host-only ingest URLs (scheme + host, no playlist path) always rewrite.
+        // Do not use the authority alone: every http URL's host looks like an ingest endpoint.
+        if (IsIngestEndpoint(target.AbsoluteUri))
+        {
+            return true;
+        }
+
+        if (!LooksLikePlaylistPath(target.AbsolutePath)
+            || string.Equals(stream.Host, target.Host, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return string.Equals(
+            FirstPathSegment(stream.AbsolutePath),
+            FirstPathSegment(target.AbsolutePath),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LooksLikePlaylistPath(string path)
+        => path.Contains(".m3u", StringComparison.OrdinalIgnoreCase)
+           || path.Contains("/iptv/", StringComparison.OrdinalIgnoreCase);
+
+    private static string FirstPathSegment(string path)
+    {
+        var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length > 0 ? parts[0] : string.Empty;
     }
 
     /// <summary>

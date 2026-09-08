@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using MediaBrowser.Controller.Channels;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Model.Dto;
 
 namespace Jellyfin.LiveTv.Channels
@@ -16,14 +17,17 @@ namespace Jellyfin.LiveTv.Channels
     public class ChannelDynamicMediaSourceProvider : IMediaSourceProvider
     {
         private readonly ChannelManager _channelManager;
+        private readonly ITunerHostManager _tunerHostManager;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="ChannelDynamicMediaSourceProvider"/> class.
         /// </summary>
         /// <param name="channelManager">The channel manager.</param>
-        public ChannelDynamicMediaSourceProvider(IChannelManager channelManager)
+        /// <param name="tunerHostManager">The tuner host manager.</param>
+        public ChannelDynamicMediaSourceProvider(IChannelManager channelManager, ITunerHostManager tunerHostManager)
         {
             _channelManager = (ChannelManager)channelManager;
+            _tunerHostManager = tunerHostManager;
         }
 
         /// <inheritdoc />
@@ -37,7 +41,11 @@ namespace Jellyfin.LiveTv.Channels
         /// <inheritdoc />
         public Task<ILiveStream> OpenMediaSource(string openToken, List<ILiveStream> currentLiveStreams, CancellationToken cancellationToken)
         {
-            throw new NotImplementedException();
+            return LiveTvLibraryChannelPlayback.OpenAsync(
+                _tunerHostManager.TunerHosts,
+                openToken,
+                currentLiveStreams,
+                cancellationToken);
         }
     }
 }
