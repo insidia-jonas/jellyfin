@@ -315,6 +315,17 @@ public static class ReleaseGrouper
     private static string Prettify(string value)
         => value.Replace('.', ' ').Replace('_', ' ').Trim();
 
+    /// <summary>
+    /// True when two display titles collapse to the same letters/digits (year-stripped show names).
+    /// </summary>
+    /// <param name="left">The first title.</param>
+    /// <param name="right">The second title.</param>
+    /// <returns><c>true</c> when they match.</returns>
+    public static bool SameTitle(string? left, string? right)
+        => !string.IsNullOrWhiteSpace(left)
+           && !string.IsNullOrWhiteSpace(right)
+           && string.Equals(Normalize(left), Normalize(right), StringComparison.Ordinal);
+
     private static string Normalize(string title)
     {
         var sb = new StringBuilder(title.Length);

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -23,8 +24,9 @@ namespace Jellyfin.Plugin.TreasureMaps.Channels;
 /// Exposes a Treasure-Maps indexer as a browsable Jellyfin channel that mirrors the website:
 /// Trending (Movies / TV Shows), browse Movies / TV Shows (incl. the German "DE" rows),
 /// browse by genre and a Find A–Z search.
-/// Titles are shown once (one poster card per movie/show); opening a card lists the individual
-/// releases (qualities) behind it, which you grab by marking a release as a favorite (heart).
+/// Titles are shown once (one poster card per movie/show). Opening a movie card lists qualities.
+/// Opening a series card lists every episode (seasons first when needed); each episode then
+/// lists qualities. Grab by marking a release as a favorite (heart).
 /// </summary>
 public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSearch, IDisableMediaSourceDisplay, IRequiresMediaInfoCallback, IHasCacheKey, ISupportsDelete
 {
@@ -37,6 +39,8 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
     // (child posters) baked in by the folder image provider, making categories look like movies.
     private const string FolderIdPrefix = "c5-";
     private const string GroupPrefix = "GRP::";
+    private const string SeasonPrefix = "SEA::";
+    private const string EpisodePrefix = "EP::";
     private const string ReleasePrefix = "REL::";
     private const string GrabPrefix = "grab::";
     private const string Sep = "::";
@@ -105,7 +109,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
             var c = Config;
             return string.Join(
                 '|',
-                "36",
+                "37",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -196,10 +200,20 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
                 return GetDownloadDetail(folderId);
             }
 
-            // A title card (GRP) opens into the individual releases behind that movie/show.
+            // A title card (GRP) opens into episodes (series) or qualities (movie).
             if (folderId.StartsWith(GroupPrefix, StringComparison.Ordinal))
             {
                 return await OpenGroupAsync(folderId, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (folderId.StartsWith(SeasonPrefix, StringComparison.Ordinal))
+            {
+                return await OpenSeasonAsync(folderId, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (folderId.StartsWith(EpisodePrefix, StringComparison.Ordinal))
+            {
+                return await OpenEpisodeAsync(folderId, cancellationToken).ConfigureAwait(false);
             }
 
             // A release tile (REL) is a folder too; opening it shows a small grab detail rather
@@ -1188,8 +1202,10 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
                 DateCreated = group.Posted?.UtcDateTime
             };
 
-            var hint = count + (count == 1 ? " release available." : " releases available.")
-                + " Mark a release below as a favorite (\u2764) to download it.";
+            var hint = string.Equals(group.Kind, "tv", StringComparison.Ordinal)
+                ? "Open the cover for every episode. Mark a quality as a favorite (\u2764) to download it."
+                : count + (count == 1 ? " release available." : " releases available.")
+                    + " Mark a release below as a favorite (\u2764) to download it.";
             card.Overview = string.IsNullOrWhiteSpace(group.Plot) ? hint : group.Plot + "\n\n" + hint;
             if (!string.IsNullOrWhiteSpace(group.Tagline))
             {
@@ -1242,34 +1258,246 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
     }
 
     /// <summary>
-    /// Opens a title card: re-fetches the title's releases and lists them as grabbable tiles.
+    /// Opens a title card: movies list qualities; series list every episode (or seasons first).
     /// </summary>
     private async Task<ChannelItemResult> OpenGroupAsync(string groupId, CancellationToken cancellationToken)
     {
         // GRP::<scopeHash>::<marker>::<kind>::<key>::<title>::<cover>
-        var parts = groupId.Split(Sep);
-        if (parts.Length < 6)
+        if (!TryParseTitleCardId(groupId, GroupPrefix, out var kind, out var key, out var title, out var cover, out _)
+            || string.IsNullOrWhiteSpace(title))
         {
             return new ChannelItemResult();
         }
 
-        var kind = parts[3];
-        var key = Decode(parts[4]);
-        var title = Decode(parts[5]);
-        var cover = parts.Length >= 7 ? Decode(parts[6]) : string.Empty;
-
-        var response = string.Equals(kind, "tv", StringComparison.Ordinal)
-            ? await _client.SearchTvAsync(title, PageSize, cancellationToken).ConfigureAwait(false)
-            : await _client.SearchMoviesAsync(title, null, PageSize, cancellationToken).ConfigureAwait(false);
-
-        var all = response?.Items ?? Array.Empty<Release>();
-        var matching = all.Where(r => string.Equals(ReleaseGrouper.KeyOf(r), key, StringComparison.OrdinalIgnoreCase)).ToList();
-        if (matching.Count == 0)
+        if (!string.Equals(kind, "tv", StringComparison.Ordinal))
         {
-            matching = all.ToList();
+            var movies = await _client.SearchMoviesAsync(title, null, PageSize, cancellationToken).ConfigureAwait(false);
+            var movieRows = FilterShowReleases(movies?.Items, key, title);
+            return await BuildReleaseTilesAsync(movieRows, groupId, cover, title, cancellationToken).ConfigureAwait(false);
         }
 
-        return await BuildReleaseTilesAsync(matching, groupId, cover, title, cancellationToken).ConfigureAwait(false);
+        var matching = await FetchShowReleasesAsync(title, key, cancellationToken).ConfigureAwait(false);
+        var bundles = SeriesBrowse.GroupEpisodes(matching);
+        return SeriesBrowse.LayoutFor(bundles) switch
+        {
+            SeriesCoverLayout.Seasons => Result(BuildSeasonFolders(bundles, groupId, kind, key, title, cover)),
+            SeriesCoverLayout.Episodes => Result(BuildEpisodeCards(bundles, groupId, kind, key, title, cover)),
+            _ => await BuildReleaseTilesAsync(matching, groupId, cover, title, cancellationToken).ConfigureAwait(false)
+        };
+    }
+
+    /// <summary>
+    /// Opens a season folder: episode cards, or qualities when the season is a single pack.
+    /// </summary>
+    private async Task<ChannelItemResult> OpenSeasonAsync(string seasonId, CancellationToken cancellationToken)
+    {
+        // SEA::<scopeHash>::<marker>::<kind>::<key>::<title>::<cover>::<season>
+        if (!TryParseTitleCardId(seasonId, SeasonPrefix, out var kind, out var key, out var title, out var cover, out var extra)
+            || !int.TryParse(extra, NumberStyles.Integer, CultureInfo.InvariantCulture, out var season))
+        {
+            return new ChannelItemResult();
+        }
+
+        var matching = await FetchShowReleasesAsync(title, key, cancellationToken).ConfigureAwait(false);
+        var bundles = SeriesBrowse.ForSeason(SeriesBrowse.GroupEpisodes(matching), season);
+        if (bundles.Count <= 1)
+        {
+            var releases = bundles.Count == 1 ? bundles[0].Releases : matching;
+            return await BuildReleaseTilesAsync(releases, seasonId, cover, title, cancellationToken).ConfigureAwait(false);
+        }
+
+        return Result(BuildEpisodeCards(bundles, seasonId, kind, key, title, cover));
+    }
+
+    /// <summary>
+    /// Opens an episode card: the quality tiles for that Folge.
+    /// </summary>
+    private async Task<ChannelItemResult> OpenEpisodeAsync(string episodeId, CancellationToken cancellationToken)
+    {
+        // EP::<scopeHash>::<marker>::<kind>::<key>::<title>::<cover>::<epkey>
+        if (!TryParseTitleCardId(episodeId, EpisodePrefix, out _, out var key, out var title, out var cover, out var episodeKey)
+            || string.IsNullOrWhiteSpace(episodeKey))
+        {
+            return new ChannelItemResult();
+        }
+
+        var matching = await FetchShowReleasesAsync(title, key, cancellationToken).ConfigureAwait(false);
+        var releases = SeriesBrowse.ReleasesFor(SeriesBrowse.GroupEpisodes(matching), episodeKey);
+        if (releases.Count == 0)
+        {
+            releases = matching;
+        }
+
+        return await BuildReleaseTilesAsync(releases, episodeId, cover, title, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<IReadOnlyList<Release>> FetchShowReleasesAsync(string title, string key, CancellationToken cancellationToken)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var matching = new List<Release>();
+
+        void Absorb(IEnumerable<Release>? rows)
+        {
+            foreach (var release in rows ?? Array.Empty<Release>())
+            {
+                if (release is null || string.IsNullOrWhiteSpace(release.Guid) || !seen.Add(release.Guid))
+                {
+                    continue;
+                }
+
+                if (SeriesBrowse.SameShow(release, key, title))
+                {
+                    matching.Add(release);
+                }
+            }
+        }
+
+        var queries = SeriesBrowse.SearchQueries(title);
+        for (var i = 0; i < queries.Count; i++)
+        {
+            var pages = i == 0 ? 6 : 4;
+            Absorb(await FetchPagesAsync("tv", queries[i], null, null, pages, cancellationToken).ConfigureAwait(false));
+        }
+
+        var seasons = SeriesBrowse.SeasonsOf(SeriesBrowse.GroupEpisodes(matching));
+        var seasonQueries = SeriesBrowse.SeasonQueries(title, seasons);
+        if (seasonQueries.Count > 0)
+        {
+            var extras = seasonQueries
+                .Select(q => FetchPageSafeAsync("tv", q, null, null, 0, cancellationToken))
+                .ToArray();
+            var pages = await Task.WhenAll(extras).ConfigureAwait(false);
+            foreach (var page in pages)
+            {
+                Absorb(page.Items);
+            }
+        }
+
+        if (matching.Count == 0)
+        {
+            throw new InvalidOperationException("Treasure-Maps returned no episodes for " + title + ".");
+        }
+
+        return matching;
+    }
+
+    private static List<Release> FilterShowReleases(IEnumerable<Release>? rows, string key, string title)
+    {
+        var matching = (rows ?? Array.Empty<Release>()).Where(r => SeriesBrowse.SameShow(r, key, title)).ToList();
+        return matching.Count > 0 ? matching : (rows ?? Array.Empty<Release>()).ToList();
+    }
+
+    private List<ChannelItemInfo> BuildSeasonFolders(
+        IReadOnlyList<EpisodeBundle> bundles,
+        string parentId,
+        string kind,
+        string key,
+        string title,
+        string cover)
+    {
+        var marker = ShortHash(DataVersion);
+        var scopeHash = ShortHash(parentId);
+        var items = new List<ChannelItemInfo>();
+        foreach (var season in SeriesBrowse.SeasonsOf(bundles))
+        {
+            var inSeason = SeriesBrowse.ForSeason(bundles, season);
+            var posted = inSeason.Select(b => b.Posted).Where(d => d.HasValue).Select(d => d!.Value).DefaultIfEmpty().Max();
+            var card = new ChannelItemInfo
+            {
+                Id = string.Join(Sep, SeasonPrefix.TrimEnd(':'), scopeHash, marker, kind, Encode(key), Encode(title), Encode(cover), Encode(season.ToString(CultureInfo.InvariantCulture))),
+                Name = SeriesBrowse.SeasonLabel(season, inSeason.Count),
+                OriginalTitle = title,
+                SeriesName = title,
+                SortName = "s" + season.ToString("00", CultureInfo.InvariantCulture),
+                Type = ChannelItemType.Folder,
+                FolderType = ChannelFolderType.Season,
+                ContentType = ChannelMediaContentType.TvExtra,
+                ImageUrl = string.IsNullOrWhiteSpace(cover) ? null : cover,
+                IndexNumber = season,
+                DateCreated = posted == default ? null : posted.UtcDateTime,
+                Overview = inSeason.Count == 1
+                    ? "1 episode in this season."
+                    : inSeason.Count.ToString(CultureInfo.InvariantCulture) + " episodes in this season."
+            };
+            items.Add(card);
+        }
+
+        var other = SeriesBrowse.ForSeason(bundles, null);
+        if (other.Count > 0)
+        {
+            items.AddRange(BuildEpisodeCards(other, parentId, kind, key, title, cover));
+        }
+
+        return items;
+    }
+
+    private List<ChannelItemInfo> BuildEpisodeCards(
+        IReadOnlyList<EpisodeBundle> bundles,
+        string parentId,
+        string kind,
+        string key,
+        string title,
+        string cover)
+    {
+        var marker = ShortHash(DataVersion);
+        var scopeHash = ShortHash(parentId);
+        var items = new List<ChannelItemInfo>(bundles.Count);
+        foreach (var bundle in bundles)
+        {
+            var card = new ChannelItemInfo
+            {
+                Id = string.Join(Sep, EpisodePrefix.TrimEnd(':'), scopeHash, marker, kind, Encode(key), Encode(title), Encode(cover), Encode(bundle.Slot.Key)),
+                Name = bundle.Slot.Label,
+                OriginalTitle = title,
+                SeriesName = title,
+                SortName = bundle.Slot.SortKey,
+                Type = ChannelItemType.Folder,
+                FolderType = ChannelFolderType.Container,
+                ContentType = ChannelMediaContentType.TvExtra,
+                ImageUrl = string.IsNullOrWhiteSpace(cover) ? null : cover,
+                IndexNumber = bundle.Slot.Episode,
+                ParentIndexNumber = bundle.Slot.Season,
+                DateCreated = bundle.Posted?.UtcDateTime,
+                Overview = SeriesBrowse.EpisodeOverview(bundle.Releases.Count)
+            };
+
+            var best = ReleaseGrouper.PickBestRelease(bundle.Releases);
+            if (best is not null && !string.IsNullOrWhiteSpace(best.Guid))
+            {
+                card.ProviderIds["TreasureMaps"] = best.Guid;
+                card.ProviderIds["TreasureMapsKind"] = "tv";
+                card.ProviderIds["TreasureMapsTitle"] = title;
+            }
+
+            card.Tags.Add(bundle.Releases.Count == 1 ? "1 release" : bundle.Releases.Count + " releases");
+            items.Add(card);
+        }
+
+        return items;
+    }
+
+    private static bool TryParseTitleCardId(
+        string folderId,
+        string prefix,
+        out string kind,
+        out string key,
+        out string title,
+        out string cover,
+        out string extra)
+    {
+        kind = key = title = cover = extra = string.Empty;
+        var parts = folderId.Split(Sep);
+        if (parts.Length < 6 || !folderId.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        kind = parts[3];
+        key = Decode(parts[4]);
+        title = Decode(parts[5]);
+        cover = parts.Length >= 7 ? Decode(parts[6]) : string.Empty;
+        extra = parts.Length >= 8 ? Decode(parts[7]) : string.Empty;
+        return true;
     }
 
     /// <summary>

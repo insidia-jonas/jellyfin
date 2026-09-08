@@ -419,6 +419,12 @@
             || /start download/i.test(name || '');
     }
 
+    function looksEpisodeOrSeason(item) {
+        if (!item) { return false; }
+        if (item.Type === 'Season') { return true; }
+        return /^(?:S\d{2}E\d{2}|Season\s+\d|Staffel\s+\d|Other releases)/i.test(item.Name || '');
+    }
+
     function isDownloadsFolder(item) {
         if (!item) { return false; }
         var name = item.Name || '';
@@ -459,6 +465,7 @@
     function pickReleases(items) {
         return items.filter(function (i) {
             if (!i || i.Type === 'Person') { return false; }
+            if (looksEpisodeOrSeason(i)) { return true; }
             if (i.ProviderIds && i.ProviderIds.TreasureMaps) { return true; }
             return i.Type === 'Folder' || i.Type === 'BoxSet' || looksQuality(i.Name);
         });
@@ -505,9 +512,15 @@
         host.className = 'verticalSection detailVerticalSection';
         var title = document.createElement('h2');
         title.className = 'sectionTitle';
-        title.textContent = 'Releases';
+        var episodeLike = releases.filter(looksEpisodeOrSeason);
+        var list = episodeLike.length ? episodeLike : releases;
+        title.textContent = episodeLike.length
+            ? (episodeLike.every(function (r) { return r.Type === 'Season' || /^Season\s+\d/i.test(r.Name || ''); }) ? 'Seasons' : 'Episodes')
+            : 'Releases';
         host.appendChild(title);
-        releases.forEach(function (release) { host.appendChild(buildRow(release, item.Name)); });
+        list.forEach(function (release) {
+            host.appendChild(episodeLike.length ? buildEpisodeRow(release) : buildRow(release, item.Name));
+        });
 
         var anchor = findChildrenHost(page)
             || page.querySelector('.detailPageSecondaryContainer')
@@ -572,6 +585,40 @@
                 target.parentNode && target.parentNode.insertBefore(sub, target.nextSibling);
             }
         });
+    }
+
+    function buildEpisodeRow(item) {
+        var row = document.createElement('div');
+        row.className = 'tmRelRow';
+        row.dataset.name = item.Name || '';
+
+        var name = document.createElement('div');
+        name.className = 'tmRelName';
+        name.textContent = item.Name || '';
+        name.title = item.Overview || item.Name || '';
+        name.style.cursor = 'pointer';
+        name.addEventListener('click', function () {
+            location.hash = '#/details?id=' + item.Id + '&serverId=' + api().serverId();
+        });
+
+        var meta = document.createElement('div');
+        meta.className = 'tmRelMeta';
+        var open = document.createElement('button');
+        open.type = 'button';
+        open.className = 'tmDl';
+        open.textContent = item.Type === 'Season' || /^Season\s+\d/i.test(item.Name || '') ? 'Open season' : 'Open episode';
+        open.addEventListener('click', function () {
+            location.hash = '#/details?id=' + item.Id + '&serverId=' + api().serverId();
+        });
+        var hint = document.createElement('div');
+        hint.className = 'tmRelStatus';
+        hint.textContent = item.Overview ? String(item.Overview).split('.')[0] : '';
+        meta.appendChild(hint);
+        meta.appendChild(open);
+
+        row.appendChild(name);
+        row.appendChild(meta);
+        return row;
     }
 
     function buildRow(release, movieTitle) {

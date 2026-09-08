@@ -188,7 +188,10 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   Sparse/no-match folders (letter, genre, For You resolve-miss, search:) return a **hint tile**
   instead of an empty list. For You is omitted from the root when AI is disabled (no dead tile).
   Title cards are filled by `MetadataCatalog` (optional OMDb key, else iTunes Search + picbit)
-  so Fire TV details pages get posters, plot, year, rating and cast. Live search fetches two
+  so Fire TV details pages get posters, plot, year, rating and cast. Opening a **series** cover
+  lists every Folge (`SeriesBrowse`: SxxExx / season packs, seasons first when needed, then
+  episode cards, then qualities). Movies still open straight to qualities. The indexer is paged
+  and also queried per season so early episodes are not buried under the newest NZBs. Live search fetches two
   pages of movie + TV and ranks with year/token scoring (`TreasureMapsSearch`). AI For You
   requests `ForYouCount` (default 24) and keeps up to 18 resolved titles.
 - The API client keeps a 5-minute in-memory response cache (1h for caps), which is what makes
