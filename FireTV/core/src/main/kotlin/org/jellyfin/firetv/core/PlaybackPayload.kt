@@ -33,4 +33,6 @@ object PlaybackPayload {
     fun accessToken(json: String): String = jsonStringField(json, "accessToken").orEmpty()
 
     fun userId(json: String): String = jsonStringField(json, "userId").orEmpty()
+
+    fun itemType(json: String): String? = LivePlayback.itemType(json)
 }

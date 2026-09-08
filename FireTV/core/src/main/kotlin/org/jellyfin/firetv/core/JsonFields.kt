@@ -40,6 +40,13 @@ internal fun jsonStringArray(json: String, key: String): List<String> {
         .toList()
 }
 
+internal fun jsonObjectField(json: String, key: String): String? {
+    val match = Regex("\"${Regex.escape(key)}\"\\s*:\\s*\\{").find(json) ?: return null
+    val open = match.range.last
+    val close = matchingBrace(json, open) ?: return null
+    return json.substring(open, close + 1)
+}
+
 internal fun jsonArrayObjects(json: String, key: String): List<String> {
     val match = Regex("\"${Regex.escape(key)}\"\\s*:\\s*\\[").find(json) ?: return emptyList()
     val end = findMatchingBracket(json, match.range.last) ?: return emptyList()

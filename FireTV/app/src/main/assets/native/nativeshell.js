@@ -215,7 +215,7 @@
             deviceId: "firetv-web",
             deviceName: "Fire TV",
             appName: "Jellyfin Fire TV",
-            appVersion: "1.5.0"
+            appVersion: "1.6.0"
         };
     }
 
@@ -235,7 +235,8 @@
         "externallinks",
         "filedownload",
         "downloadmanagement",
-        "htmlaudioautoplay"
+        "htmlaudioautoplay",
+        "livetv"
     ];
 
     var exoPlayerProfile = {
@@ -332,6 +333,8 @@
                     ServerId: item.ServerId,
                     Type: item.Type,
                     MediaType: item.MediaType,
+                    IsLiveStream: !!(item.IsLiveStream || item.Type === "TvChannel" || item.Type === "Program"),
+                    ChannelId: item.ChannelId,
                     RunTimeTicks: item.RunTimeTicks,
                     ProductionYear: item.ProductionYear
                 };
@@ -358,7 +361,8 @@
         }
     };
     FireTvExoPlayerPlugin.prototype.canPlayMediaType = function (mediaType) {
-        return String(mediaType || "").toLowerCase() === "video";
+        var kind = String(mediaType || "").toLowerCase();
+        return kind !== "audio" && kind !== "book" && kind !== "photo";
     };
     FireTvExoPlayerPlugin.prototype.canQueueMediaType = function (mediaType) {
         return this.canPlayMediaType(mediaType);

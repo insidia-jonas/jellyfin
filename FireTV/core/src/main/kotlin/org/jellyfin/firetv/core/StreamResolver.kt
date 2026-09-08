@@ -19,6 +19,9 @@ data class ResolvedPlayback(
     val subtitleTracks: List<MediaTrack> = emptyList(),
     val selectedAudioIndex: Int? = null,
     val selectedSubtitleIndex: Int? = null,
+    val isLive: Boolean = false,
+    val liveStreamId: String? = null,
+    val container: String? = null,
 )
 
 /**
@@ -58,13 +61,34 @@ object StreamResolver {
             deviceName = deviceName,
             appName = appName,
             appVersion = appVersion,
+            connectTimeoutMs = 15_000,
+            readTimeoutMs = 35_000,
         )
         require(response.code in 200..299) {
             "PlaybackInfo failed HTTP ${response.code} ${response.body.take(240)}"
         }
-        val sources = jsonArrayObjects(response.body, "MediaSources")
+        var sources = jsonArrayObjects(response.body, "MediaSources")
         require(sources.isNotEmpty()) { "Server returned no media sources" }
-        val source = pickSource(sources, mediaSourceId)
+        var source = pickSource(sources, mediaSourceId)
+        val playSessionId = jsonStringField(response.body, "PlaySessionId")
+        if (needsLiveOpen(source)) {
+            openLiveStream(
+                server = server,
+                itemId = itemId,
+                userId = userId,
+                token = token,
+                ignoreSslErrors = ignoreSslErrors,
+                deviceId = deviceId,
+                deviceName = deviceName,
+                appName = appName,
+                appVersion = appVersion,
+                mediaSourceId = jsonStringField(source, "Id") ?: mediaSourceId,
+                playSessionId = playSessionId,
+                openToken = jsonStringField(source, "OpenToken"),
+            )?.let { opened ->
+                source = opened
+            }
+        }
         val urls = MediaSourceUrls(
             transcodingUrl = jsonStringField(source, "TranscodingUrl"),
             directStreamUrl = jsonStringField(source, "DirectStreamUrl"),
@@ -105,7 +129,82 @@ object StreamResolver {
             subtitleTracks = MediaTracks.subtitles(tracks),
             selectedAudioIndex = defaultAudio,
             selectedSubtitleIndex = defaultSubtitle,
+            isLive = LivePlayback.isLive(payload, source),
+            liveStreamId = jsonStringField(source, "LiveStreamId"),
+            container = jsonStringField(source, "Container"),
         )
+    }
+
+    fun closeLiveStream(playback: ResolvedPlayback, ignoreSslErrors: Boolean) {
+        val liveStreamId = playback.liveStreamId?.ifBlank { null } ?: return
+        runCatching {
+            JellyfinHttp.post(
+                url = "${playback.serverAddress}/LiveStreams/Close?liveStreamId=$liveStreamId",
+                body = "{}",
+                accessToken = playback.accessToken,
+                ignoreSslErrors = ignoreSslErrors,
+                deviceId = playback.deviceId,
+                deviceName = playback.deviceName,
+                appName = playback.appName,
+                appVersion = playback.appVersion,
+            )
+        }
+    }
+
+    private fun needsLiveOpen(source: String): Boolean {
+        return jsonBooleanField(source, "RequiresOpening") == true &&
+            jsonStringField(source, "LiveStreamId").isNullOrBlank()
+    }
+
+    private fun openLiveStream(
+        server: String,
+        itemId: String,
+        userId: String,
+        token: String,
+        ignoreSslErrors: Boolean,
+        deviceId: String,
+        deviceName: String,
+        appName: String,
+        appVersion: String,
+        mediaSourceId: String?,
+        playSessionId: String?,
+        openToken: String?,
+    ): String? {
+        val body = buildString {
+            append('{')
+            append("\"ItemId\":").append(jsonEscape(itemId)).append(',')
+            append("\"UserId\":").append(jsonEscape(userId)).append(',')
+            append("\"MaxStreamingBitrate\":120000000,")
+            append("\"EnableDirectPlay\":true,")
+            append("\"EnableDirectStream\":true,")
+            if (!mediaSourceId.isNullOrBlank()) {
+                append("\"MediaSourceId\":").append(jsonEscape(mediaSourceId)).append(',')
+            }
+            if (!playSessionId.isNullOrBlank()) {
+                append("\"PlaySessionId\":").append(jsonEscape(playSessionId)).append(',')
+            }
+            if (!openToken.isNullOrBlank()) {
+                append("\"OpenToken\":").append(jsonEscape(openToken)).append(',')
+            }
+            append("\"DeviceProfile\":").append(DEVICE_PROFILE)
+            append('}')
+        }
+        val response = JellyfinHttp.post(
+            url = "$server/LiveStreams/Open",
+            body = body,
+            accessToken = token,
+            ignoreSslErrors = ignoreSslErrors,
+            deviceId = deviceId,
+            deviceName = deviceName,
+            appName = appName,
+            appVersion = appVersion,
+            connectTimeoutMs = 15_000,
+            readTimeoutMs = 35_000,
+        )
+        if (response.code !in 200..299) {
+            return null
+        }
+        return jsonObjectField(response.body, "MediaSource")
     }
 
     private fun pickSource(sources: List<String>, mediaSourceId: String?): String {

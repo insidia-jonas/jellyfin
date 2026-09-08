@@ -36,6 +36,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.jellyfin.firetv.R
 import org.jellyfin.firetv.core.JellyfinHttp
+import org.jellyfin.firetv.core.LivePlayback
 import org.jellyfin.firetv.core.MediaTrack
 import org.jellyfin.firetv.core.MediaTracks
 import org.jellyfin.firetv.core.RemoteSubtitle
@@ -57,6 +58,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private var originalPayload: String? = null
     private var ignoreSsl: Boolean = false
     private var pausedBySystem: Boolean = false
+    private var liveRetryUsed: Boolean = false
     private val mainHandler = Handler(Looper.getMainLooper())
     private val hideOsd = Runnable {
         if (!binding.trackPanel.isVisible && !binding.searchPanel.isVisible && player?.isPlaying == true) {
@@ -127,13 +129,14 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         }
         originalPayload = payload
         resolveJob?.cancel()
+        val liveHint = LivePlayback.isLivePayload(payload)
         binding.loading.isVisible = true
         binding.loadingTitle.setText(R.string.app_name)
-        binding.loadingHint.setText(R.string.preparing_playback)
+        binding.loadingHint.setText(if (liveHint) R.string.preparing_live else R.string.preparing_playback)
         resolveJob = lifecycleScope.launch {
             val resolved = withContext(Dispatchers.IO) {
                 runCatching {
-                    withTimeout(25_000) {
+                    withTimeout(if (liveHint) 40_000 else 25_000) {
                         StreamResolver.resolve(payload, ignoreSsl)
                     }
                 }
@@ -203,7 +206,12 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             .setAllowCrossProtocolRedirects(true)
             .setDefaultRequestProperties(headers)
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(3_000, 20_000, 1_000, 2_500)
+            .setBufferDurationsMs(
+                if (resolved.isLive) 1_500 else 3_000,
+                if (resolved.isLive) 8_000 else 20_000,
+                if (resolved.isLive) 500 else 1_000,
+                if (resolved.isLive) 1_500 else 2_500,
+            )
             .build()
         val exo = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
@@ -223,19 +231,28 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_READY) {
                     binding.loading.isVisible = false
+                    liveRetryUsed = false
                     mainHandler.removeCallbacks(stallWatchdog)
                     applyPreferredTracks(exo, resolved)
                 }
                 if (playbackState == Player.STATE_BUFFERING) {
                     mainHandler.removeCallbacks(stallWatchdog)
-                    mainHandler.postDelayed(stallWatchdog, 45_000)
+                    mainHandler.postDelayed(stallWatchdog, if (resolved.isLive) 90_000 else 45_000)
                 }
                 if (playbackState == Player.STATE_ENDED) {
-                    stopAndClose()
+                    if (resolved.isLive) {
+                        retryLive(R.string.playback_failed)
+                    } else {
+                        stopAndClose()
+                    }
                 }
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                if (resolved.isLive) {
+                    retryLive(error.message?.takeIf { it.isNotBlank() } ?: getString(R.string.playback_failed))
+                    return
+                }
                 Toast.makeText(
                     this@PlayerActivity,
                     error.message?.takeIf { it.isNotBlank() } ?: getString(R.string.playback_failed),
@@ -246,7 +263,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         })
         exo.setMediaItem(mediaItemFor(resolved))
         exo.prepare()
-        if (keepPosition > 0) {
+        if (!resolved.isLive && keepPosition > 0) {
             exo.seekTo(keepPosition)
         }
         exo.playWhenReady = true
@@ -277,10 +294,23 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                 .setSelectionFlags(flags)
                 .build()
         }
-        return MediaItem.Builder()
+        val builder = MediaItem.Builder()
             .setUri(resolved.url)
             .setSubtitleConfigurations(configs)
-            .build()
+        LivePlayback.mimeType(resolved.container, resolved.url)?.let { builder.setMimeType(it) }
+        return builder.build()
+    }
+
+    private fun retryLive(message: String) {
+        val payload = originalPayload
+        if (!liveRetryUsed && !payload.isNullOrBlank()) {
+            liveRetryUsed = true
+            Toast.makeText(this, R.string.live_reconnecting, Toast.LENGTH_SHORT).show()
+            beginResolve(payload)
+            return
+        }
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        stopAndClose()
     }
 
     private fun applyPreferredTracks(exo: ExoPlayer, resolved: ResolvedPlayback) {
@@ -348,15 +378,23 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             KeyEvent.KEYCODE_DPAD_RIGHT,
             KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
             -> {
-                exo.seekTo(seekTarget(exo, +30_000))
-                showOsd()
+                if (playback?.isLive == true) {
+                    showOsd()
+                } else {
+                    exo.seekTo(seekTarget(exo, +30_000))
+                    showOsd()
+                }
                 true
             }
             KeyEvent.KEYCODE_DPAD_LEFT,
             KeyEvent.KEYCODE_MEDIA_REWIND,
             -> {
-                exo.seekTo(seekTarget(exo, -10_000))
-                showOsd()
+                if (playback?.isLive == true) {
+                    showOsd()
+                } else {
+                    exo.seekTo(seekTarget(exo, -10_000))
+                    showOsd()
+                }
                 true
             }
             KeyEvent.KEYCODE_DPAD_UP,
@@ -405,10 +443,18 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         binding.osdSeek.max = 1000
         binding.osdSeek.progress = if (duration > 0) ((position * 1000) / duration).toInt() else 0
         binding.osdPlayState.text = if (exo.isPlaying) "▶" else "❚❚"
-        binding.osdTime.text = "${formatTime(position)}  /  ${formatTime(duration)}"
-        binding.osdRemaining.isVisible = duration > 0
-        if (duration > 0) {
-            binding.osdRemaining.text = getString(R.string.player_remaining, formatTime(duration - position))
+        if (playback?.isLive == true) {
+            binding.osdSeek.progress = 1000
+            binding.osdTime.text = getString(R.string.player_live)
+            binding.osdRemaining.isVisible = false
+            binding.osdHints.setText(R.string.player_hints_live)
+        } else {
+            binding.osdTime.text = "${formatTime(position)}  /  ${formatTime(duration)}"
+            binding.osdRemaining.isVisible = duration > 0
+            if (duration > 0) {
+                binding.osdRemaining.text = getString(R.string.player_remaining, formatTime(duration - position))
+            }
+            binding.osdHints.setText(R.string.player_hints)
         }
         binding.osdMeta.text = trackSummary()
     }
@@ -479,8 +525,10 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                 onSubtitlePicked(track)
             }
         }
-        addTrackButton(list, getString(R.string.subtitle_search), selected = false) {
-            showSearchPanel()
+        if (!current.isLive) {
+            addTrackButton(list, getString(R.string.subtitle_search), selected = false) {
+                showSearchPanel()
+            }
         }
     }
 
@@ -709,7 +757,9 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     }
 
     override fun seekMs(positionMs: Long) {
-        player?.seekTo(positionMs.coerceAtLeast(0))
+        if (playback?.isLive != true) {
+            player?.seekTo(positionMs.coerceAtLeast(0))
+        }
         showOsd()
     }
 
@@ -740,8 +790,12 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private fun stopAndClose() {
         val exo = player
         val position = exo?.currentPosition ?: 0L
+        val closing = playback
         lifecycleScope.launch(Dispatchers.IO) {
             reporter?.stopped(position)
+            if (closing != null) {
+                StreamResolver.closeLiveStream(closing, ignoreSsl)
+            }
         }
         releasePlayer()
         finish()

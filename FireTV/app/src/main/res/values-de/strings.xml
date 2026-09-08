@@ -40,10 +40,14 @@
     <string name="press_back_again">Nochmal Zurück zum Beenden</string>
     <string name="connected_as">Verbunden mit %1$s</string>
     <string name="preparing_playback">Wiedergabe startet…</string>
+    <string name="preparing_live">Live-Kanal wird gestartet…</string>
+    <string name="live_reconnecting">Livestream unterbrochen — verbinde neu…</string>
     <string name="playback_failed">Diese Fassung konnte nicht abgespielt werden. Andere Version wählen oder Transcoding auf dem Server prüfen.</string>
     <string name="playback_timeout">Der Server hat zu lange gebraucht, um den Titel zu starten. Netz prüfen und erneut versuchen.</string>
     <string name="webview_recovered">Die Oberfläche wurde nach einem Grafikfehler neu geladen.</string>
     <string name="player_hints">OK Pause · Links/Rechts springen · Hoch Ton &amp; Untertitel</string>
+    <string name="player_hints_live">OK Pause · Hoch Ton · Live</string>
+    <string name="player_live">LIVE</string>
     <string name="player_remaining">−%1$s</string>
     <string name="tracks_title">Ton &amp; Untertitel</string>
     <string name="tracks_subtitle">Spur wählen oder online suchen, ohne den Film zu verlassen.</string>

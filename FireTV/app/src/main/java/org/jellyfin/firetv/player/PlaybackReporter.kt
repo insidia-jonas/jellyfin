@@ -21,7 +21,7 @@ class PlaybackReporter(private val playback: ResolvedPlayback) {
             .put("ItemId", playback.itemId)
             .put("MediaSourceId", playback.mediaSourceId)
             .put("PlaySessionId", playback.playSessionId)
-            .put("CanSeek", true)
+            .put("CanSeek", !playback.isLive)
             .put("IsPaused", isPaused)
             .put("IsMuted", false)
             .put("PositionTicks", positionMs * 10_000L)

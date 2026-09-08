@@ -110,4 +110,71 @@ class StreamResolverTest {
             server.stop(0)
         }
     }
+
+    @Test
+    fun `opens a live m3u channel when playback info still requires opening`() {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        var opened = false
+        server.createContext("/Items/channel-1/PlaybackInfo") { exchange ->
+            exchange.requestBody.readBytes()
+            val json = """
+                {
+                  "PlaySessionId": "live-session",
+                  "MediaSources": [{
+                    "Id": "live-source",
+                    "Path": "http://ingest.example/stream.ts",
+                    "RequiresOpening": true,
+                    "IsInfiniteStream": true,
+                    "SupportsDirectPlay": true,
+                    "OpenToken": "token-1"
+                  }]
+                }
+            """.trimIndent()
+            val bytes = json.toByteArray()
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.createContext("/LiveStreams/Open") { exchange ->
+            opened = true
+            exchange.requestBody.readBytes()
+            val json = """
+                {
+                  "MediaSource": {
+                    "Id": "live-source",
+                    "Path": "http://127.0.0.1/LiveStreams/abc/stream.ts",
+                    "LiveStreamId": "abc",
+                    "IsInfiniteStream": true,
+                    "RequiresOpening": false,
+                    "SupportsDirectPlay": true,
+                    "Container": "mpegts"
+                  }
+                }
+            """.trimIndent()
+            val bytes = json.toByteArray()
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.executor = Executors.newSingleThreadExecutor()
+        server.start()
+        try {
+            val port = server.address.port
+            val payload = """
+                {
+                  "items":[{"Id":"channel-1","Name":"Das Erste","Type":"TvChannel"}],
+                  "serverAddress":"http://127.0.0.1:$port",
+                  "accessToken":"t",
+                  "userId":"u"
+                }
+            """.trimIndent()
+            val resolved = StreamResolver.resolve(payload, ignoreSslErrors = false)
+            assertTrue(opened)
+            assertTrue(resolved.isLive)
+            assertEquals("abc", resolved.liveStreamId)
+            assertEquals("mpegts", resolved.container)
+            assertTrue(resolved.url.contains("/LiveStreams/abc/stream.ts"))
+            assertTrue(resolved.url.contains("api_key=t"))
+        } finally {
+            server.stop(0)
+        }
+    }
 }

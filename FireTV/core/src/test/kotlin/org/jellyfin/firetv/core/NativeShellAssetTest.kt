@@ -14,6 +14,7 @@ class NativeShellAssetTest {
         assertTrue(script.contains("width=1920"))
         assertTrue(script.contains("ExoPlayerPlugin"))
         assertTrue(script.contains("filedownload"))
+        assertTrue(script.contains("livetv"))
         assertTrue(script.contains("downloadFile"))
         assertTrue(script.contains("accessToken"))
         assertTrue(script.contains("FireTvCanExit"))

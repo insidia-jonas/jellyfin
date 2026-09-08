@@ -61,10 +61,12 @@ class DownloadRequestsTest {
 class PlaybackPayloadTest {
     @Test
     fun `reads id from items array`() {
-        val json = """{"items":[{"Id":"item-1","Name":"Arrival"}],"serverAddress":"http://s:8096"}"""
+        val json = """{"items":[{"Id":"item-1","Name":"Arrival","Type":"TvChannel"}],"serverAddress":"http://s:8096"}"""
         assertEquals("item-1", PlaybackPayload.itemId(json))
         assertEquals("Arrival", PlaybackPayload.itemName(json))
         assertEquals("http://s:8096", PlaybackPayload.serverAddress(json))
+        assertEquals("TvChannel", PlaybackPayload.itemType(json))
+        assertTrue(LivePlayback.isLivePayload(json))
     }
 
     @Test
