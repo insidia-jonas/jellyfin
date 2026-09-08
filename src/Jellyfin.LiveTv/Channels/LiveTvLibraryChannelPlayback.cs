@@ -76,6 +76,7 @@ internal static class LiveTvLibraryChannelPlayback
                     .GetChannelStream(channelId, channelId, currentLiveStreams ?? [], cancellationToken)
                     .ConfigureAwait(false);
                 liveStream.OriginalStreamId = channelId;
+                EnsureLiveStreamId(liveStream, channelId);
                 return liveStream;
             }
             catch (FileNotFoundException)
@@ -88,5 +89,26 @@ internal static class LiveTvLibraryChannelPlayback
         }
 
         throw new ResourceNotFoundException($"Unable to open Live TV channel {channelId}");
+    }
+
+    /// <summary>
+    /// MediaSourceManager indexes open streams by LiveStreamId. Tuner hosts do not set it
+    /// (the official Live TV provider does), so IChannel playback must assign one.
+    /// </summary>
+    /// <param name="liveStream">The opened tuner stream.</param>
+    /// <param name="channelId">Fallback id when the media source has none.</param>
+    internal static void EnsureLiveStreamId(ILiveStream liveStream, string channelId)
+    {
+        ArgumentNullException.ThrowIfNull(liveStream);
+        var source = liveStream.MediaSource;
+        if (source is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrEmpty(source.LiveStreamId))
+        {
+            source.LiveStreamId = string.IsNullOrEmpty(source.Id) ? channelId : source.Id;
+        }
     }
 }

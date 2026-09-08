@@ -29,9 +29,21 @@ public class LiveTvLibraryChannelPlaybackTests
     }
 
     [Fact]
+    public void EnsureLiveStreamId_FillsMissingIdFromMediaSource()
+    {
+        var source = new MediaSourceInfo { Id = "src-md5" };
+        var stream = Mock.Of<ILiveStream>(s => s.MediaSource == source);
+
+        LiveTvLibraryChannelPlayback.EnsureLiveStreamId(stream, "m3u_channel1");
+
+        Assert.Equal("src-md5", source.LiveStreamId);
+    }
+
+    [Fact]
     public async Task OpenAsync_UsesMatchingTunerHost()
     {
-        var expected = Mock.Of<ILiveStream>();
+        var source = new MediaSourceInfo { Id = "src1" };
+        var expected = Mock.Of<ILiveStream>(stream => stream.MediaSource == source);
         var hdhr = new Mock<ITunerHost>();
         hdhr.Setup(host => host.GetChannelStream(
                 It.IsAny<string>(),
@@ -56,6 +68,7 @@ public class LiveTvLibraryChannelPlaybackTests
 
         Assert.Same(expected, opened);
         Assert.Equal("m3u_channel1", opened.OriginalStreamId);
+        Assert.Equal("src1", opened.MediaSource.LiveStreamId);
     }
 
     [Fact]
