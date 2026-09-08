@@ -16,6 +16,8 @@ object PlayerCommands {
         fun destroy()
         fun setAudioStreamIndex(index: Int)
         fun setSubtitleStreamIndex(index: Int)
+        fun nextTrack()
+        fun previousTrack()
     }
 
     fun pause() = listener?.pause()
@@ -26,4 +28,6 @@ object PlayerCommands {
     fun destroy() = listener?.destroy()
     fun setAudioStreamIndex(index: Int) = listener?.setAudioStreamIndex(index)
     fun setSubtitleStreamIndex(index: Int) = listener?.setSubtitleStreamIndex(index)
+    fun nextTrack() = listener?.nextTrack()
+    fun previousTrack() = listener?.previousTrack()
 }

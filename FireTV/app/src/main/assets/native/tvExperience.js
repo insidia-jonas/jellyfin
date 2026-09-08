@@ -116,6 +116,8 @@
         var type = String(item.Type || "").toLowerCase();
         if (type === "movie" || type === "series" || type === "boxset") {
             points += 10;
+        } else if (type === "tvchannel" || type === "livetvprogram" || type === "program") {
+            points += 8;
         } else if (type === "folder" || type === "collectionfolder") {
             points -= 6;
         } else if (type === "episode" || type === "season") {
@@ -329,7 +331,8 @@
         box.removeAttribute("data-firetv-hidden");
         var title = document.createElement("div");
         title.className = "firetv-smart-title";
-        title.textContent = "Beste Treffer";
+        var lang = String((document.documentElement && document.documentElement.lang) || navigator.language || "").toLowerCase();
+        title.textContent = lang.indexOf("de") === 0 ? "Beste Treffer" : "Top matches";
         var row = document.createElement("div");
         row.className = "firetv-smart-row";
         items.slice(0, 24).forEach(function (item) {
@@ -405,7 +408,7 @@
                 SearchTerm: term,
                 Limit: 40,
                 Fields: fields,
-                IncludeItemTypes: "Movie,Series,BoxSet,Video,Folder",
+                IncludeItemTypes: "Movie,Series,BoxSet,Video,Folder,TvChannel,LiveTvProgram,MusicAlbum,Audio",
                 EnableTotalRecordCount: false
             };
             if (parent) {
@@ -595,7 +598,7 @@
         window.setInterval(function () {
             wrapApiClient();
             bindSearch();
-        }, 1500);
+        }, 4000);
     }
 
     if (document.readyState === "loading") {

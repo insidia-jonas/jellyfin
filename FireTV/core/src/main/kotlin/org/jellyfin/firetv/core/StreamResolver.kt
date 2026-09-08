@@ -22,6 +22,7 @@ data class ResolvedPlayback(
     val isLive: Boolean = false,
     val liveStreamId: String? = null,
     val container: String? = null,
+    val isAudio: Boolean = false,
 )
 
 /**
@@ -66,6 +67,9 @@ object StreamResolver {
         )
         require(response.code in 200..299) {
             "PlaybackInfo failed HTTP ${response.code} ${response.body.take(240)}"
+        }
+        jsonStringField(response.body, "ErrorCode")?.takeIf { it.isNotBlank() }?.let { code ->
+            error("PlaybackInfo $code")
         }
         var sources = jsonArrayObjects(response.body, "MediaSources")
         require(sources.isNotEmpty()) { "Server returned no media sources" }
@@ -132,6 +136,7 @@ object StreamResolver {
             isLive = LivePlayback.isLive(payload, source),
             liveStreamId = jsonStringField(source, "LiveStreamId"),
             container = jsonStringField(source, "Container"),
+            isAudio = PlaybackPayload.isAudio(payload),
         )
     }
 
@@ -253,7 +258,8 @@ object StreamResolver {
             {"Container":"mp3,aac,flac,wav,ogg,opus,m4a","Type":"Audio"}
           ],
           "TranscodingProfiles": [
-            {"Container":"ts","Type":"Video","VideoCodec":"h264","AudioCodec":"aac,ac3","Protocol":"hls","Context":"Streaming","MaxAudioChannels":"6","MinSegments":"1","BreakOnNonKeyFrames":true}
+            {"Container":"ts","Type":"Video","VideoCodec":"h264","AudioCodec":"aac,ac3","Protocol":"hls","Context":"Streaming","MaxAudioChannels":"6","MinSegments":"1","BreakOnNonKeyFrames":true},
+            {"Container":"mp3","Type":"Audio","AudioCodec":"mp3","Protocol":"http","Context":"Streaming"}
           ],
           "SubtitleProfiles": [
             {"Format":"vtt","Method":"External"},

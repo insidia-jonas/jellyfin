@@ -67,6 +67,7 @@ class PlaybackPayloadTest {
         assertEquals("http://s:8096", PlaybackPayload.serverAddress(json))
         assertEquals("TvChannel", PlaybackPayload.itemType(json))
         assertTrue(LivePlayback.isLivePayload(json))
+        assertEquals(listOf("item-1"), PlaybackPayload.itemIds(json))
     }
 
     @Test

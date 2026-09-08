@@ -2,9 +2,9 @@
 <resources>
     <string name="app_name">Jellyfin</string>
     <string name="app_version_label">Version %1$s</string>
-    <string name="connect_kicker">Fire TV</string>
-    <string name="connect_title">Deine Mediathek. Kinoformat.</string>
-    <string name="connect_subtitle">Die volle Jellyfin-Oberfläche, für die Fernbedienung. Wiedergabe läuft über den Fire-TV-Player. Im Film: Hoch für Ton und Untertitel.</string>
+    <string name="connect_kicker">Fire TV · 2.0</string>
+    <string name="connect_title">Das Kino für deinen Server.</string>
+    <string name="connect_subtitle">Die komplette Jellyfin-Web-UI, passend zu diesem Server. Filme, Serien, Musik und Live-TV laufen über den Fire-TV-Player. Hoch öffnet Ton und Untertitel. Menü öffnet die Client-Leiste.</string>
     <string name="connect_form_title">Server verbinden</string>
     <string name="server_url_hint">http://192.168.1.10:8096</string>
     <string name="server_url_label">Serveradresse</string>
@@ -47,6 +47,7 @@
     <string name="webview_recovered">Die Oberfläche wurde nach einem Grafikfehler neu geladen.</string>
     <string name="player_hints">OK Pause · Links/Rechts springen · Hoch Ton &amp; Untertitel</string>
     <string name="player_hints_live">OK Pause · Hoch Ton · Live</string>
+    <string name="player_hints_audio">OK Pause · Weiter/Zurück · Hoch Spuren</string>
     <string name="player_live">LIVE</string>
     <string name="player_remaining">−%1$s</string>
     <string name="tracks_title">Ton &amp; Untertitel</string>

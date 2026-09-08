@@ -1,11 +1,13 @@
 package org.jellyfin.firetv.player
 
+import org.jellyfin.firetv.core.JellyfinHttp
 import org.jellyfin.firetv.core.ResolvedPlayback
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 
-class PlaybackReporter(private val playback: ResolvedPlayback) {
+class PlaybackReporter(
+    private val playback: ResolvedPlayback,
+    private val ignoreSslErrors: Boolean,
+) {
     fun playing() = post("/Sessions/Playing", snapshot(isPaused = false))
 
     fun progress(positionMs: Long, isPaused: Boolean) {
@@ -27,30 +29,25 @@ class PlaybackReporter(private val playback: ResolvedPlayback) {
             .put("PositionTicks", positionMs * 10_000L)
             .put("PlayMethod", playback.playMethod)
             .put("VolumeLevel", 100)
+            .apply {
+                playback.liveStreamId?.takeIf { it.isNotBlank() }?.let { put("LiveStreamId", it) }
+            }
     }
 
     private fun post(path: String, body: JSONObject) {
-        val connection = URL(playback.serverAddress + path).openConnection() as HttpURLConnection
-        try {
-            connection.connectTimeout = 8_000
-            connection.readTimeout = 8_000
-            connection.requestMethod = "POST"
-            connection.doOutput = true
-            connection.setRequestProperty("Content-Type", "application/json")
-            connection.setRequestProperty(
-                "Authorization",
-                "MediaBrowser Client=\"${playback.appName}\", Device=\"${playback.deviceName}\", " +
-                    "DeviceId=\"${playback.deviceId}\", Version=\"${playback.appVersion}\", Token=\"${playback.accessToken}\"",
+        runCatching {
+            JellyfinHttp.post(
+                url = playback.serverAddress + path,
+                body = body.toString(),
+                accessToken = playback.accessToken,
+                ignoreSslErrors = ignoreSslErrors,
+                deviceId = playback.deviceId,
+                deviceName = playback.deviceName,
+                appName = playback.appName,
+                appVersion = playback.appVersion,
+                connectTimeoutMs = 8_000,
+                readTimeoutMs = 8_000,
             )
-            if (playback.accessToken.isNotBlank()) {
-                connection.setRequestProperty("X-Emby-Token", playback.accessToken)
-            }
-            connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-            connection.responseCode
-        } catch (_: Exception) {
-            // Progress reporting must never crash playback.
-        } finally {
-            connection.disconnect()
         }
     }
 }

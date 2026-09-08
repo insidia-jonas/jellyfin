@@ -20,6 +20,7 @@ class NativeInterface(
         fun launchPlayer(payload: String)
         fun downloadFiles(json: String)
         fun openDownloadManager()
+        fun findServersAsync(timeoutMs: Int)
         fun runOnHost(block: () -> Unit)
     }
 
@@ -91,4 +92,15 @@ class NativeInterface(
     fun openDownloadManager() {
         host.runOnHost { host.openDownloadManager() }
     }
+
+    @JavascriptInterface
+    fun findServersAsync(timeoutMs: Int) {
+        host.findServersAsync(timeoutMs.coerceIn(500, 8_000))
+    }
+
+    @JavascriptInterface
+    fun onLocalUserSignedIn(user: String?, token: String?) = Unit
+
+    @JavascriptInterface
+    fun onLocalUserSignedOut() = Unit
 }

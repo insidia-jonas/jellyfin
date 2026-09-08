@@ -1,6 +1,7 @@
 package org.jellyfin.firetv.shell
 
 import android.annotation.SuppressLint
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -11,6 +12,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.widget.Toast
+import kotlin.concurrent.thread
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
@@ -23,6 +25,7 @@ import org.jellyfin.firetv.BuildConfig
 import org.jellyfin.firetv.R
 import org.jellyfin.firetv.connect.ConnectActivity
 import org.jellyfin.firetv.core.FireTvClient
+import org.jellyfin.firetv.core.NativeServerList
 import org.jellyfin.firetv.core.ServerUrl
 import org.jellyfin.firetv.databinding.ActivityWebClientBinding
 import org.jellyfin.firetv.databinding.ItemDownloadBinding
@@ -30,6 +33,7 @@ import org.jellyfin.firetv.download.DownloadIndex
 import org.jellyfin.firetv.download.FileDownloader
 import org.jellyfin.firetv.player.NativePlayerBridge
 import org.jellyfin.firetv.player.PlayerActivity
+import org.jellyfin.firetv.player.PlayerWebSync
 import org.jellyfin.firetv.prefs.AppPreferences
 import org.json.JSONObject
 
@@ -105,6 +109,16 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
         )
 
         configureWebView()
+        PlayerWebSync.sink = { json ->
+            runOnUiThread {
+                if (::binding.isInitialized) {
+                    binding.webView.evaluateJavascript(
+                        "window.FireTvPlayerSync&&window.FireTvPlayerSync.apply($json)",
+                        null,
+                    )
+                }
+            }
+        }
         loadWebClient()
     }
 
@@ -348,7 +362,9 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
         runOnUiThread { hideSystemBars() }
     }
 
-    override fun updateVolumeLevel(level: Int) = Unit
+    override fun updateVolumeLevel(level: Int) {
+        applySystemVolume(level)
+    }
 
     override fun launchPlayer(payload: String) {
         runOnUiThread {
@@ -382,11 +398,36 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
         }
     }
 
+    override fun findServersAsync(timeoutMs: Int) {
+        thread(name = "firetv-find-servers") {
+            val json = NativeServerList.discoverJson(timeoutMs)
+            runOnUiThread {
+                if (::binding.isInitialized) {
+                    binding.webView.evaluateJavascript(
+                        "window.__firetvFindServersDone&&window.__firetvFindServersDone($json)",
+                        null,
+                    )
+                }
+            }
+        }
+    }
+
     override fun runOnHost(block: () -> Unit) {
         runOnUiThread(block)
     }
 
+    private fun applySystemVolume(percent: Int) {
+        val audio = getSystemService(AudioManager::class.java)
+            ?: getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager
+        val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+        val target = ((percent.coerceIn(0, 100) / 100f) * max).toInt()
+        audio.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
+    }
+
     override fun onDestroy() {
+        if (PlayerWebSync.sink != null) {
+            PlayerWebSync.sink = null
+        }
         if (::binding.isInitialized) {
             binding.downloadsOverlay.removeCallbacks(refreshDownloads)
         }

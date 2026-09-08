@@ -23,7 +23,7 @@ function collectAuth() {
         deviceId: device.deviceId || "",
         deviceName: device.deviceName || "Fire TV",
         appName: device.appName || "Jellyfin Fire TV",
-        appVersion: device.appVersion || "1.6.0"
+        appVersion: device.appVersion || "2.0.0"
     };
 }
 
@@ -68,6 +68,8 @@ export class ExoPlayerPlugin {
         this.isLocalPlayer = true;
 
         this._currentTime = 0;
+        this._duration = null;
+        this._volume = 100;
         this._paused = true;
         this._nativePlayer = window.NativePlayer;
     }
@@ -92,7 +94,7 @@ export class ExoPlayerPlugin {
 
     canPlayMediaType(mediaType) {
         var kind = String(mediaType || "").toLowerCase();
-        return kind !== "audio" && kind !== "book" && kind !== "photo";
+        return kind !== "book" && kind !== "photo";
     }
 
     canQueueMediaType(mediaType) {
@@ -125,9 +127,17 @@ export class ExoPlayerPlugin {
         }
     }
 
-    nextTrack() {}
+    nextTrack() {
+        if (this._nativePlayer && this._nativePlayer.nextTrack) {
+            this._nativePlayer.nextTrack();
+        }
+    }
 
-    previousTrack() {}
+    previousTrack() {
+        if (this._nativePlayer && this._nativePlayer.previousTrack) {
+            this._nativePlayer.previousTrack();
+        }
+    }
 
     seek(ticks) {
         if (this._nativePlayer) {
@@ -143,18 +153,18 @@ export class ExoPlayerPlugin {
     }
 
     duration() {
-        return null;
+        return this._duration;
     }
 
     volume(volume) {
         if (volume !== undefined) {
             this.setVolume(volume);
         }
-        return null;
+        return this._volume;
     }
 
     getVolume() {
-        return 100;
+        return this._volume == null ? 100 : this._volume;
     }
 
     setVolume(vol) {

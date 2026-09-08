@@ -74,4 +74,14 @@ class NativePlayerBridge(
     fun setSubtitleStreamIndex(index: Int) {
         host.runOnHost { PlayerCommands.setSubtitleStreamIndex(index) }
     }
+
+    @JavascriptInterface
+    fun nextTrack() {
+        host.runOnHost { PlayerCommands.nextTrack() }
+    }
+
+    @JavascriptInterface
+    fun previousTrack() {
+        host.runOnHost { PlayerCommands.previousTrack() }
+    }
 }

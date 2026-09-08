@@ -229,3 +229,74 @@ html.layout-tv,
 .layout-tv [data-firetv-hidden="1"] {
     display: none !important;
 }
+
+.layout-tv .loginPage,
+.layout-tv .manualLoginForm,
+.layout-tv .visualLoginForm {
+    background: radial-gradient(1200px 700px at 18% 12%, rgba(170, 92, 195, 0.22), transparent 55%),
+        radial-gradient(900px 600px at 88% 80%, rgba(0, 164, 220, 0.16), transparent 50%),
+        #07090f !important;
+}
+
+.layout-tv .loginDisclaimer,
+.layout-tv .padded-left.padded-right.padded-bottom-page {
+    color: #d7deea;
+}
+
+.layout-tv .emby-input,
+.layout-tv .emby-textarea {
+    background: rgba(21, 26, 36, 0.92) !important;
+    border-radius: 12px !important;
+}
+
+.layout-tv .nowPlayingBar,
+.layout-tv .nowPlayingBar-hidden {
+    background: linear-gradient(180deg, transparent, rgba(7, 9, 15, 0.94)) !important;
+}
+
+.layout-tv .programCell,
+.layout-tv .guide-channelHeaderCell,
+.layout-tv .timeslotHeader-l-tv {
+    border-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+.layout-tv .guide-programName,
+.layout-tv .programCell-title {
+    font-weight: 650 !important;
+}
+
+.layout-tv .liveTvGuidePage,
+.layout-tv .channelsContainer {
+    background: #07090f !important;
+}
+
+.layout-tv .headerTabs,
+.layout-tv .emby-tabs-slider {
+    background: transparent !important;
+}
+
+.layout-tv .detailRibbon,
+.layout-tv .itemMiscInfo-primary {
+    letter-spacing: 0.01em;
+}
+
+.layout-tv .cardOverlayInner-logo,
+.layout-tv .cardImageIcon {
+    opacity: 0.88;
+}
+
+.layout-tv .libraryPage .padded-bottom-page {
+    padding-bottom: 3.4em !important;
+}
+
+.layout-tv .dialog .emby-button,
+.layout-tv .actionSheetMenuItem {
+    min-height: 2.8em;
+    border-radius: 10px !important;
+}
+
+.layout-tv .toast {
+    background: #151a24 !important;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px !important;
+}

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="background">#FF07090F</color>
-    <color name="background_hero">#FF12081C</color>
+    <color name="background_hero">#FF1A0B28</color>
     <color name="surface">#FF151A24</color>
     <color name="surface_elevated">#FF1B2230</color>
     <color name="surface_focused">#FF243044</color>

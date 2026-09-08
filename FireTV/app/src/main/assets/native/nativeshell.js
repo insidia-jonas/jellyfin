@@ -97,7 +97,7 @@
             "  border-radius:16px!important;",
             "  box-shadow:0 24px 80px rgba(0,0,0,.55)!important;",
             "}",
-            "video,audio[controls]{display:none!important;width:0!important;height:0!important;}"
+            "video{display:none!important;width:0!important;height:0!important;}"
         ].join("");
         parent.appendChild(style);
     }
@@ -215,7 +215,7 @@
             deviceId: "firetv-web",
             deviceName: "Fire TV",
             appName: "Jellyfin Fire TV",
-            appVersion: "1.6.0"
+            appVersion: "2.0.0"
         };
     }
 
@@ -223,6 +223,7 @@
 
     var features = [
         "exit",
+        "exitmenu",
         "displaylanguage",
         "displaymode",
         "physicalvolumecontrol",
@@ -314,6 +315,8 @@
         this.priority = -1;
         this.isLocalPlayer = true;
         this._currentTime = 0;
+        this._duration = null;
+        this._volume = 100;
         this._paused = true;
         this._nativePlayer = window.NativePlayer;
         window.ExoPlayer = this;
@@ -362,7 +365,7 @@
     };
     FireTvExoPlayerPlugin.prototype.canPlayMediaType = function (mediaType) {
         var kind = String(mediaType || "").toLowerCase();
-        return kind !== "audio" && kind !== "book" && kind !== "photo";
+        return kind !== "book" && kind !== "photo";
     };
     FireTvExoPlayerPlugin.prototype.canQueueMediaType = function (mediaType) {
         return this.canPlayMediaType(mediaType);
@@ -422,10 +425,13 @@
         return this._currentTime;
     };
     FireTvExoPlayerPlugin.prototype.duration = function () {
-        return null;
+        return this._duration;
     };
-    FireTvExoPlayerPlugin.prototype.volume = function () {
-        return null;
+    FireTvExoPlayerPlugin.prototype.volume = function (value) {
+        if (value !== undefined) {
+            this.setVolume(value);
+        }
+        return this._volume;
     };
     FireTvExoPlayerPlugin.prototype.setVolume = function (vol) {
         if (window.NativePlayer) {
@@ -433,7 +439,7 @@
         }
     };
     FireTvExoPlayerPlugin.prototype.getVolume = function () {
-        return 100;
+        return this._volume;
     };
     FireTvExoPlayerPlugin.prototype.isMuted = function () {
         return false;
@@ -454,8 +460,16 @@
     FireTvExoPlayerPlugin.prototype.instantMix = function () { };
     FireTvExoPlayerPlugin.prototype.queue = function () { };
     FireTvExoPlayerPlugin.prototype.queueNext = function () { };
-    FireTvExoPlayerPlugin.prototype.nextTrack = function () { };
-    FireTvExoPlayerPlugin.prototype.previousTrack = function () { };
+    FireTvExoPlayerPlugin.prototype.nextTrack = function () {
+        if (window.NativePlayer && window.NativePlayer.nextTrack) {
+            window.NativePlayer.nextTrack();
+        }
+    };
+    FireTvExoPlayerPlugin.prototype.previousTrack = function () {
+        if (window.NativePlayer && window.NativePlayer.previousTrack) {
+            window.NativePlayer.previousTrack();
+        }
+    };
     FireTvExoPlayerPlugin.prototype.canSetAudioStreamIndex = function () {
         return true;
     };
@@ -583,6 +597,45 @@
                 window.NativeInterface.openServerSelection();
             }
         },
+        findServers: function (timeoutMs) {
+            return new Promise(function (resolve) {
+                var settled = false;
+                window.__firetvFindServersDone = function (servers) {
+                    if (settled) {
+                        return;
+                    }
+                    settled = true;
+                    resolve(Array.isArray(servers) ? servers : []);
+                };
+                try {
+                    if (window.NativeInterface && window.NativeInterface.findServersAsync) {
+                        window.NativeInterface.findServersAsync(timeoutMs || 3000);
+                    } else {
+                        resolve([]);
+                        return;
+                    }
+                } catch (e) {
+                    resolve([]);
+                    return;
+                }
+                window.setTimeout(function () {
+                    if (!settled) {
+                        settled = true;
+                        resolve([]);
+                    }
+                }, (timeoutMs || 3000) + 1500);
+            });
+        },
+        onLocalUserSignedIn: function (user, token) {
+            if (window.NativeInterface && window.NativeInterface.onLocalUserSignedIn) {
+                window.NativeInterface.onLocalUserSignedIn(String(user || ""), String(token || ""));
+            }
+        },
+        onLocalUserSignedOut: function () {
+            if (window.NativeInterface && window.NativeInterface.onLocalUserSignedOut) {
+                window.NativeInterface.onLocalUserSignedOut();
+            }
+        },
         getPlugins: function () {
             return plugins;
         }
@@ -631,6 +684,33 @@
                 return false;
             }
             return features.indexOf(String(command).toLowerCase()) !== -1;
+        }
+    };
+
+    window.FireTvPlayerSync = {
+        apply: function (state) {
+            var player = window.ExoPlayer;
+            if (!player || !state) {
+                return;
+            }
+            if (typeof state.positionMs === "number") {
+                player._currentTime = state.positionMs;
+            }
+            if (typeof state.durationMs === "number") {
+                player._duration = state.durationMs > 0 ? state.durationMs : null;
+            }
+            if (typeof state.paused === "boolean") {
+                player._paused = state.paused;
+            }
+            if (typeof state.volume === "number") {
+                player._volume = state.volume;
+            }
+            var ev = player.events;
+            if (ev && typeof ev.trigger === "function" && state.event) {
+                try {
+                    ev.trigger(player, state.event);
+                } catch (e) { /* keep playback going */ }
+            }
         }
     };
 
