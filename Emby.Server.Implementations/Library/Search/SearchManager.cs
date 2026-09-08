@@ -157,16 +157,15 @@ public class SearchManager : ISearchManager
 
             baseQuery = _queryHelpers.ApplyAccessFiltering(dbContext, baseQuery, accessFilter);
 
-            var allowedCount = await baseQuery.CountAsync(cancellationToken).ConfigureAwait(false);
-            if (allowedCount == libraryCandidates.Count)
-            {
-                return channelResults.Count == 0 ? libraryCandidates : [.. channelResults, .. libraryCandidates];
-            }
-
             var allowedIds = await baseQuery
                 .Select(e => e.Id)
                 .ToHashSetAsync(cancellationToken)
                 .ConfigureAwait(false);
+
+            if (allowedIds.Count == libraryCandidates.Count)
+            {
+                return channelResults.Count == 0 ? libraryCandidates : [.. channelResults, .. libraryCandidates];
+            }
 
             var filtered = libraryCandidates.Where(c => allowedIds.Contains(c.ItemId)).ToList();
             if (filtered.Count < libraryCandidates.Count)
