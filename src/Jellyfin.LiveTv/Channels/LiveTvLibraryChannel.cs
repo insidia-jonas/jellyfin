@@ -119,7 +119,7 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback
                 var sources = await host.GetChannelStreamMediaSources(id, cancellationToken).ConfigureAwait(false);
                 if (sources.Count > 0)
                 {
-                    return sources;
+                    return LiveTvLibraryChannelPlayback.PrepareMediaSources(sources, id);
                 }
             }
             catch (Exception ex)

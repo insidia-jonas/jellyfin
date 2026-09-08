@@ -64,6 +64,46 @@ public class M3uUrlFailoverTests
     }
 
     [Fact]
+    public void RewriteStreamUrl_DoesNotPointRegionalStreamAtPlaylistCdn()
+    {
+        var rewritten = M3uUrlFailover.RewriteStreamUrl(
+            "http://am01.example/9209/mpegts?token=abc",
+            "http://cdn.example/iptv/p/token/Sharavoz.Tv.Kodi.m3u?p=1");
+
+        Assert.Equal("http://am01.example/9209/mpegts?token=abc", rewritten);
+    }
+
+    [Fact]
+    public void RewriteStreamUrl_ListingOnlyPrimaryUrl_KeepsRegionalHost()
+    {
+        var info = new TunerHostInfo
+        {
+            Url = "http://cdn.example/iptv/p/token/list.m3u?p=1"
+        };
+
+        M3uUrlFailover.NormalizeTunerUrls(info);
+
+        var rewritten = M3uUrlFailover.RewriteStreamUrl(
+            "http://am01.example/9209/mpegts?token=abc",
+            M3uUrlFailover.GetPrimaryUrl(info));
+
+        Assert.Equal("http://cdn.example/iptv/p/token/list.m3u?p=1", info.Url);
+        Assert.Equal("http://cdn.example/iptv/p/token/list.m3u?p=1", M3uUrlFailover.GetPrimaryUrl(info));
+        Assert.Equal("http://am01.example/9209/mpegts?token=abc", rewritten);
+    }
+
+    [Fact]
+    public void ShouldRewriteStreamHost_IngestAuthorityAlone_IsNotEnough()
+    {
+        var stream = new Uri("http://am01.example/9209/mpegts?token=abc");
+        var listing = new Uri("http://cdn.example/iptv/p/token/list.m3u?p=1");
+        var ingest = new Uri("http://nl01.example/");
+
+        Assert.False(M3uUrlFailover.ShouldRewriteStreamHost(stream, listing));
+        Assert.True(M3uUrlFailover.ShouldRewriteStreamHost(stream, ingest));
+    }
+
+    [Fact]
     public void StableStreamKey_IgnoresHost()
     {
         var a = M3uUrlFailover.StableStreamKey("http://s1.example/iptv/token/12.ts");
