@@ -106,7 +106,7 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   take minutes; Fire TV `GetSubtitles` may time out even though the sidecar still finishes
   writing.
 - Pi deployment: `scripts/pi/full-redeploy.sh` is the one-shot for a Raspberry Pi — it stops
-  `jellyfin` / `jellyfin12`, deletes every known old Treasure-Maps plugin dir and channel cache,
+  `jellyfin12` (does not disable it) and stops+disables packaged `jellyfin`, deletes every known old Treasure-Maps plugin dir and channel cache,
   checks out `BRANCH` (default `cursor/set-up-dev-environment-0947`), publishes Jellyfin 12,
   installs the plugin + `meta.json`, builds or reuses jellyfin-web, writes
   `/etc/systemd/system/jellyfin12.service`, and starts it. Users/libraries/plugin config in
