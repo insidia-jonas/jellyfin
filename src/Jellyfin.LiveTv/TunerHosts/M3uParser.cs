@@ -54,7 +54,7 @@ namespace Jellyfin.LiveTv.TunerHosts
         {
             ArgumentNullException.ThrowIfNull(info);
 
-            var listingsUrl = M3uUrlFailover.GetPrimaryUrl(info);
+            var listingsUrl = M3uUrlFailover.GetPlaylistUrl(info);
             if (!listingsUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
             {
                 return AsyncFile.OpenRead(listingsUrl);

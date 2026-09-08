@@ -112,7 +112,7 @@ public class M3uPlaylistHealthScheduledTask : IScheduledTask, IConfigurableSched
 
     private async Task<bool> UpdateTunerAsync(TunerHostInfo tuner, CancellationToken cancellationToken)
     {
-        var candidates = M3uUrlFailover.GetCandidateUrls(tuner);
+        var candidates = M3uUrlFailover.GetHealthCandidates(tuner);
         if (candidates.Count <= 1)
         {
             return false;

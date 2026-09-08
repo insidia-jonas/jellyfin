@@ -63,29 +63,85 @@ internal static class M3uUrlFailover
     }
 
     /// <summary>
-    /// Gets the playlist URL that should be fetched now.
+    /// Gets the URL that should be used for stream-host failover (active ingest or playlist).
     /// </summary>
     /// <param name="info">The tuner host.</param>
-    /// <returns>The active or first candidate URL.</returns>
+    /// <returns>The active ingest host or the first candidate URL.</returns>
     public static string GetPrimaryUrl(TunerHostInfo info)
     {
         ArgumentNullException.ThrowIfNull(info);
 
-        var candidates = GetCandidateUrls(info);
+        var health = GetHealthCandidates(info);
         if (!string.IsNullOrWhiteSpace(info.ActiveUrl))
         {
             var active = SplitUrls(info.ActiveUrl);
-            if (active.Count == 1)
+            if (active.Count == 1
+                && health.Contains(active[0], StringComparer.OrdinalIgnoreCase))
             {
                 return active[0];
             }
         }
 
-        return candidates.Count > 0 ? candidates[0] : info.Url;
+        return health.Count > 0 ? health[0] : info.Url;
+    }
+
+    /// <summary>
+    /// Gets the M3U listing URL. Ingest-only hosts (no path) are never fetched as playlists.
+    /// </summary>
+    /// <param name="info">The tuner host.</param>
+    /// <returns>The playlist URL.</returns>
+    public static string GetPlaylistUrl(TunerHostInfo info)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+
+        foreach (var url in GetCandidateUrls(info))
+        {
+            if (!IsIngestEndpoint(url))
+            {
+                return url;
+            }
+        }
+
+        return !string.IsNullOrWhiteSpace(info.Url) ? SplitUrls(info.Url).FirstOrDefault() ?? info.Url : info.Url;
+    }
+
+    /// <summary>
+    /// Gets URLs to probe and fail over between.
+    /// When host-only ingest endpoints are present, playlist listing URLs are excluded
+    /// so health checks rewrite streams onto those hosts instead of the playlist CDN.
+    /// </summary>
+    /// <param name="info">The tuner host.</param>
+    /// <returns>Ingest hosts, or all playlist URLs when no ingest hosts exist.</returns>
+    public static IReadOnlyList<string> GetHealthCandidates(TunerHostInfo info)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+
+        var all = GetCandidateUrls(info);
+        var ingest = all.Where(IsIngestEndpoint).ToArray();
+        return ingest.Length > 0 ? ingest : all;
+    }
+
+    /// <summary>
+    /// Returns true when the URL is an ingest origin (scheme + host, no playlist path).
+    /// </summary>
+    /// <param name="url">The candidate URL.</param>
+    /// <returns><c>true</c> if the URL should be used only to rewrite stream hosts.</returns>
+    public static bool IsIngestEndpoint(string? url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            return false;
+        }
+
+        return (uri.AbsolutePath.Length == 0 || uri.AbsolutePath == "/")
+               && string.IsNullOrEmpty(uri.Query);
     }
 
     /// <summary>
     /// Stores pipe-separated playlist URLs as a primary URL plus alternates.
+    /// Host-only ingest endpoints stay in <see cref="TunerHostInfo.AlternateUrls"/>;
+    /// the listing playlist remains in <see cref="TunerHostInfo.Url"/>.
     /// </summary>
     /// <param name="info">The tuner host to normalize.</param>
     public static void NormalizeTunerUrls(TunerHostInfo info)
@@ -98,20 +154,25 @@ internal static class M3uUrlFailover
             return;
         }
 
-        info.Url = candidates[0];
-        info.AlternateUrls = candidates.Count > 1 ? candidates.Skip(1).ToArray() : [];
+        var playlist = candidates.FirstOrDefault(static url => !IsIngestEndpoint(url)) ?? candidates[0];
+        info.Url = playlist;
+        info.AlternateUrls = candidates
+            .Where(url => !string.Equals(url, playlist, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        var health = GetHealthCandidates(info);
         if (string.IsNullOrWhiteSpace(info.ActiveUrl)
-            || !candidates.Contains(info.ActiveUrl, StringComparer.OrdinalIgnoreCase))
+            || !health.Contains(info.ActiveUrl, StringComparer.OrdinalIgnoreCase))
         {
-            info.ActiveUrl = candidates[0];
+            info.ActiveUrl = health.Count > 0 ? health[0] : playlist;
         }
     }
 
     /// <summary>
-    /// Rewrites a channel stream onto another playlist's host/scheme/port.
+    /// Rewrites a channel stream onto another ingest or playlist host/scheme/port.
     /// </summary>
     /// <param name="streamUrl">The current stream URL.</param>
-    /// <param name="playlistUrl">The playlist URL whose host should be used.</param>
+    /// <param name="playlistUrl">The playlist or ingest URL whose host should be used.</param>
     /// <returns>The rewritten stream URL, or the original if rewriting is not possible.</returns>
     public static string RewriteStreamUrl(string streamUrl, string? playlistUrl)
     {

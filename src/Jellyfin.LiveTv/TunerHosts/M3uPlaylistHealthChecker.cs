@@ -38,9 +38,13 @@ public sealed class M3uPlaylistHealthChecker
         var stopwatch = Stopwatch.StartNew();
         try
         {
+            var listingUrl = M3uUrlFailover.IsIngestEndpoint(playlistUrl)
+                ? M3uUrlFailover.GetPlaylistUrl(info)
+                : playlistUrl;
+
             var probeInfo = new TunerHostInfo
             {
-                Url = playlistUrl,
+                Url = listingUrl,
                 UserAgent = info.UserAgent,
                 Referrer = info.Referrer
             };

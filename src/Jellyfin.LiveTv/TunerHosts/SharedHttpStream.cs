@@ -99,7 +99,7 @@ namespace Jellyfin.LiveTv.TunerHosts
                             var originalUrl = url;
                             var currentPlaylistUrl = M3uUrlFailover.GetPrimaryUrl(_tunerHostInfo);
                             var hangTimeout = M3uUrlFailover.GetHangTimeout(_tunerHostInfo);
-                            var candidates = M3uUrlFailover.GetCandidateUrls(_tunerHostInfo);
+                            var candidates = M3uUrlFailover.GetHealthCandidates(_tunerHostInfo);
 
                             while (!cancellationToken.IsCancellationRequested)
                             {

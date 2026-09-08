@@ -24,6 +24,36 @@ public class M3uUrlFailoverTests
     }
 
     [Fact]
+    public void Normalize_MixedPlaylistAndIngestHosts_KeepsListingUrl()
+    {
+        var info = new TunerHostInfo
+        {
+            Url = "http://cdn.example/iptv/p/token/list.m3u?p=1|http://nl01.example|http://am01.example"
+        };
+
+        M3uUrlFailover.NormalizeTunerUrls(info);
+
+        Assert.Equal("http://cdn.example/iptv/p/token/list.m3u?p=1", info.Url);
+        Assert.Equal(["http://nl01.example", "http://am01.example"], info.AlternateUrls);
+        Assert.True(M3uUrlFailover.IsIngestEndpoint("http://nl01.example"));
+        Assert.False(M3uUrlFailover.IsIngestEndpoint("http://cdn.example/iptv/p/token/list.m3u?p=1"));
+        Assert.Equal("http://cdn.example/iptv/p/token/list.m3u?p=1", M3uUrlFailover.GetPlaylistUrl(info));
+        Assert.Equal(["http://nl01.example", "http://am01.example"], M3uUrlFailover.GetHealthCandidates(info));
+        Assert.Equal("http://nl01.example", info.ActiveUrl);
+        Assert.Equal("http://nl01.example", M3uUrlFailover.GetPrimaryUrl(info));
+    }
+
+    [Fact]
+    public void RewriteStreamUrl_IngestHost_ReplacesOnlyHost()
+    {
+        var rewritten = M3uUrlFailover.RewriteStreamUrl(
+            "http://am01.example/9209/mpegts?token=abc",
+            "http://nl01.example");
+
+        Assert.Equal("http://nl01.example/9209/mpegts?token=abc", rewritten);
+    }
+
+    [Fact]
     public void RewriteStreamUrl_ReplacesHostAndScheme()
     {
         var rewritten = M3uUrlFailover.RewriteStreamUrl(
