@@ -21,6 +21,7 @@ using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaEncoding;
 using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.IO;
+using MediaBrowser.Model.MediaInfo;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.LiveTv.IO
@@ -168,7 +169,13 @@ namespace Jellyfin.LiveTv.IO
 
             if (mediaSource.RequiresLooping)
             {
-                inputModifier += " -stream_loop -1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 2";
+                inputModifier += " -stream_loop -1";
+            }
+
+            if (mediaSource.RequiresLooping
+                || (mediaSource.IsInfiniteStream && mediaSource.Protocol == MediaProtocol.Http))
+            {
+                inputModifier += " -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5";
             }
 
             var analyzeDurationSeconds = 5;
