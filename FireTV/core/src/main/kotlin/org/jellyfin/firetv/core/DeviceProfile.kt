@@ -8,7 +8,7 @@ package org.jellyfin.firetv.core
  * nativeshell.js [exoPlayerProfile].
  */
 object DeviceProfile {
-    const val JSON: String = """
+    val JSON: String = """
         {
           "Name": "Jellyfin Fire TV ExoPlayer",
           "MaxStreamingBitrate": 120000000,
