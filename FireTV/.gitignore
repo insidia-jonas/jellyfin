@@ -6,6 +6,7 @@ local.properties
 .cxx/
 captures/
 *.apk
+!sideload/Jellyfin-FireTV.apk
 *.aab
 *.ap_
 *.dex
