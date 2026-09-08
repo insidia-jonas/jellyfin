@@ -62,9 +62,11 @@ public class PluginConfiguration : BasePluginConfiguration
     public string ApiKey { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the maximum number of releases fetched per browse request.
+    /// Gets or sets the maximum number of unique titles kept in a category folder
+    /// (Movies / TV / DE / genre). The indexer is queried until this many titles exist.
+    /// The web client then paginates that list.
     /// </summary>
-    public int ResultLimit { get; set; } = 60;
+    public int ResultLimit { get; set; } = 200;
 
     /// <summary>
     /// Gets or sets the minimum community rating used when browsing (0 disables the filter).

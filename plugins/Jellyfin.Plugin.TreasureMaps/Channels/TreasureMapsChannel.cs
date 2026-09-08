@@ -35,7 +35,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
     // Generation prefix for category-folder ids. Bumping it (c2-, c3-, ...) forces Jellyfin to
     // create fresh folder entities — needed once because the old entities had collage images
     // (child posters) baked in by the folder image provider, making categories look like movies.
-    private const string FolderIdPrefix = "c4-";
+    private const string FolderIdPrefix = "c5-";
     private const string GroupPrefix = "GRP::";
     private const string ReleasePrefix = "REL::";
     private const string GrabPrefix = "grab::";
@@ -43,7 +43,6 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
 
     // The API times out above ~100 results per request, so bigger lists are fetched in pages.
     private const int PageSize = 100;
-    private const int CategoryPages = 2;
     private const int FindPages = 3;
     private const int RootLatestCount = 24;
 
@@ -106,7 +105,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
             var c = Config;
             return string.Join(
                 '|',
-                "35",
+                "36",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -132,7 +131,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         {
             ContentTypes = new List<ChannelMediaContentType> { ChannelMediaContentType.Movie, ChannelMediaContentType.Clip },
             MediaTypes = new List<ChannelMediaType> { ChannelMediaType.Video },
-            MaxPageSize = Config.ResultLimit
+            MaxPageSize = Math.Max(CategoryBrowse.DefaultTitleLimit, Config.ResultLimit)
         };
     }
 
@@ -235,29 +234,34 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
                 return await GetSpotlightFeedAsync(folderId, cancellationToken).ConfigureAwait(false);
             }
 
+            if (CategoryBrowse.TryParsePageFolder(folderId, out var pageScope, out var pageNumber)
+                && TryCategorySpec(pageScope, out var pageKind, out var pageGenre, out var pageCats))
+            {
+                return await GetCategoryAsync(pageScope, pageKind, pageGenre, pageCats, pageNumber, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
             if (string.Equals(folderId, "movies", StringComparison.Ordinal))
             {
-                var movies = await FetchPagesAsync("movie", null, null, null, CategoryPages, cancellationToken).ConfigureAwait(false);
-                return await BuildGroupCardsAsync(movies, folderId, Config.ResultLimit, null, cancellationToken).ConfigureAwait(false);
+                return await GetCategoryAsync(folderId, "movie", null, null, 1, cancellationToken).ConfigureAwait(false);
             }
 
             if (string.Equals(folderId, "tv", StringComparison.Ordinal))
             {
-                var tv = await FetchPagesAsync("tv", null, null, null, CategoryPages, cancellationToken).ConfigureAwait(false);
-                return await BuildGroupCardsAsync(tv, folderId, Config.ResultLimit, null, cancellationToken).ConfigureAwait(false);
+                return await GetCategoryAsync(folderId, "tv", null, null, 1, cancellationToken).ConfigureAwait(false);
             }
 
             // German rows, mirroring the website's "Movies - DE" / "TV - DE" category blocks.
             if (string.Equals(folderId, "movies-de", StringComparison.Ordinal))
             {
-                var moviesDe = await FetchPagesAsync("movie", null, null, TreasureMapsApiClient.GermanMovieCategories, CategoryPages, cancellationToken).ConfigureAwait(false);
-                return await BuildGroupCardsAsync(moviesDe, folderId, Config.ResultLimit, null, cancellationToken).ConfigureAwait(false);
+                return await GetCategoryAsync(folderId, "movie", null, TreasureMapsApiClient.GermanMovieCategories, 1, cancellationToken)
+                    .ConfigureAwait(false);
             }
 
             if (string.Equals(folderId, "tv-de", StringComparison.Ordinal))
             {
-                var tvDe = await FetchPagesAsync("tv", null, null, TreasureMapsApiClient.GermanTvCategories, CategoryPages, cancellationToken).ConfigureAwait(false);
-                return await BuildGroupCardsAsync(tvDe, folderId, Config.ResultLimit, null, cancellationToken).ConfigureAwait(false);
+                return await GetCategoryAsync(folderId, "tv", null, TreasureMapsApiClient.GermanTvCategories, 1, cancellationToken)
+                    .ConfigureAwait(false);
             }
 
             if (string.Equals(folderId, "genres", StringComparison.Ordinal))
@@ -282,8 +286,8 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
 
             if (folderId.StartsWith(GenrePrefix, StringComparison.Ordinal))
             {
-                var byGenre = await FetchPagesAsync("movie", null, folderId[GenrePrefix.Length..], null, CategoryPages, cancellationToken).ConfigureAwait(false);
-                return await BuildGroupCardsAsync(byGenre, folderId, Config.ResultLimit, null, cancellationToken).ConfigureAwait(false);
+                return await GetCategoryAsync(folderId, "movie", folderId[GenrePrefix.Length..], null, 1, cancellationToken)
+                    .ConfigureAwait(false);
             }
 
             return Hint("unknown-folder", "Nothing here", "This Treasure-Maps category has no titles right now.");
@@ -862,6 +866,137 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         return Result(items);
     }
 
+    private static bool TryCategorySpec(string scope, out string kind, out string? genre, out string? categories)
+    {
+        kind = "movie";
+        genre = null;
+        categories = null;
+        if (string.Equals(scope, "movies", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (string.Equals(scope, "tv", StringComparison.Ordinal))
+        {
+            kind = "tv";
+            return true;
+        }
+
+        if (string.Equals(scope, "movies-de", StringComparison.Ordinal))
+        {
+            categories = TreasureMapsApiClient.GermanMovieCategories;
+            return true;
+        }
+
+        if (string.Equals(scope, "tv-de", StringComparison.Ordinal))
+        {
+            kind = "tv";
+            categories = TreasureMapsApiClient.GermanTvCategories;
+            return true;
+        }
+
+        if (scope.StartsWith(GenrePrefix, StringComparison.Ordinal))
+        {
+            genre = scope[GenrePrefix.Length..];
+            return !string.IsNullOrWhiteSpace(genre);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Loads a category page: keep fetching indexer rows until enough unique titles exist,
+    /// sort newest first, then either show page 1 plus "Page 2…" folders or a later slice.
+    /// </summary>
+    private async Task<ChannelItemResult> GetCategoryAsync(
+        string scope,
+        string kind,
+        string? genre,
+        string? categories,
+        int page,
+        CancellationToken cancellationToken)
+    {
+        var target = Math.Clamp(Math.Max(CategoryBrowse.DefaultTitleLimit, Config.ResultLimit), 50, 500);
+        var fetchTarget = Config.FilterByLanguage ? target * 2 : target;
+        var releases = await FetchUntilUniqueAsync(
+            kind,
+            null,
+            genre,
+            categories,
+            fetchTarget,
+            CategoryBrowse.MaxFetchPages,
+            cancellationToken).ConfigureAwait(false);
+
+        var built = await BuildGroupCardsAsync(releases, scope, target, null, cancellationToken, newestFirst: true)
+            .ConfigureAwait(false);
+        var cards = built.Items;
+        if (cards.Count == 0
+            || (cards.Count == 1 && cards[0].Name.Contains("Nothing here", StringComparison.OrdinalIgnoreCase)))
+        {
+            return built;
+        }
+
+        var (slice, totalPages) = CategoryBrowse.Slice(cards, page, CategoryBrowse.CardsPerPage);
+        if (page == 1 && totalPages > 1)
+        {
+            var items = new List<ChannelItemInfo>();
+            for (var p = 2; p <= totalPages; p++)
+            {
+                items.Add(Folder(
+                    CategoryBrowse.PageFolderId(scope, p),
+                    CategoryBrowse.PageLabel(p, CategoryBrowse.CardsPerPage, cards.Count),
+                    p - 2));
+            }
+
+            items.AddRange(slice);
+            return Result(items);
+        }
+
+        return slice.Count == 0
+            ? Hint(scope + "-page-empty", "Nothing here", "This Treasure-Maps page has no more titles.")
+            : Result(slice.ToList());
+    }
+
+    /// <summary>
+    /// Fetches indexer pages until <paramref name="targetUnique"/> titles are seen or the page cap is hit.
+    /// </summary>
+    private async Task<IReadOnlyList<Release>> FetchUntilUniqueAsync(
+        string kind,
+        string? query,
+        string? genre,
+        string? categories,
+        int targetUnique,
+        int maxPages,
+        CancellationToken cancellationToken)
+    {
+        var all = new List<Release>();
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var anyOk = false;
+        for (var page = 0; page < maxPages && keys.Count < targetUnique; page++)
+        {
+            var (items, ok) = await FetchPageSafeAsync(kind, query, genre, categories, page * PageSize, cancellationToken)
+                .ConfigureAwait(false);
+            anyOk |= ok;
+            foreach (var item in items)
+            {
+                all.Add(item);
+                keys.Add(ReleaseGrouper.KeyOf(item));
+            }
+
+            if (ok && items.Count < PageSize)
+            {
+                break;
+            }
+        }
+
+        if (!anyOk && all.Count == 0)
+        {
+            throw new InvalidOperationException($"All Treasure-Maps {kind} pages failed (q={query ?? "*"}).");
+        }
+
+        return all;
+    }
+
     /// <summary>
     /// Fetches multiple result pages (the API caps a single request at ~100 items) and
     /// concatenates them, newest first. Pages are fetched independently: a slow/failed page
@@ -982,7 +1117,8 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         string scope,
         int maxGroups,
         string? searchTerm,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool newestFirst = false)
     {
         var prefs = GetLanguagePreferences();
         var marker = ShortHash(DataVersion);
@@ -1011,8 +1147,9 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         var groups = ReleaseGrouper.Group(kept).ToList();
         await _catalog.FillAsync(groups, cancellationToken).ConfigureAwait(false);
         var cap = maxGroups > 0 ? maxGroups : Config.ResultLimit;
-        var ordered = groups
-            .OrderBy(g => bestRank.TryGetValue(g.Key, out var r) ? r : int.MaxValue)
+        var ordered = (newestFirst
+                ? CategoryBrowse.OrderNewest(groups, bestRank)
+                : groups.OrderBy(g => bestRank.TryGetValue(g.Key, out var r) ? r : int.MaxValue).ToList())
             .Take(cap)
             .ToList();
 

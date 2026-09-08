@@ -28,8 +28,8 @@
                         <div class="fieldDescription">Sent as the <code>X-API-Key</code> header. Find it in your Treasure-Maps account settings.</div>
                     </div>
                     <div class="inputContainer inputContainer-withDescription">
-                        <input is="emby-input" type="number" id="resultLimit" pattern="[0-9]*" min="1" max="500" label="Results per page" />
-                        <div class="fieldDescription">How many releases to load per browse request (1-500).</div>
+                        <input is="emby-input" type="number" id="resultLimit" pattern="[0-9]*" min="50" max="500" label="Unique titles per category" />
+                        <div class="fieldDescription">How many different movies/shows to keep in Movies, TV Shows, DE and genre folders (50–500). The indexer is queried until this many titles are filled; the web client then shows pages. Fire TV shows the newest first and uses Page 2 / Page 3 folders for the rest.</div>
                     </div>
                     <div class="inputContainer inputContainer-withDescription">
                         <input is="emby-input" type="number" id="minRating" min="0" max="10" step="0.1" label="Minimum rating" />
@@ -244,7 +244,7 @@
             function readFormInto(config) {
                 config.BaseUrl = document.querySelector('#baseUrl').value;
                 config.ApiKey = document.querySelector('#apiKey').value;
-                config.ResultLimit = parseInt(document.querySelector('#resultLimit').value, 10) || 60;
+                config.ResultLimit = parseInt(document.querySelector('#resultLimit').value, 10) || 200;
                 config.MinRating = parseFloat(document.querySelector('#minRating').value) || 0;
                 config.PrimaryLanguage = document.querySelector('#primaryLanguage').value.trim();
                 config.SecondaryLanguages = document.querySelector('#secondaryLanguages').value
@@ -287,7 +287,7 @@
                     ApiClient.getPluginConfiguration(TreasureMapsConfig.pluginId).then(function (config) {
                         document.querySelector('#baseUrl').value = config.BaseUrl || '';
                         document.querySelector('#apiKey').value = config.ApiKey || '';
-                        document.querySelector('#resultLimit').value = config.ResultLimit || 60;
+                        document.querySelector('#resultLimit').value = config.ResultLimit || 200;
                         document.querySelector('#minRating').value = config.MinRating || 0;
                         document.querySelector('#primaryLanguage').value = config.PrimaryLanguage || '';
                         document.querySelector('#secondaryLanguages').value = (config.SecondaryLanguages || []).join(', ');

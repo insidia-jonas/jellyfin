@@ -984,7 +984,7 @@ public class TreasureMapsController : ControllerBase
         }
 
         var kind = (type ?? "movie").ToLowerInvariant();
-        var limit = Plugin.Instance?.Configuration.ResultLimit ?? 60;
+        var limit = Plugin.Instance?.Configuration.ResultLimit ?? 200;
         try
         {
             var response = kind switch

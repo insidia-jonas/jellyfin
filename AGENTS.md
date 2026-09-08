@@ -167,7 +167,7 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
 - Category tiles must stay uniform (plain colored tiles): Jellyfin's `FolderImageProvider` used to
   compose folder images from child posters, making half the category tiles look like movie cards.
   Channel-sourced folders are excluded from that provider (server patch), and the category folder
-  ids carry a generation prefix (`c4-`, stripped in `GetChannelItems`) that is bumped when the
+  ids carry a generation prefix (`c5-`, stripped in `GetChannelItems`) that is bumped when the
   folder entities must be recreated (old collage images, then missing images). Category folders
   now set `ImageUrl` to a generated poster (`ChannelArtwork`) so Fire TV is not a grid of empty
   blue tiles; the channel itself implements `GetChannelImage`. If tiles look stale, bump the prefix.
@@ -202,6 +202,13 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   movie/TV download folders (absolute folders used as-is; relative ones resolved under SABnzbd's
   `misc.complete_dir`), so finished downloads appear in the top menu. GOTCHA: Jellyfin ignores video
   files with "sample" in the name — don't name test files `...-SAMPLE.mp4` when seeding a library.
+- Category size: Movies / TV / DE / genre used to fetch two NZB pages (200 releases) and then
+  group them. Many qualities of the same title collapsed that to ~25 posters. `GetCategoryAsync`
+  now calls `FetchUntilUniqueAsync` (up to 8×100) until ~200 unique titles exist, sorts **newest
+  posted first** (`CategoryBrowse.OrderNewest`), and keeps `max(200, ResultLimit)` cards. Web
+  paginates that list (`1–25 von 200`). Fire TV often only shows the first grid; page-1 also
+  prepends `Page 2 (51–100)` folders (`pg:{scope}:{n}`, `CategoryBrowse.CardsPerPage` = 50).
+  Bump `DataVersion` / `FolderIdPrefix` (`c5-`, marker `36`) after this layout change.
 - Two-level, website-like layout: a category (Movies/TV/genre/letter/trending) shows **one poster
   card per title** (grouped by tmdb/imdb/normalized-title via `ReleaseGrouper`, id prefix `GRP::`),
   NOT one card per release. Opening a title card re-fetches that title's releases (`q=<title>`,

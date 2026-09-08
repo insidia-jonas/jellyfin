@@ -74,7 +74,7 @@ public sealed class MetadataCatalog
     /// <returns>A task that completes when the lookups finish.</returns>
     public async Task FillAsync(IReadOnlyList<ReleaseGroup> groups, CancellationToken cancellationToken)
     {
-        var missing = groups.Where(NeedsFill).Take(28).ToList();
+        var missing = groups.Where(NeedsFill).Take(80).ToList();
         if (missing.Count == 0)
         {
             return;
