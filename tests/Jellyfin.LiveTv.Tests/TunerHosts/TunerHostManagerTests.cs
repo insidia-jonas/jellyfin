@@ -27,7 +27,7 @@ public class TunerHostManagerTests
         Assert.Equal("xmltv", listing.Type);
         Assert.Equal(tuner.EpgUrl, listing.Path);
         Assert.Equal(tuner.UserAgent, listing.UserAgent);
-        Assert.False(listing.EnableAllTuners);
+        Assert.True(listing.EnableAllTuners);
         Assert.Equal(tuner.Id, Assert.Single(listing.EnabledTuners));
     }
 

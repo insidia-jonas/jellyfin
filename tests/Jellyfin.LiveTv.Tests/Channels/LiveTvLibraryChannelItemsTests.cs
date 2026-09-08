@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using Jellyfin.LiveTv.Channels;
 using MediaBrowser.Controller.Channels;
 using MediaBrowser.Controller.LiveTv;
@@ -21,7 +23,7 @@ public class LiveTvLibraryChannelItemsTests
 
         Assert.Equal(2, items.Count);
         Assert.Equal(ChannelItemType.Folder, items[0].Type);
-        Assert.Equal("News", items[0].Name);
+        Assert.Equal("News  ·  2", items[0].Name);
         Assert.Equal("https://logo/cnn.png", items[0].ImageUrl);
         Assert.Equal(ChannelItemType.Media, items[1].Type);
         Assert.Equal("Extra", items[1].Name);
@@ -44,5 +46,32 @@ public class LiveTvLibraryChannelItemsTests
         Assert.Equal("CNN", items[0].Name);
         Assert.Equal("cnn", items[0].Id);
         Assert.True(items[0].IsLiveStream);
+    }
+
+    [Fact]
+    public void Build_ChannelTile_ShowsNowAndNext()
+    {
+        ChannelInfo[] channels =
+        [
+            new() { Id = "cnn", Name = "DE | Das Erste", Number = "1" }
+        ];
+        var guide = new Dictionary<string, LiveTvNowNext>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["cnn"] = new()
+            {
+                NowTitle = "Tagesschau",
+                NextTitle = "Wetter"
+            }
+        };
+
+        var items = LiveTvLibraryChannelItems.Build(channels, null, guide);
+
+        var tile = Assert.Single(items);
+        Assert.Equal("Das Erste  ·  Tagesschau", tile.Name);
+        Assert.Equal("Das Erste", tile.OriginalTitle);
+        Assert.Contains("Jetzt: Tagesschau", tile.Overview, StringComparison.Ordinal);
+        Assert.Contains("Danach: Wetter", tile.Overview, StringComparison.Ordinal);
+        Assert.StartsWith("00001.00", tile.SortName, StringComparison.Ordinal);
+        Assert.Equal(default, tile.DateCreated);
     }
 }

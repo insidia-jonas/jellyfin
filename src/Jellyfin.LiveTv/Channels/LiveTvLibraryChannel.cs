@@ -1,16 +1,21 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data;
+using Jellyfin.Data.Enums;
 using Jellyfin.Database.Implementations.Enums;
 using MediaBrowser.Controller.Channels;
+using MediaBrowser.Controller.Dto;
+using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Channels;
 using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Entities;
+using MediaBrowser.Model.Querying;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.LiveTv.Channels;
@@ -18,9 +23,11 @@ namespace Jellyfin.LiveTv.Channels;
 /// <summary>
 /// A My Media library tile for Live TV, shown next to Movies, TV Shows, and other channels.
 /// </summary>
-public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback
+public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCacheKey
 {
     private readonly ITunerHostManager _tunerHostManager;
+    private readonly IListingsManager _listingsManager;
+    private readonly ILibraryManager _libraryManager;
     private readonly IUserManager _userManager;
     private readonly ILogger<LiveTvLibraryChannel> _logger;
 
@@ -28,14 +35,20 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback
     /// Initializes a new instance of the <see cref="LiveTvLibraryChannel"/> class.
     /// </summary>
     /// <param name="tunerHostManager">The tuner host manager.</param>
+    /// <param name="listingsManager">The listings manager (logos from XMLTV).</param>
+    /// <param name="libraryManager">The library manager (imported guide).</param>
     /// <param name="userManager">The user manager.</param>
     /// <param name="logger">The logger.</param>
     public LiveTvLibraryChannel(
         ITunerHostManager tunerHostManager,
+        IListingsManager listingsManager,
+        ILibraryManager libraryManager,
         IUserManager userManager,
         ILogger<LiveTvLibraryChannel> logger)
     {
         _tunerHostManager = tunerHostManager;
+        _listingsManager = listingsManager;
+        _libraryManager = libraryManager;
         _userManager = userManager;
         _logger = logger;
     }
@@ -47,13 +60,22 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback
     public string Description => "Live television and IPTV channels.";
 
     /// <inheritdoc />
-    public string DataVersion => "3";
+    public string DataVersion => "4";
 
     /// <inheritdoc />
     public string HomePageUrl => string.Empty;
 
     /// <inheritdoc />
     public ChannelParentalRating ParentalRating => ChannelParentalRating.GeneralAudience;
+
+    /// <inheritdoc />
+    public string? GetCacheKey(string? userId)
+    {
+        // Refresh now/next every 10 minutes so Fire TV tiles do not stay on a finished show.
+        var now = DateTime.UtcNow;
+        return now.ToString("yyyyMMddHH", System.Globalization.CultureInfo.InvariantCulture)
+               + (now.Minute / 10).ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
 
     /// <inheritdoc />
     public InternalChannelFeatures GetChannelFeatures()
@@ -63,7 +85,7 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback
             MediaTypes = [ChannelMediaType.Video],
             ContentTypes = [ChannelMediaContentType.TvExtra],
             DefaultSortFields = [ChannelItemSortField.Name],
-            AutoRefreshLevels = 2
+            AutoRefreshLevels = 3
         };
     }
 
@@ -96,12 +118,55 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback
             }
         }
 
-        var items = LiveTvLibraryChannelItems.Build(channels, query.FolderId);
+        if (channels.Count > 0)
+        {
+            try
+            {
+                await _listingsManager.AddProviderMetadata(channels, true, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Could not attach XMLTV logos to Live TV channel tiles");
+            }
+        }
+
+        var guide = LoadNowNext();
+        var items = LiveTvLibraryChannelItems.Build(channels, query.FolderId, guide);
         return new ChannelItemResult
         {
             Items = items,
             TotalRecordCount = items.Count
         };
+    }
+
+    private IReadOnlyDictionary<string, LiveTvNowNext> LoadNowNext()
+    {
+        try
+        {
+            var now = DateTime.UtcNow;
+            var liveTvChannels = _libraryManager.GetItemList(new InternalItemsQuery
+            {
+                IncludeItemTypes = [BaseItemKind.LiveTvChannel],
+                Recursive = true,
+                DtoOptions = new DtoOptions(false)
+            });
+
+            var programs = _libraryManager.GetItemList(new InternalItemsQuery
+            {
+                IncludeItemTypes = [BaseItemKind.LiveTvProgram],
+                Recursive = true,
+                MinEndDate = now,
+                MaxStartDate = now.AddHours(8),
+                DtoOptions = new DtoOptions(true)
+            }).OfType<LiveTvProgram>();
+
+            return LiveTvNowNextMap.Create(liveTvChannels, programs, now);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not load Live TV now/next for channel tiles");
+            return new Dictionary<string, LiveTvNowNext>(StringComparer.OrdinalIgnoreCase);
+        }
     }
 
     /// <inheritdoc />

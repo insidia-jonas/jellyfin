@@ -208,7 +208,7 @@ public class TunerHostManager : ITunerHostManager
             Type = "xmltv",
             Path = info.EpgUrl,
             UserAgent = info.UserAgent,
-            EnableAllTuners = false,
+            EnableAllTuners = true,
             EnabledTuners = [info.Id]
         };
 
