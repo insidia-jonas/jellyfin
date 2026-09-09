@@ -270,6 +270,104 @@ html.layout-tv,
     background: #07090f !important;
 }
 
+html.firetv-live-on .libraryPage .itemsContainer,
+body.firetv-live-on .libraryPage .itemsContainer,
+html.firetv-live-on .liveTvPage .itemsContainer,
+body.firetv-live-on .liveTvPage .itemsContainer {
+    display: none !important;
+}
+
+#firetv-live {
+    padding: 0.2em 0 2em;
+}
+
+#firetv-live .firetv-live-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.8em 1.2em;
+    margin: 0 0 0.9em;
+}
+
+#firetv-live .firetv-live-title {
+    font-size: 1.7em;
+    font-weight: 750;
+    color: #f4f7fb;
+    letter-spacing: 0.02em;
+}
+
+#firetv-live .firetv-live-count {
+    color: #9aa6b6;
+    font-weight: 600;
+}
+
+#firetv-live .firetv-live-search {
+    min-width: 18em;
+    padding: 0.45em 0.8em;
+    border: 0;
+    border-radius: 10px;
+    background: #151a24;
+    color: #f4f7fb;
+    font-size: 1.05em;
+}
+
+#firetv-live .firetv-live-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45em;
+    max-width: 74em;
+}
+
+#firetv-live .firetv-live-row {
+    display: flex;
+    align-items: center;
+    gap: 1em;
+    width: 100%;
+    min-height: 5.4em;
+    padding: 0.35em 0.7em;
+    border: 0;
+    border-radius: 10px;
+    background: #10141c;
+    color: #f4f7fb;
+    text-align: left;
+    outline: none;
+}
+
+#firetv-live .firetv-live-row.focused {
+    filter: brightness(1.12);
+    background: #1a2230;
+}
+
+#firetv-live .firetv-live-logo {
+    flex: 0 0 4.6em;
+    width: 4.6em;
+    height: 4.6em;
+    border-radius: 8px;
+    background: #151a24 center / contain no-repeat;
+}
+
+#firetv-live .firetv-live-copy {
+    min-width: 0;
+}
+
+#firetv-live .firetv-live-name {
+    font-size: 1.15em;
+    font-weight: 750;
+}
+
+#firetv-live .firetv-live-now {
+    margin-top: 0.2em;
+    color: #9aa6b6;
+    font-weight: 600;
+    font-size: 0.95em;
+}
+
+#firetv-live .firetv-live-empty {
+    color: #9aa6b6;
+    font-size: 1.1em;
+    padding: 1.2em 0;
+}
+
 .layout-tv .card[data-firetv-livetv="1"] .cardImageContainer,
 .layout-tv .card[data-firetv-livetv="1"] .cardImage,
 .layout-tv .card[data-firetv-livetv="1"] .coveredImage,

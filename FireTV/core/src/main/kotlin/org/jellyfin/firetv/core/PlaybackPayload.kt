@@ -38,6 +38,20 @@ object PlaybackPayload {
         }?.takeIf { it.isNotBlank() }
     }
 
+    fun itemExternalId(json: String): String? {
+        return jsonArrayObjects(json, "items").firstOrNull()?.let {
+            jsonStringField(it, "ExternalId") ?: jsonStringField(it, "externalId")
+        }?.takeIf { it.isNotBlank() }
+    }
+
+    fun channelId(json: String): String? {
+        val fromItem = jsonArrayObjects(json, "items").firstOrNull()?.let {
+            jsonStringField(it, "ChannelId") ?: jsonStringField(it, "channelId")
+        }
+        return fromItem?.takeIf { it.isNotBlank() }
+            ?: jsonStringField(json, "channelId")?.takeIf { it.isNotBlank() }
+    }
+
     fun serverAddress(json: String): String? {
         return jsonStringField(json, "serverAddress")?.trim()?.trimEnd('/')
     }
@@ -60,11 +74,13 @@ object PlaybackPayload {
     fun itemIds(json: String): List<String> {
         val fromItems = jsonArrayObjects(json, "items").mapNotNull { item ->
             (jsonStringField(item, "Id") ?: jsonStringField(item, "id"))?.takeIf { it.isNotBlank() }
+        }.distinct()
+        val fromIds = jsonStringArray(json, "ids").filter { it.isNotBlank() }.distinct()
+        return when {
+            fromIds.size > fromItems.size -> fromIds
+            fromItems.isNotEmpty() -> fromItems
+            else -> fromIds
         }
-        if (fromItems.isNotEmpty()) {
-            return fromItems.distinct()
-        }
-        return jsonStringArray(json, "ids").filter { it.isNotBlank() }.distinct()
     }
 
     fun nextItemId(json: String, currentId: String): String? {
@@ -94,10 +110,15 @@ object PlaybackPayload {
         val overview = match?.let { jsonStringField(it, "Overview") ?: jsonStringField(it, "overview") }
         val type = match?.let { jsonStringField(it, "Type") ?: jsonStringField(it, "type") }
         val media = match?.let { jsonStringField(it, "MediaType") ?: jsonStringField(it, "mediaType") }
-        val live = match?.let { jsonBooleanField(it, "IsLiveStream") } == true
+        val external = match?.let { jsonStringField(it, "ExternalId") ?: jsonStringField(it, "externalId") }
+        val channel = match?.let { jsonStringField(it, "ChannelId") ?: jsonStringField(it, "channelId") }
+        val live = match?.let { jsonBooleanField(it, "IsLiveStream") } == true ||
+            LivePlayback.isLiveType(type)
         return buildString {
             append('{')
-            append("\"ids\":[").append(jsonEscape(itemId)).append("],")
+            append("\"ids\":[")
+            append(itemIds(json).joinToString(",") { jsonEscape(it) }.ifBlank { jsonEscape(itemId) })
+            append("],")
             append("\"items\":[{")
             append("\"Id\":").append(jsonEscape(itemId)).append(',')
             append("\"Name\":").append(jsonEscape(name))
@@ -106,6 +127,12 @@ object PlaybackPayload {
             }
             if (!overview.isNullOrBlank()) {
                 append(",\"Overview\":").append(jsonEscape(overview))
+            }
+            if (!external.isNullOrBlank()) {
+                append(",\"ExternalId\":").append(jsonEscape(external))
+            }
+            if (!channel.isNullOrBlank()) {
+                append(",\"ChannelId\":").append(jsonEscape(channel))
             }
             if (!type.isNullOrBlank()) {
                 append(",\"Type\":").append(jsonEscape(type))

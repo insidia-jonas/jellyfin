@@ -51,6 +51,30 @@ class PlayUrlTest {
     }
 
     @Test
+    fun `rewrites loopback live proxy urls onto the fire tv server`() {
+        val url = PlayUrl.resolveLive(
+            "http://192.168.188.10:8096",
+            MediaSourceUrls(
+                path = "http://127.0.0.1:8096/LiveTv/LiveStreamFiles/abc/stream.ts",
+                supportsDirectPlay = true,
+            ),
+        )
+        assertEquals("http://192.168.188.10:8096/LiveTv/LiveStreamFiles/abc/stream.ts", url)
+    }
+
+    @Test
+    fun `rejects raw iptv ingest hosts for live playback`() {
+        val url = PlayUrl.resolveLive(
+            "http://192.168.188.10:8096",
+            MediaSourceUrls(
+                path = "http://nl01.provider.example:8080/prosieben.ts",
+                supportsDirectPlay = true,
+            ),
+        )
+        assertEquals(null, url)
+    }
+
+    @Test
     fun `filesystem path falls through to transcode`() {
         val url = PlayUrl.resolve(
             "http://192.168.1.10:8096",

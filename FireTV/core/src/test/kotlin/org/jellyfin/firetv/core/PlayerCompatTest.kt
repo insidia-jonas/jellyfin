@@ -28,6 +28,8 @@ class PlayerCompatTest {
         val next = PlaybackPayload.retarget(json, "b")
         assertEquals("b", PlaybackPayload.itemId(next))
         assertEquals("Two", PlaybackPayload.itemName(next))
+        assertEquals(listOf("a", "b", "c"), PlaybackPayload.itemIds(next))
+        assertEquals("c", PlaybackPayload.nextItemId(next, "b"))
         assertTrue(PlaybackPayload.isAudio(next))
         assertEquals("http://s:8096", PlaybackPayload.serverAddress(next))
         assertEquals("tok", PlaybackPayload.accessToken(next))

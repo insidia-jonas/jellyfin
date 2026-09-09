@@ -223,16 +223,16 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         }
         val dataSourceFactory = DefaultHttpDataSource.Factory()
             .setUserAgent("${resolved.appName}/${resolved.appVersion}")
-            .setConnectTimeoutMs(12_000)
-            .setReadTimeoutMs(20_000)
+            .setConnectTimeoutMs(if (resolved.isLive) 20_000 else 12_000)
+            .setReadTimeoutMs(if (resolved.isLive) 45_000 else 20_000)
             .setAllowCrossProtocolRedirects(true)
             .setDefaultRequestProperties(headers)
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                if (resolved.isLive) 1_500 else 3_000,
-                if (resolved.isLive) 8_000 else 20_000,
-                if (resolved.isLive) 500 else 1_000,
-                if (resolved.isLive) 1_500 else 2_500,
+                if (resolved.isLive) 2_500 else 3_000,
+                if (resolved.isLive) 15_000 else 20_000,
+                if (resolved.isLive) 1_500 else 1_000,
+                if (resolved.isLive) 3_000 else 2_500,
             )
             .build()
         val exo = ExoPlayer.Builder(this)
@@ -458,6 +458,23 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                 true
             }
             KeyEvent.KEYCODE_DPAD_UP,
+            -> {
+                if (playback?.isLive == true && playAdjacentFromQueue(next = false)) {
+                    true
+                } else {
+                    showTrackPanel()
+                    true
+                }
+            }
+            KeyEvent.KEYCODE_DPAD_DOWN,
+            -> {
+                if (playback?.isLive == true && playAdjacentFromQueue(next = true)) {
+                    true
+                } else {
+                    showOsd()
+                    true
+                }
+            }
             KeyEvent.KEYCODE_CAPTIONS,
             KeyEvent.KEYCODE_MENU,
             -> {

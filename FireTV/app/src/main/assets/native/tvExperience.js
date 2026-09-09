@@ -288,71 +288,9 @@
         return lang.indexOf("de") === 0;
     }
 
-    function paintLiveTvCard(card) {
-        var parsed = parseLiveTvCard(card);
-        if (!parsed) {
-            return;
-        }
-        var sig = [parsed.channel, parsed.now, parsed.next, parsed.folderLabel].join("|");
-        card.setAttribute("data-firetv-livetv", "1");
-        if (card.getAttribute("data-firetv-livetv-sig") === sig) {
-            return;
-        }
-        card.setAttribute("data-firetv-livetv-sig", sig);
-        var first = card.querySelector(".cardText-first") || card.querySelector(".cardText");
-        var second = card.querySelector(".cardText-secondary");
-        var host = first && first.parentNode;
-        if (first && parsed.channel) {
-            first.textContent = parsed.channel;
-        }
-        var nowLine = parsed.isFolder
-            ? parsed.folderLabel
-            : (parsed.now
-                ? ((germanUi() ? "Jetzt: " : "Now: ") + parsed.now + (parsed.nowRange ? " (" + parsed.nowRange + ")" : ""))
-                : "");
-        if (nowLine) {
-            if (!second && host) {
-                second = document.createElement("div");
-                second.className = "cardText cardText-secondary";
-                host.appendChild(second);
-            }
-            if (second) {
-                second.textContent = nowLine;
-            }
-        }
-        var nextHost = card.querySelector(".firetv-livetv-next");
-        if (parsed.next) {
-            if (!nextHost && host) {
-                nextHost = document.createElement("div");
-                nextHost.className = "cardText firetv-livetv-next";
-                host.appendChild(nextHost);
-            }
-            if (nextHost) {
-                nextHost.textContent = (germanUi() ? "Danach: " : "Next: ") + parsed.next +
-                    (parsed.nextRange ? " (" + parsed.nextRange + ")" : "");
-            }
-        } else if (nextHost) {
-            nextHost.textContent = "";
-        }
-    }
-
     function restyleLiveTvCards() {
-        var cards = all(".card, .posterItem");
-        var marked = [];
-        cards.forEach(function (card) {
-            if (looksLiveTvCard(card)) {
-                paintLiveTvCard(card);
-                marked.push(card);
-            }
-        });
-        if (marked.length || isLiveTvContext()) {
-            return;
-        }
-        var dotted = cards.filter(function (card) {
-            return cardPlainText(card).indexOf("  ·  ") !== -1;
-        });
-        if (dotted.length >= 4 && dotted.length >= cards.length * 0.55) {
-            dotted.forEach(paintLiveTvCard);
+        if (window.FireTvLive && typeof window.FireTvLive.sync === "function") {
+            window.FireTvLive.sync();
         }
     }
 

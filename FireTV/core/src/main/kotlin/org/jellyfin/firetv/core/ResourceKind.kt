@@ -24,7 +24,9 @@ object ResourceKind {
 
     fun isMedia(path: String): Boolean {
         val p = path.lowercase()
-        if (p.contains("/videos/") || p.contains("/audio/") || p.contains("/livestreams/")) {
+        if (p.contains("/videos/") || p.contains("/audio/") ||
+            p.contains("/livestreams/") || p.contains("/livestreamfiles/")
+        ) {
             return true
         }
         if (p.contains("/items/") && (p.contains("/download") || p.contains("/file"))) {

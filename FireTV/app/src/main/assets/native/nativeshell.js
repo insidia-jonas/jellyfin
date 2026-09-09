@@ -120,6 +120,12 @@
             script.async = true;
             parent.appendChild(script);
         }
+        if (!document.querySelector('script[src="/native/tvLive.js"]')) {
+            var live = document.createElement("script");
+            live.src = "/native/tvLive.js";
+            live.async = true;
+            parent.appendChild(live);
+        }
     }
 
     function patchHtml5Media() {
@@ -215,7 +221,7 @@
             deviceId: "firetv-web",
             deviceName: "Fire TV",
             appName: "Jellyfin Fire TV",
-            appVersion: "2.1.0"
+            appVersion: "2.2.0"
         };
     }
 
@@ -357,8 +363,9 @@
                     ServerId: item.ServerId,
                     Type: item.Type,
                     MediaType: item.MediaType,
-                    IsLiveStream: !!(item.IsLiveStream || item.Type === "TvChannel" || item.Type === "Program"),
+                    IsLiveStream: !!(item.IsLiveStream || item.Type === "TvChannel" || item.Type === "Program" || item.Type === "LiveTvProgram"),
                     ChannelId: item.ChannelId,
+                    ExternalId: item.ExternalId,
                     OriginalTitle: item.OriginalTitle,
                     Overview: item.Overview,
                     RunTimeTicks: item.RunTimeTicks,
@@ -397,10 +404,11 @@
         if (!window.NativePlayer || !window.NativePlayer.isEnabled()) {
             return false;
         }
-        if (playOptions && playOptions.fullscreen === false) {
+        if (this.playbackManager && this.playbackManager.syncPlayEnabled) {
             return false;
         }
-        if (this.playbackManager && this.playbackManager.syncPlayEnabled) {
+        var live = !!(item && (item.IsLiveStream || item.Type === "TvChannel" || item.Type === "Program" || item.Type === "LiveTvProgram"));
+        if (!live && playOptions && playOptions.fullscreen === false) {
             return false;
         }
         return true;

@@ -23,7 +23,7 @@ function collectAuth() {
         deviceId: device.deviceId || "",
         deviceName: device.deviceName || "Fire TV",
         appName: device.appName || "Jellyfin Fire TV",
-        appVersion: device.appVersion || "2.1.0"
+        appVersion: device.appVersion || "2.2.0"
     };
 }
 
@@ -43,8 +43,9 @@ function toPayload(options) {
                 ServerId: item.ServerId,
                 Type: item.Type,
                 MediaType: item.MediaType,
-                IsLiveStream: !!(item.IsLiveStream || item.Type === "TvChannel" || item.Type === "Program"),
+                IsLiveStream: !!(item.IsLiveStream || item.Type === "TvChannel" || item.Type === "Program" || item.Type === "LiveTvProgram"),
                 ChannelId: item.ChannelId,
+                ExternalId: item.ExternalId,
                 OriginalTitle: item.OriginalTitle,
                 Overview: item.Overview,
                 RunTimeTicks: item.RunTimeTicks,
@@ -107,15 +108,12 @@ export class ExoPlayerPlugin {
         if (!this._nativePlayer || !this._nativePlayer.isEnabled()) {
             return false;
         }
-        if (playOptions && playOptions.fullscreen === false) {
-            return false;
-        }
         if (this.playbackManager && this.playbackManager.syncPlayEnabled) {
             return false;
         }
-        var type = String(item && item.Type || "").toLowerCase();
-        if (type === "tvchannel" || type === "program" || type === "livetvprogram") {
-            return true;
+        var live = !!(item && (item.IsLiveStream || item.Type === "TvChannel" || item.Type === "Program" || item.Type === "LiveTvProgram"));
+        if (!live && playOptions && playOptions.fullscreen === false) {
+            return false;
         }
         return true;
     }

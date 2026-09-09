@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">Jellyfin</string>
     <string name="app_version_label">Version %1$s</string>
-    <string name="connect_kicker">Fire TV · 2.1</string>
+    <string name="connect_kicker">Fire TV · 2.2</string>
     <string name="connect_title">The cinema for your server.</string>
     <string name="connect_subtitle">The complete Jellyfin web UI, matched to this server. Movies, series, music, and Live TV play on the Fire TV player. Up opens audio and subtitles. Menu opens the client rail.</string>
     <string name="connect_form_title">Connect your server</string>
@@ -46,7 +46,7 @@
     <string name="press_back_again">Press Back again to exit</string>
     <string name="connected_as">Connected to %1$s</string>
     <string name="player_hints">OK pause · Left/Right skip · Up audio &amp; subtitles</string>
-    <string name="player_hints_live">OK pause · Up audio · Live</string>
+    <string name="player_hints_live">OK pause · Up/Down channel · Menu audio</string>
     <string name="player_hints_audio">OK pause · Next/Prev album · Up tracks</string>
     <string name="player_live">LIVE</string>
     <string name="player_remaining">−%1$s</string>

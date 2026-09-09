@@ -12,6 +12,7 @@ class ResourceKindTest {
         assertTrue(ResourceKind.isMedia("/Audio/abc/stream"))
         assertTrue(ResourceKind.isMedia("/Items/abc/Download"))
         assertTrue(ResourceKind.isMedia("/foo/clip.mkv"))
+        assertTrue(ResourceKind.isMedia("/LiveTv/LiveStreamFiles/abc/stream.ts"))
     }
 
     @Test

@@ -179,6 +179,65 @@ class StreamResolverTest {
             assertEquals("mpegts", resolved.container)
             assertTrue(resolved.url.contains("/LiveStreams/abc/stream.ts"))
             assertTrue(resolved.url.contains("api_key=t"))
+            assertTrue(resolved.url.startsWith("http://127.0.0.1:$port/"))
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `skips an empty file source and rewrites the loopback live proxy`() {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        var openedToken = ""
+        server.createContext("/Items/m3u_zdf/PlaybackInfo") { exchange ->
+            exchange.requestBody.readBytes()
+            val json = """
+                {
+                  "PlaySessionId": "live-session-2",
+                  "MediaSources": [
+                    {"Id":"file","Protocol":"File","Path":"","SupportsDirectPlay":true},
+                    {"Id":"tuner","RequiresOpening":true,"IsInfiniteStream":true,"OpenToken":"m3u_zdf","Path":"http://nl01.provider.example/zdf.ts","SupportsDirectPlay":true}
+                  ]
+                }
+            """.trimIndent()
+            val bytes = json.toByteArray()
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.createContext("/LiveStreams/Open") { exchange ->
+            openedToken = exchange.requestBody.readBytes().toString(Charsets.UTF_8)
+            val json = """
+                {
+                  "MediaSource": {
+                    "Id": "tuner",
+                    "Path": "http://127.0.0.1:8096/LiveTv/LiveStreamFiles/zdf/stream.ts",
+                    "LiveStreamId": "zdf",
+                    "IsInfiniteStream": true,
+                    "Container": "mpegts"
+                  }
+                }
+            """.trimIndent()
+            val bytes = json.toByteArray()
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.executor = Executors.newSingleThreadExecutor()
+        server.start()
+        try {
+            val port = server.address.port
+            val payload = """
+                {
+                  "items":[{"Id":"m3u_zdf","Name":"ZDF","Type":"TvChannel","ExternalId":"m3u_zdf","IsLiveStream":true}],
+                  "serverAddress":"http://127.0.0.1:$port",
+                  "accessToken":"t",
+                  "userId":"u"
+                }
+            """.trimIndent()
+            val resolved = StreamResolver.resolve(payload, ignoreSslErrors = false)
+            assertTrue(openedToken.contains("m3u_zdf"))
+            assertTrue(resolved.isLive)
+            assertEquals("http://127.0.0.1:$port/LiveTv/LiveStreamFiles/zdf/stream.ts?api_key=t", resolved.url)
+            assertTrue(!resolved.url.contains("provider.example"))
         } finally {
             server.stop(0)
         }
