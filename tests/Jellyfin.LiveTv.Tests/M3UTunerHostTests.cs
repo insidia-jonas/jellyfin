@@ -21,14 +21,12 @@ namespace Jellyfin.LiveTv.Tests
     public class M3UTunerHostTests
     {
         [Theory]
-        // A manifest is not a byte stream, so it must never be offered for direct play.
-        [InlineData("http://example.com/live/1234.m3u8", false)]
-        [InlineData("http://example.com/live/1234.m3u8?token=abc", false)]
-        [InlineData("http://example.com/live/1234.mpd", false)]
-        // Byte streams are unaffected.
-        [InlineData("http://example.com/live/1234.ts", true)]
-        [InlineData("http://example.com/live/1234", true)]
-        public async Task GetChannelStreamMediaSources_ManifestPath_DisablesDirectPlay(string path, bool expectDirectPlay)
+        [InlineData("http://example.com/live/1234.m3u8")]
+        [InlineData("http://example.com/live/1234.m3u8?token=abc")]
+        [InlineData("http://example.com/live/1234.mpd")]
+        [InlineData("http://example.com/live/1234.ts")]
+        [InlineData("http://example.com/live/1234")]
+        public async Task GetChannelStreamMediaSources_NeverAdvertisesDirectPlayOrProbe(string path)
         {
             var mediaSourceManager = new Mock<IMediaSourceManager>();
             mediaSourceManager.Setup(x => x.GetPathProtocol(It.IsAny<string>())).Returns(MediaProtocol.Http);
@@ -47,7 +45,9 @@ namespace Jellyfin.LiveTv.Tests
                 new TunerHostInfo { TunerCount = 0, EnableStreamLooping = false },
                 new ChannelInfo { Path = path });
 
-            Assert.Equal(expectDirectPlay, sources[0].SupportsDirectPlay);
+            Assert.False(sources[0].SupportsDirectPlay);
+            Assert.False(sources[0].SupportsProbing);
+            Assert.True(sources[0].RequiresOpening);
         }
 
         private sealed class TestableM3UTunerHost : M3UTunerHost

@@ -60,7 +60,7 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCa
     public string Description => "Live television and IPTV channels.";
 
     /// <inheritdoc />
-    public string DataVersion => "4";
+    public string DataVersion => "5";
 
     /// <inheritdoc />
     public string HomePageUrl => string.Empty;

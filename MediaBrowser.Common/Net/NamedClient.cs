@@ -24,5 +24,10 @@ namespace MediaBrowser.Common.Net
         /// Non happy eyeballs implementation.
         /// </summary>
         public const string DirectIp = nameof(DirectIp);
+
+        /// <summary>
+        /// IPTV live HTTP: no connection pooling, Connection: close, infinite timeout.
+        /// </summary>
+        public const string Iptv = nameof(Iptv);
     }
 }

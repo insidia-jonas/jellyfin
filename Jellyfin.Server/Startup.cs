@@ -3,6 +3,7 @@ using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Threading;
 using System.Net.Http.Headers;
 using System.Net.Mime;
 using System.Text;
@@ -123,6 +124,20 @@ namespace Jellyfin.Server
                     c.DefaultRequestHeaders.Accept.Add(acceptAnyHeader);
                 })
                 .ConfigurePrimaryHttpMessageHandler(defaultHttpClientHandlerDelegate);
+
+            services.AddHttpClient(NamedClient.Iptv, c =>
+                {
+                    c.Timeout = Timeout.InfiniteTimeSpan;
+                    c.DefaultRequestHeaders.Connection.Add("close");
+                })
+                .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+                {
+                    PooledConnectionLifetime = TimeSpan.Zero,
+                    PooledConnectionIdleTimeout = TimeSpan.Zero,
+                    MaxConnectionsPerServer = 4,
+                    AutomaticDecompression = DecompressionMethods.All,
+                    RequestHeaderEncodingSelector = (_, _) => Encoding.UTF8
+                });
 
             services.AddHealthChecks()
                 .AddCheck<DbContextFactoryHealthCheck<JellyfinDbContext>>(nameof(JellyfinDbContext));

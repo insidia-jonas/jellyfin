@@ -98,6 +98,38 @@ public class LiveTvLibraryChannelPlaybackTests
             Times.Never);
     }
 
+    [Theory]
+    [InlineData("m3u_abc")]
+    [InlineData("hdhr_12.1")]
+    public void IsTunerChannelId_TunerIds_AreAccepted(string id)
+    {
+        Assert.True(LiveTvLibraryChannelPlayback.IsTunerChannelId(id));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("g:News")]
+    [InlineData("imdb-tt123")]
+    [InlineData("c5-movies")]
+    public void IsTunerChannelId_NonTunerIds_AreRejected(string? id)
+    {
+        Assert.False(LiveTvLibraryChannelPlayback.IsTunerChannelId(id));
+    }
+
+    [Fact]
+    public async Task OpenAsync_NonTunerId_ThrowsFileNotFound()
+    {
+        var host = new Mock<ITunerHost>(MockBehavior.Strict);
+
+        await Assert.ThrowsAsync<FileNotFoundException>(() =>
+            LiveTvLibraryChannelPlayback.OpenAsync(
+                [host.Object],
+                "imdb-tt123",
+                [],
+                CancellationToken.None));
+    }
+
     [Fact]
     public async Task OpenAsync_MissingTuner_ThrowsResourceNotFound()
     {

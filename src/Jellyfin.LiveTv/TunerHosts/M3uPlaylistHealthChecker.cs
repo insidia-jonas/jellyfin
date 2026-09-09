@@ -3,15 +3,13 @@ using System.Diagnostics;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using MediaBrowser.Common.Net;
 using MediaBrowser.Model.LiveTv;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.LiveTv.TunerHosts;
 
 /// <summary>
-/// Probes M3U listing URLs and ingest hosts. Never opens a media stream — IPTV providers
-/// treat a TS GET as a viewer and then refuse a second device.
+/// Probes M3U listing playlists only. Never contacts ingest hosts or opens a media stream.
 /// </summary>
 public sealed class M3uPlaylistHealthChecker
 {
@@ -38,9 +36,10 @@ public sealed class M3uPlaylistHealthChecker
         {
             if (M3uUrlFailover.IsIngestEndpoint(playlistUrl))
             {
-                var reachable = await ProbeHostAsync(playlistUrl, info, cancellationToken).ConfigureAwait(false);
+                // Never touch ingest hosts from the health task. A HEAD/GET to the
+                // stream origin is treated as a viewer by many IPTV providers.
                 stopwatch.Stop();
-                return Result(playlistUrl, reachable, stopwatch.ElapsedMilliseconds, 0, 0);
+                return Result(playlistUrl, false, stopwatch.ElapsedMilliseconds, 0, 0);
             }
 
             var probeInfo = new TunerHostInfo
@@ -85,42 +84,4 @@ public sealed class M3uPlaylistHealthChecker
             BytesRead = bytesRead,
             Score = Score(success, elapsedMs)
         };
-
-    private async Task<bool> ProbeHostAsync(string hostUrl, TunerHostInfo info, CancellationToken cancellationToken)
-    {
-        if (!Uri.TryCreate(hostUrl, UriKind.Absolute, out var uri))
-        {
-            return false;
-        }
-
-        var root = new UriBuilder(uri) { Path = "/", Query = string.Empty }.Uri;
-        try
-        {
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(3));
-
-            using var request = new HttpRequestMessage(HttpMethod.Head, root);
-            request.Headers.ConnectionClose = true;
-            if (!string.IsNullOrWhiteSpace(info.UserAgent))
-            {
-                request.Headers.TryAddWithoutValidation("User-Agent", info.UserAgent);
-            }
-
-            using var response = await _httpClientFactory.CreateClient(NamedClient.Default)
-                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token)
-                .ConfigureAwait(false);
-
-            // Any HTTP response means the ingest host is reachable. Do not follow up with a TS GET.
-            return true;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Ingest host probe failed for {Url}", hostUrl);
-            return false;
-        }
-    }
 }

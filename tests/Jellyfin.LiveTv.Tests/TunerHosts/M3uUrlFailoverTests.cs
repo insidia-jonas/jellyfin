@@ -39,6 +39,7 @@ public class M3uUrlFailoverTests
         Assert.False(M3uUrlFailover.IsIngestEndpoint("http://cdn.example/iptv/p/token/list.m3u?p=1"));
         Assert.Equal("http://cdn.example/iptv/p/token/list.m3u?p=1", M3uUrlFailover.GetPlaylistUrl(info));
         Assert.Equal(["http://nl01.example", "http://am01.example"], M3uUrlFailover.GetHealthCandidates(info));
+        Assert.Equal(["http://cdn.example/iptv/p/token/list.m3u?p=1"], M3uUrlFailover.GetListingHealthCandidates(info));
         Assert.Equal("http://nl01.example", info.ActiveUrl);
         Assert.Equal("http://nl01.example", M3uUrlFailover.GetPrimaryUrl(info));
     }

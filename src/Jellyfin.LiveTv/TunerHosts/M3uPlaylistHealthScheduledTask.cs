@@ -48,7 +48,7 @@ public class M3uPlaylistHealthScheduledTask : IScheduledTask, IConfigurableSched
     public string Key => "M3uPlaylistHealth";
 
     /// <inheritdoc />
-    public string Description => "Checks M3U playlist and ingest-host reachability (never opens a TV stream) and switches if another server is healthier.";
+    public string Description => "Compares M3U listing playlists only (never contacts ingest hosts) and switches the listing URL if another is healthier.";
 
     /// <inheritdoc />
     public string Category => "Live TV";
@@ -112,7 +112,7 @@ public class M3uPlaylistHealthScheduledTask : IScheduledTask, IConfigurableSched
 
     private async Task<bool> UpdateTunerAsync(TunerHostInfo tuner, CancellationToken cancellationToken)
     {
-        var candidates = M3uUrlFailover.GetHealthCandidates(tuner);
+        var candidates = M3uUrlFailover.GetListingHealthCandidates(tuner);
         if (candidates.Count <= 1)
         {
             return false;

@@ -130,7 +130,10 @@ namespace Jellyfin.LiveTv.TunerHosts
                 channel.Path,
                 M3uUrlFailover.GetPrimaryUrl(info));
 
-            var supportsDirectPlay = !info.EnableStreamLooping && info.TunerCount == 0;
+            // Never advertise DirectPlay. Fire TV would hit the raw IPTV URL (no VLC
+            // user-agent) while AutoOpen also holds a server connection — two slots,
+            // and the client play usually fails.
+            var supportsDirectPlay = false;
             var supportsDirectStream = !info.EnableStreamLooping;
 
             var protocol = _mediaSourceManager.GetPathProtocol(path);
@@ -189,6 +192,7 @@ namespace Jellyfin.LiveTv.TunerHosts
                 RequiresOpening = true,
                 RequiresClosing = true,
                 RequiresLooping = info.EnableStreamLooping,
+                SupportsProbing = false,
 
                 ReadAtNativeFramerate = info.ReadAtNativeFramerate,
 

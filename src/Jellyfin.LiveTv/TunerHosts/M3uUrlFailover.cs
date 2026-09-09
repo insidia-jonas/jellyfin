@@ -122,6 +122,21 @@ internal static class M3uUrlFailover
     }
 
     /// <summary>
+    /// Listing playlist URLs only. Never includes host-only ingest endpoints —
+    /// probing those counts as a viewer on some IPTV providers.
+    /// </summary>
+    /// <param name="info">The tuner host.</param>
+    /// <returns>Playlist URLs, or empty when the tuner is ingest-only.</returns>
+    public static IReadOnlyList<string> GetListingHealthCandidates(TunerHostInfo info)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+
+        return GetCandidateUrls(info)
+            .Where(static url => !IsIngestEndpoint(url))
+            .ToArray();
+    }
+
+    /// <summary>
     /// Returns true when the URL is an ingest origin (scheme + host, no playlist path).
     /// </summary>
     /// <param name="url">The candidate URL.</param>
