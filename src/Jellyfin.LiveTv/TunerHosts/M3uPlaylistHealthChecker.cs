@@ -1,6 +1,5 @@
 using System;
 using System.Diagnostics;
-using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,12 +10,11 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.LiveTv.TunerHosts;
 
 /// <summary>
-/// Probes M3U playlist ingest servers and scores them for hang-free delivery.
+/// Probes M3U listing URLs and ingest hosts. Never opens a media stream — IPTV providers
+/// treat a TS GET as a viewer and then refuse a second device.
 /// </summary>
 public sealed class M3uPlaylistHealthChecker
 {
-    private const int ProbeBytes = 65536;
-
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<M3uPlaylistHealthChecker> _logger;
 
@@ -38,13 +36,16 @@ public sealed class M3uPlaylistHealthChecker
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            var listingUrl = M3uUrlFailover.IsIngestEndpoint(playlistUrl)
-                ? M3uUrlFailover.GetPlaylistUrl(info)
-                : playlistUrl;
+            if (M3uUrlFailover.IsIngestEndpoint(playlistUrl))
+            {
+                var reachable = await ProbeHostAsync(playlistUrl, info, cancellationToken).ConfigureAwait(false);
+                stopwatch.Stop();
+                return Result(playlistUrl, reachable, stopwatch.ElapsedMilliseconds, 0, 0);
+            }
 
             var probeInfo = new TunerHostInfo
             {
-                Url = listingUrl,
+                Url = playlistUrl,
                 UserAgent = info.UserAgent,
                 Referrer = info.Referrer
             };
@@ -53,94 +54,64 @@ public sealed class M3uPlaylistHealthChecker
                 .ParsePlaylist(probeInfo, "probe_", cancellationToken)
                 .ConfigureAwait(false);
 
-            var playlistMs = stopwatch.ElapsedMilliseconds;
-            var streamBytes = 0;
-            var streamOk = false;
-
-            foreach (var channel in playlist.Channels.Take(3))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var streamUrl = M3uUrlFailover.RewriteStreamUrl(channel.Path, playlistUrl);
-                var (ok, bytes) = await ProbeStreamAsync(streamUrl, info, cancellationToken).ConfigureAwait(false);
-                streamBytes = Math.Max(streamBytes, bytes);
-                if (ok)
-                {
-                    streamOk = true;
-                    break;
-                }
-            }
-
             stopwatch.Stop();
-            var success = playlist.Channels.Count > 0 && streamOk;
-            var score = success
-                ? (streamBytes + 1d) / Math.Max(stopwatch.ElapsedMilliseconds, 1d)
-                : -1;
-
-            return new M3uPlaylistHealthResult
-            {
-                Url = playlistUrl,
-                Success = success,
-                ElapsedMs = stopwatch.ElapsedMilliseconds,
-                PlaylistMs = playlistMs,
-                BytesRead = streamBytes,
-                Score = score
-            };
+            var count = playlist.Channels.Count;
+            return Result(playlistUrl, count > 0, stopwatch.ElapsedMilliseconds, stopwatch.ElapsedMilliseconds, 0);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             stopwatch.Stop();
             _logger.LogWarning(ex, "Health probe failed for playlist {Url}", playlistUrl);
-            return new M3uPlaylistHealthResult
-            {
-                Url = playlistUrl,
-                Success = false,
-                ElapsedMs = stopwatch.ElapsedMilliseconds,
-                Score = -1
-            };
+            return Result(playlistUrl, false, stopwatch.ElapsedMilliseconds, 0, 0);
         }
     }
 
-    private async Task<(bool Success, int BytesRead)> ProbeStreamAsync(string streamUrl, TunerHostInfo info, CancellationToken cancellationToken)
+    /// <summary>
+    /// Scores a listing or host probe. Failed probes are -1.
+    /// </summary>
+    /// <param name="success">Whether the probe reached a usable listing or host.</param>
+    /// <param name="elapsedMs">Elapsed milliseconds.</param>
+    /// <returns>The score.</returns>
+    internal static double Score(bool success, long elapsedMs)
+        => success ? 1000d / Math.Max(elapsedMs, 1d) : -1;
+
+    private static M3uPlaylistHealthResult Result(string url, bool success, long elapsedMs, long playlistMs, int bytesRead)
+        => new()
+        {
+            Url = url,
+            Success = success,
+            ElapsedMs = elapsedMs,
+            PlaylistMs = playlistMs,
+            BytesRead = bytesRead,
+            Score = Score(success, elapsedMs)
+        };
+
+    private async Task<bool> ProbeHostAsync(string hostUrl, TunerHostInfo info, CancellationToken cancellationToken)
     {
+        if (!Uri.TryCreate(hostUrl, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        var root = new UriBuilder(uri) { Path = "/", Query = string.Empty }.Uri;
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, streamUrl);
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(3));
+
+            using var request = new HttpRequestMessage(HttpMethod.Head, root);
+            request.Headers.ConnectionClose = true;
             if (!string.IsNullOrWhiteSpace(info.UserAgent))
             {
                 request.Headers.TryAddWithoutValidation("User-Agent", info.UserAgent);
             }
 
-            if (!string.IsNullOrWhiteSpace(info.Referrer))
-            {
-                request.Headers.TryAddWithoutValidation("Referer", info.Referrer);
-            }
-
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(8));
-
             using var response = await _httpClientFactory.CreateClient(NamedClient.Default)
                 .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token)
                 .ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
 
-            var stream = await response.Content.ReadAsStreamAsync(timeoutCts.Token).ConfigureAwait(false);
-            await using (stream.ConfigureAwait(false))
-            {
-                var buffer = new byte[8192];
-                var total = 0;
-                while (total < ProbeBytes)
-                {
-                    var read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), timeoutCts.Token).ConfigureAwait(false);
-                    if (read == 0)
-                    {
-                        break;
-                    }
-
-                    total += read;
-                }
-
-                return (total > 0, total);
-            }
+            // Any HTTP response means the ingest host is reachable. Do not follow up with a TS GET.
+            return true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -148,8 +119,8 @@ public sealed class M3uPlaylistHealthChecker
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Stream probe failed for {Url}", streamUrl);
-            return (false, 0);
+            _logger.LogDebug(ex, "Ingest host probe failed for {Url}", hostUrl);
+            return false;
         }
     }
 }

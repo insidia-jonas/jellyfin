@@ -48,7 +48,7 @@ public class M3uPlaylistHealthScheduledTask : IScheduledTask, IConfigurableSched
     public string Key => "M3uPlaylistHealth";
 
     /// <inheritdoc />
-    public string Description => "Tests M3U ingest servers and switches to the URL with the most reliable, hang-free delivery.";
+    public string Description => "Checks M3U playlist and ingest-host reachability (never opens a TV stream) and switches if another server is healthier.";
 
     /// <inheritdoc />
     public string Category => "Live TV";
@@ -126,12 +126,11 @@ public class M3uPlaylistHealthScheduledTask : IScheduledTask, IConfigurableSched
         {
             var result = await _healthChecker.ProbeAsync(url, tuner, cancellationToken).ConfigureAwait(false);
             _logger.LogInformation(
-                "M3U health {Url}: success={Success} score={Score:0.###} elapsed={Elapsed}ms bytes={Bytes}",
+                "M3U health {Url}: success={Success} score={Score:0.###} elapsed={Elapsed}ms (listing/host only, no TV stream)",
                 result.Url,
                 result.Success,
                 result.Score,
-                result.ElapsedMs,
-                result.BytesRead);
+                result.ElapsedMs);
 
             if (string.Equals(url, currentUrl, StringComparison.OrdinalIgnoreCase))
             {
