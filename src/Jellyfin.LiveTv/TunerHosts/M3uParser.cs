@@ -36,6 +36,9 @@ namespace Jellyfin.LiveTv.TunerHosts
         [GeneratedRegex(@"([a-z0-9\-_]+)=\""([^""]+)\""", RegexOptions.IgnoreCase, "en-US")]
         private static partial Regex KeyValueRegex();
 
+        [GeneratedRegex(@"([a-z0-9\-_]+)=([^\s"",]+)", RegexOptions.IgnoreCase, "en-US")]
+        private static partial Regex UnquotedKeyValueRegex();
+
         public async Task<List<ChannelInfo>> Parse(TunerHostInfo info, string channelIdPrefix, CancellationToken cancellationToken)
         {
             var playlist = await ParsePlaylist(info, channelIdPrefix, cancellationToken).ConfigureAwait(false);
@@ -79,6 +82,8 @@ namespace Jellyfin.LiveTv.TunerHosts
         {
             var playlist = new M3uPlaylist();
             string extInf = string.Empty;
+            string extGrp = string.Empty;
+            var pendingHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
             await foreach (var line in reader.ReadAllLinesAsync().ConfigureAwait(false))
             {
@@ -96,33 +101,77 @@ namespace Jellyfin.LiveTv.TunerHosts
 
                 if (trimmedLine.StartsWith("#EXTVLCOPT:", StringComparison.OrdinalIgnoreCase))
                 {
-                    ApplyVlcOpt(playlist, trimmedLine["#EXTVLCOPT:".Length..]);
+                    ApplyVlcOpt(
+                        string.IsNullOrWhiteSpace(extInf) ? playlist : null,
+                        string.IsNullOrWhiteSpace(extInf) ? null : pendingHeaders,
+                        trimmedLine["#EXTVLCOPT:".Length..]);
+                    continue;
+                }
+
+                if (trimmedLine.StartsWith("#KODIPROP:", StringComparison.OrdinalIgnoreCase))
+                {
+                    ApplyKodiProp(
+                        string.IsNullOrWhiteSpace(extInf) ? playlist : null,
+                        string.IsNullOrWhiteSpace(extInf) ? null : pendingHeaders,
+                        trimmedLine["#KODIPROP:".Length..]);
+                    continue;
+                }
+
+                if (trimmedLine.StartsWith("#EXTGRP:", StringComparison.OrdinalIgnoreCase))
+                {
+                    extGrp = FirstGroupName(trimmedLine["#EXTGRP:".Length..]);
                     continue;
                 }
 
                 if (trimmedLine.StartsWith(ExtInfPrefix, StringComparison.OrdinalIgnoreCase))
                 {
                     extInf = trimmedLine.Substring(ExtInfPrefix.Length).Trim();
+                    pendingHeaders.Clear();
                 }
                 else if (!string.IsNullOrWhiteSpace(extInf) && !trimmedLine.StartsWith('#'))
                 {
-                    if (!IsValidChannelUrl(trimmedLine))
+                    var (url, urlHeaders) = M3uStreamUrl.Split(trimmedLine);
+                    if (!IsValidChannelUrl(url))
                     {
                         _logger.LogWarning("Skipping M3U channel entry with non-HTTP path: {Path}", trimmedLine);
                         extInf = string.Empty;
+                        pendingHeaders.Clear();
                         continue;
                     }
 
-                    var channel = GetChannelInfo(extInf, tunerHostId, trimmedLine);
+                    var channel = GetChannelInfo(extInf, tunerHostId, url);
+                    if (string.IsNullOrWhiteSpace(channel.ChannelGroup) && !string.IsNullOrWhiteSpace(extGrp))
+                    {
+                        channel.ChannelGroup = extGrp;
+                    }
+
+                    var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    CopyPlaylistIdentity(headers, playlist);
+                    foreach (var header in pendingHeaders)
+                    {
+                        headers[header.Key] = header.Value;
+                    }
+
+                    foreach (var header in urlHeaders)
+                    {
+                        headers[header.Key] = header.Value;
+                    }
+
+                    if (headers.Count > 0)
+                    {
+                        channel.RequiredHttpHeaders = headers;
+                    }
+
                     var stableKey = string.IsNullOrWhiteSpace(channel.TunerChannelId)
-                        ? M3uUrlFailover.StableStreamKey(trimmedLine)
+                        ? M3uUrlFailover.StableStreamKey(url)
                         : channel.TunerChannelId;
                     channel.Id = channelIdPrefix + stableKey.GetMD5().ToString("N", CultureInfo.InvariantCulture);
 
-                    channel.Path = trimmedLine;
+                    channel.Path = url;
                     playlist.Channels.Add(channel);
                     _logger.LogDebug("Parsed channel: {ChannelName}", channel.Name);
                     extInf = string.Empty;
+                    pendingHeaders.Clear();
                 }
             }
 
@@ -139,31 +188,111 @@ namespace Jellyfin.LiveTv.TunerHosts
                 ?? GetAttribute(attributes, "tvg-url"));
         }
 
-        private static void ApplyVlcOpt(M3uPlaylist playlist, string option)
+        private static void ApplyVlcOpt(M3uPlaylist playlist, Dictionary<string, string> channelHeaders, string option)
         {
+            if (!TrySplitOption(option, out var key, out var value))
+            {
+                return;
+            }
+
+            if (playlist is not null)
+            {
+                ApplyPlaylistIdentity(playlist, key, value);
+            }
+
+            if (channelHeaders is not null)
+            {
+                M3uStreamUrl.ApplyIdentityHeader(channelHeaders, key, value);
+            }
+        }
+
+        private static void ApplyKodiProp(M3uPlaylist playlist, Dictionary<string, string> channelHeaders, string option)
+        {
+            if (!TrySplitOption(option, out var key, out var value))
+            {
+                return;
+            }
+
+            if (key.Equals("inputstream.adaptive.stream_headers", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("inputstream.ffmpegdirect.http-header", StringComparison.OrdinalIgnoreCase))
+            {
+                if (playlist is not null)
+                {
+                    var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    M3uStreamUrl.ApplyHeaderPairs(headers, value);
+                    foreach (var header in headers)
+                    {
+                        ApplyPlaylistIdentity(playlist, header.Key, header.Value);
+                    }
+                }
+
+                if (channelHeaders is not null)
+                {
+                    M3uStreamUrl.ApplyHeaderPairs(channelHeaders, value);
+                }
+
+                return;
+            }
+
+            ApplyVlcOpt(playlist, channelHeaders, option);
+        }
+
+        private static bool TrySplitOption(string option, out string key, out string value)
+        {
+            key = string.Empty;
+            value = string.Empty;
             var trimmed = option.Trim();
             var separator = trimmed.IndexOf('=', StringComparison.Ordinal);
             if (separator <= 0)
             {
-                return;
+                return false;
             }
 
-            var key = trimmed[..separator].Trim();
-            var value = trimmed[(separator + 1)..].Trim().Trim('"');
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return;
-            }
+            key = trimmed[..separator].Trim();
+            value = trimmed[(separator + 1)..].Trim().Trim('"');
+            return !string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value);
+        }
 
-            if (key.Equals("http-user-agent", StringComparison.OrdinalIgnoreCase))
+        private static void ApplyPlaylistIdentity(M3uPlaylist playlist, string key, string value)
+        {
+            if (key.Equals("http-user-agent", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("user-agent", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("User-Agent", StringComparison.OrdinalIgnoreCase))
             {
                 playlist.UserAgent ??= value;
             }
             else if (key.Equals("http-referrer", StringComparison.OrdinalIgnoreCase)
-                     || key.Equals("http-referer", StringComparison.OrdinalIgnoreCase))
+                     || key.Equals("http-referer", StringComparison.OrdinalIgnoreCase)
+                     || key.Equals("referrer", StringComparison.OrdinalIgnoreCase)
+                     || key.Equals("referer", StringComparison.OrdinalIgnoreCase)
+                     || key.Equals("Referer", StringComparison.OrdinalIgnoreCase))
             {
                 playlist.Referrer ??= value;
             }
+        }
+
+        private static void CopyPlaylistIdentity(Dictionary<string, string> headers, M3uPlaylist playlist)
+        {
+            if (!string.IsNullOrWhiteSpace(playlist.UserAgent))
+            {
+                headers["User-Agent"] = playlist.UserAgent;
+            }
+
+            if (!string.IsNullOrWhiteSpace(playlist.Referrer))
+            {
+                headers["Referer"] = playlist.Referrer;
+            }
+        }
+
+        private static string FirstGroupName(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return string.Empty;
+            }
+
+            var parts = raw.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            return parts.Length > 0 ? parts[0] : string.Empty;
         }
 
         private static string GetAttribute(Dictionary<string, string> attributes, string key)
@@ -214,7 +343,18 @@ namespace Jellyfin.LiveTv.TunerHosts
 
             if (attributes.TryGetValue("group-title", out string groupTitle))
             {
-                channel.ChannelGroup = groupTitle;
+                channel.ChannelGroup = FirstGroupName(groupTitle);
+            }
+
+            if (attributes.TryGetValue("tvg-name", out string tvgName))
+            {
+                channel.TvgName = tvgName;
+            }
+
+            if (attributes.TryGetValue("radio", out string radio)
+                && radio.Equals("true", StringComparison.OrdinalIgnoreCase))
+            {
+                channel.ChannelType = ChannelType.Radio;
             }
 
             channel.Name = GetChannelName(extInf, attributes);
@@ -413,6 +553,17 @@ namespace Jellyfin.LiveTv.TunerHosts
 
                 dict[key] = value;
                 remaining = remaining.Replace(key + "=\"" + value + "\"", string.Empty, StringComparison.OrdinalIgnoreCase);
+            }
+
+            foreach (Match match in UnquotedKeyValueRegex().Matches(remaining))
+            {
+                var key = match.Groups[1].Value;
+                if (dict.ContainsKey(key))
+                {
+                    continue;
+                }
+
+                dict[key] = match.Groups[2].Value;
             }
 
             return dict;

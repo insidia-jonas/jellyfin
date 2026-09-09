@@ -2,6 +2,7 @@
 
 #pragma warning disable CS1591
 
+using System.Collections.Generic;
 using MediaBrowser.Model.LiveTv;
 
 namespace MediaBrowser.Controller.LiveTv
@@ -84,5 +85,16 @@ namespace MediaBrowser.Controller.LiveTv
         public string VideoCodec { get; set; }
 
         public string[] Tags { get; set; }
+
+        /// <summary>
+        /// Gets or sets the M3U <c>tvg-name</c> used to match XMLTV channels (Kodi IPTV Simple).
+        /// </summary>
+        public string TvgName { get; set; }
+
+        /// <summary>
+        /// Gets or sets HTTP headers from <c>#EXTVLCOPT</c>, <c>#KODIPROP</c>, or a Kodi-style
+        /// <c>|user-agent=</c> stream URL suffix.
+        /// </summary>
+        public Dictionary<string, string> RequiredHttpHeaders { get; set; }
     }
 }

@@ -126,9 +126,11 @@ namespace Jellyfin.LiveTv.TunerHosts
 
         protected virtual MediaSourceInfo CreateMediaSourceInfo(TunerHostInfo info, ChannelInfo channel)
         {
-            var path = M3uUrlFailover.RewriteStreamUrl(
-                channel.Path,
-                M3uUrlFailover.GetPrimaryUrl(info));
+            var path = M3uStreamUrl.SubstituteLiveNow(
+                M3uUrlFailover.RewriteStreamUrl(
+                    channel.Path,
+                    M3uUrlFailover.GetPrimaryUrl(info)),
+                DateTime.UtcNow);
 
             // Never advertise DirectPlay. Fire TV would hit the raw IPTV URL (no VLC
             // user-agent) while AutoOpen also holds a server connection — two slots,
@@ -153,16 +155,30 @@ namespace Jellyfin.LiveTv.TunerHosts
                 supportsDirectPlay = false;
             }
 
-            var httpHeaders = new Dictionary<string, string>();
+            var httpHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
             if (protocol == MediaProtocol.Http)
             {
-                // Use user-defined user-agent. If there isn't one, make it look like a browser.
-                httpHeaders[HeaderNames.UserAgent] = string.IsNullOrWhiteSpace(info.UserAgent) ?
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" :
-                    info.UserAgent;
+                if (channel.RequiredHttpHeaders is not null)
+                {
+                    foreach (var header in channel.RequiredHttpHeaders)
+                    {
+                        if (!string.IsNullOrWhiteSpace(header.Key) && !string.IsNullOrWhiteSpace(header.Value))
+                        {
+                            httpHeaders[header.Key] = header.Value;
+                        }
+                    }
+                }
 
-                if (!string.IsNullOrWhiteSpace(info.Referrer))
+                if (!httpHeaders.ContainsKey(HeaderNames.UserAgent))
+                {
+                    httpHeaders[HeaderNames.UserAgent] = string.IsNullOrWhiteSpace(info.UserAgent)
+                        ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                        : info.UserAgent;
+                }
+
+                if (!httpHeaders.ContainsKey(HeaderNames.Referer)
+                    && !string.IsNullOrWhiteSpace(info.Referrer))
                 {
                     httpHeaders[HeaderNames.Referer] = info.Referrer;
                 }

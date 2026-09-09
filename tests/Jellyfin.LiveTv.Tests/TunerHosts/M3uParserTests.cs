@@ -38,6 +38,37 @@ public class M3uParserTests
     }
 
     [Fact]
+    public async Task ParsePlaylist_ReadsKodiHeadersGroupsAndTvgName()
+    {
+        var playlist = await ParseFileAsync("Test Data/LiveTv/m3u/iptv-kodi-headers.m3u");
+
+        Assert.Equal(3, playlist.Channels.Count);
+
+        var ard = playlist.Channels[0];
+        Assert.Equal("Das Erste", ard.Name);
+        Assert.Equal("Das_Erste", ard.TvgName);
+        Assert.Equal("DE", ard.ChannelGroup);
+        Assert.Equal("http://ingest.example/ard.ts", ard.Path);
+        Assert.Equal("OverrideAgent", ard.RequiredHttpHeaders["User-Agent"]);
+        Assert.Equal("https://pipe.example", ard.RequiredHttpHeaders["Referer"]);
+        Assert.Equal("https://provider.example", ard.RequiredHttpHeaders["Origin"]);
+
+        var sky = playlist.Channels[1];
+        Assert.Equal("Sky Sport", sky.Name);
+        Assert.Equal("Sports", sky.ChannelGroup);
+        Assert.Equal("http://ingest.example/sky.ts?start={lutc}", sky.Path);
+        Assert.Null(sky.RequiredHttpHeaders);
+
+        var unquoted = playlist.Channels[2];
+        Assert.Equal("Unquoted", unquoted.Name);
+        Assert.Equal("unquoted.de", unquoted.TunerChannelId);
+        Assert.Equal("UnquotedName", unquoted.TvgName);
+        Assert.Equal("News", unquoted.ChannelGroup);
+        Assert.Equal("KodiAgent", unquoted.RequiredHttpHeaders["User-Agent"]);
+        Assert.Equal("https://kodi.example", unquoted.RequiredHttpHeaders["Origin"]);
+    }
+
+    [Fact]
     public async Task ParsePlaylist_UsesXTvgUrlWhenUrlTvgMissing()
     {
         var playlist = await ParseFileAsync("Test Data/LiveTv/m3u/iptv-xtvg-only.m3u");

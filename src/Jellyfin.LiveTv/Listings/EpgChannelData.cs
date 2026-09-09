@@ -28,12 +28,22 @@ namespace Jellyfin.LiveTv.Listings
                     _channelsById.TryAdd(channel.CallSign, channel);
                 }
 
+                if (!string.IsNullOrEmpty(channel.TvgName))
+                {
+                    _channelsById.TryAdd(channel.TvgName, channel);
+                }
+
                 if (!string.IsNullOrEmpty(channel.Number))
                 {
                     _channelsByNumber[channel.Number] = channel;
                 }
 
                 foreach (var name in NameKeys(channel.Name))
+                {
+                    _channelsByName.TryAdd(name, channel);
+                }
+
+                foreach (var name in NameKeys(channel.TvgName))
                 {
                     _channelsByName.TryAdd(name, channel);
                 }
@@ -62,7 +72,9 @@ namespace Jellyfin.LiveTv.Listings
         public static string NormalizeName(string value)
         {
             return StripQualitySuffix(
-                value.Replace(" ", string.Empty, StringComparison.Ordinal).Replace("-", string.Empty, StringComparison.Ordinal));
+                value.Replace(" ", string.Empty, StringComparison.Ordinal)
+                    .Replace("-", string.Empty, StringComparison.Ordinal)
+                    .Replace("_", string.Empty, StringComparison.Ordinal));
         }
 
         private static IEnumerable<string> NameKeys(string? name)
