@@ -1,0 +1,12 @@
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+.cxx/
+captures/
+*.apk
+!sideload/Jellyfin-FireTV.apk
+*.aab
+*.ap_
+*.dex
