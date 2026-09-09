@@ -1164,6 +1164,14 @@ namespace MediaBrowser.Controller.Entities
                 {
                     return sources;
                 }
+
+                // Live IChannel items (IPTV) have no file path. Do not invent a
+                // Protocol=File source — Fire TV picks it over the real live stream
+                // and AutoOpen never opens the tuner.
+                if (string.IsNullOrEmpty(Path))
+                {
+                    return Array.Empty<MediaSourceInfo>();
+                }
             }
 
             var list = GetAllItemsForMediaSources().ToList();
@@ -2022,7 +2030,7 @@ namespace MediaBrowser.Controller.Entities
 
         public virtual string GetClientTypeName()
         {
-            if (IsFolder && SourceType == SourceType.Channel && this is not Channel && this is not Season && this is not Series)
+            if (IsFolder && SourceType == SourceType.Channel && this is not Channel && this is not Season && this is not Series && this is not Movies.BoxSet)
             {
                 return "ChannelFolderItem";
             }

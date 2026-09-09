@@ -20,6 +20,8 @@ namespace Jellyfin.LiveTv.TunerHosts
     public class LiveStream : ILiveStream
     {
         private readonly IConfigurationManager _configurationManager;
+        private int _activeReaders;
+        private DateTime _lastReaderReleasedUtc;
 
         public LiveStream(
             MediaSourceInfo mediaSource,
@@ -74,6 +76,15 @@ namespace Jellyfin.LiveTv.TunerHosts
 
         public DateTime DateOpened { get; protected set; }
 
+        /// <summary>
+        /// Gets how long a live stream may sit with no readers before it is closed.
+        /// Fire TV AutoOpen opens a stream when focusing a tile; this releases the IPTV slot.
+        /// </summary>
+        internal static TimeSpan IdleGrace { get; } = TimeSpan.FromSeconds(45);
+
+        /// <inheritdoc />
+        public virtual bool IsIdle => LiveStreamIdle.IsIdle(_activeReaders, DateOpened, _lastReaderReleasedUtc, DateTime.UtcNow);
+
         protected void SetTempFilePath(string extension)
         {
             TempFilePath = Path.Combine(_configurationManager.GetTranscodePath(), UniqueId + "." + extension);
@@ -94,7 +105,7 @@ namespace Jellyfin.LiveTv.TunerHosts
             await LiveStreamCancellationTokenSource.CancelAsync().ConfigureAwait(false);
         }
 
-        public Stream GetStream()
+        public virtual Stream GetStream()
         {
             var stream = new FileStream(
                 TempFilePath,
@@ -110,7 +121,14 @@ namespace Jellyfin.LiveTv.TunerHosts
                 TrySeek(stream, -20000);
             }
 
-            return stream;
+            Interlocked.Increment(ref _activeReaders);
+            return new LiveStreamReader(stream, OnReaderDisposed);
+        }
+
+        private void OnReaderDisposed()
+        {
+            Interlocked.Decrement(ref _activeReaders);
+            _lastReaderReleasedUtc = DateTime.UtcNow;
         }
 
         /// <inheritdoc />

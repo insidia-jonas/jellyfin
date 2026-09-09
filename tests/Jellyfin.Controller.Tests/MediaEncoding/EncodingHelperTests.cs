@@ -322,10 +322,80 @@ public class EncodingHelperTests
         };
     }
 
+    [Fact]
+    public void GetInputModifier_InfiniteHttpLiveStream_AddsReconnectWithoutLoop()
+    {
+        var state = new EncodingJobInfo(TranscodingJobType.Hls)
+        {
+            MediaSource = new MediaSourceInfo
+            {
+                Path = "http://example.com/live.ts",
+                Protocol = MediaProtocol.Http,
+                IsInfiniteStream = true
+            },
+            InputProtocol = MediaProtocol.Http,
+            IsVideoRequest = true,
+            BaseRequest = new VideoRequestDto()
+        };
+
+        var args = CreateHelper().GetInputModifier(state, new EncodingOptions(), "ts");
+
+        Assert.Contains("-reconnect 1", args, StringComparison.Ordinal);
+        Assert.Contains("-reconnect_at_eof 1", args, StringComparison.Ordinal);
+        Assert.Contains("-reconnect_streamed 1", args, StringComparison.Ordinal);
+        Assert.Contains("-reconnect_delay_max 5", args, StringComparison.Ordinal);
+        Assert.DoesNotContain("-stream_loop", args, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetInputModifier_RequiresLooping_AddsStreamLoopAndReconnect()
+    {
+        var state = new EncodingJobInfo(TranscodingJobType.Progressive)
+        {
+            MediaSource = new MediaSourceInfo
+            {
+                Path = "http://example.com/clip.ts",
+                Protocol = MediaProtocol.Http,
+                RequiresLooping = true
+            },
+            InputProtocol = MediaProtocol.Http,
+            IsVideoRequest = true,
+            BaseRequest = new VideoRequestDto()
+        };
+
+        var args = CreateHelper().GetInputModifier(state, new EncodingOptions(), "ts");
+
+        Assert.Contains("-stream_loop -1", args, StringComparison.Ordinal);
+        Assert.Contains("-reconnect 1", args, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetInputModifier_FiniteFile_DoesNotAddReconnect()
+    {
+        var state = new EncodingJobInfo(TranscodingJobType.Progressive)
+        {
+            MediaSource = new MediaSourceInfo
+            {
+                Path = "/media/movie.mkv",
+                Protocol = MediaProtocol.File,
+                IsInfiniteStream = false
+            },
+            InputProtocol = MediaProtocol.File,
+            IsVideoRequest = true,
+            BaseRequest = new VideoRequestDto()
+        };
+
+        var args = CreateHelper().GetInputModifier(state, new EncodingOptions(), "ts");
+
+        Assert.DoesNotContain("-reconnect 1", args, StringComparison.Ordinal);
+        Assert.DoesNotContain("-stream_loop", args, StringComparison.Ordinal);
+    }
+
     private static EncodingHelper CreateHelper()
     {
         var appPaths = Mock.Of<IApplicationPaths>();
         var mediaEncoder = new Mock<IMediaEncoder>();
+        mediaEncoder.Setup(e => e.EncoderVersion).Returns(new Version(7, 1));
         var subtitleEncoder = new Mock<ISubtitleEncoder>();
         var config = new Mock<IConfiguration>();
         var configurationManager = new Mock<IConfigurationManager>();

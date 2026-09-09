@@ -29,6 +29,14 @@ namespace Emby.Server.Implementations.Images
                 return false;
             }
 
+            // Channel folders (e.g. a channel's category folders) get their look from the channel
+            // provider; generating a collage from arbitrary child posters makes category tiles
+            // indistinguishable from content tiles.
+            if (item.SourceType == SourceType.Channel)
+            {
+                return false;
+            }
+
             return true;
         }
     }

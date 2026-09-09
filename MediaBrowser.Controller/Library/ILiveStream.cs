@@ -20,6 +20,12 @@ namespace MediaBrowser.Controller.Library
 
         bool EnableStreamSharing { get; }
 
+        /// <summary>
+        /// Gets a value indicating whether no client is reading this stream
+        /// and the idle grace period has elapsed.
+        /// </summary>
+        bool IsIdle { get; }
+
         MediaSourceInfo MediaSource { get; set; }
 
         string UniqueId { get; }

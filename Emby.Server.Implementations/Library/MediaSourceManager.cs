@@ -180,7 +180,10 @@ namespace Emby.Server.Implementations.Library
             ResolveSymlinkPaths(mediaSources, enablePathSubstitution);
 
             // If file is strm or main media stream is missing, force a metadata refresh with remote probing
-            if (allowMediaProbe && mediaSources[0].Type != MediaSourceType.Placeholder
+            if (allowMediaProbe
+                && mediaSources.Count > 0
+                && mediaSources[0].Type != MediaSourceType.Placeholder
+                && !string.IsNullOrEmpty(item.Path)
                 && (item.Path.EndsWith(".strm", StringComparison.OrdinalIgnoreCase)
                     || (item.MediaType == MediaType.Video && mediaSources[0].MediaStreams.All(i => i.Type != MediaStreamType.Video))
                     || (item.MediaType == MediaType.Audio && mediaSources[0].MediaStreams.All(i => i.Type != MediaStreamType.Audio))))
@@ -1016,6 +1019,35 @@ namespace Emby.Server.Implementations.Library
                     }
                 }
             }
+        }
+
+        /// <inheritdoc />
+        public async Task<int> CloseIdleLiveStreams()
+        {
+            var closed = 0;
+
+            using (await _liveStreamLocker.LockAsync().ConfigureAwait(false))
+            {
+                foreach (var pair in _openStreams.ToArray())
+                {
+                    if (!pair.Value.IsIdle)
+                    {
+                        continue;
+                    }
+
+                    if (_openStreams.TryRemove(pair.Key, out var liveStream))
+                    {
+                        _logger.LogInformation(
+                            "Closing idle live stream {Id} (original {Original})",
+                            pair.Key,
+                            liveStream.OriginalStreamId);
+                        await liveStream.Close().ConfigureAwait(false);
+                        closed++;
+                    }
+                }
+            }
+
+            return closed;
         }
 
         private (IMediaSourceProvider MediaSourceProvider, string KeyId) GetProvider(string key)

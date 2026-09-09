@@ -1,0 +1,6 @@
+<Project>
+  <!-- Opt this standalone plugin project out of the repository's central package management. -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+</Project>

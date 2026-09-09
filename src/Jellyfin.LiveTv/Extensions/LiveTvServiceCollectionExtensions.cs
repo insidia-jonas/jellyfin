@@ -31,6 +31,7 @@ public static class LiveTvServiceCollectionExtensions
 
         services.AddSingleton<ILiveTvManager, LiveTvManager>();
         services.AddSingleton<IChannelManager, ChannelManager>();
+        services.AddSingleton<IChannel, LiveTvLibraryChannel>();
         services.AddSingleton<IStreamHelper, StreamHelper>();
         services.AddSingleton<ITunerHostManager, TunerHostManager>();
         services.AddSingleton<IListingsManager, ListingsManager>();
@@ -40,6 +41,7 @@ public static class LiveTvServiceCollectionExtensions
         services.AddSingleton<ILiveTvService, DefaultLiveTvService>();
         services.AddSingleton<ITunerHost, HdHomerunHost>();
         services.AddSingleton<ITunerHost, M3UTunerHost>();
+        services.AddSingleton<M3uPlaylistHealthChecker>();
         services.AddSingleton<SchedulesDirect>();
         services.AddSingleton<IListingsProvider>(s => s.GetRequiredService<SchedulesDirect>());
         services.AddSingleton<ISchedulesDirectService>(s => s.GetRequiredService<SchedulesDirect>());

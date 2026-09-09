@@ -72,6 +72,17 @@ namespace MediaBrowser.Controller.Channels
         Task<QueryResult<BaseItem>> GetLatestChannelItemsInternal(InternalItemsQuery query, CancellationToken cancellationToken);
 
         /// <summary>
+        /// Searches channels that implement <see cref="ISupportsSearch"/> and materializes title cards
+        /// so they appear in native Search/Hints (Fire TV, iOS, web).
+        /// </summary>
+        /// <param name="searchTerm">The free-text query.</param>
+        /// <param name="userId">The user id, if any.</param>
+        /// <param name="limit">Maximum number of title cards to materialize.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>Materialized channel items matching the query.</returns>
+        Task<IReadOnlyList<BaseItem>> SearchChannelItemsAsync(string searchTerm, Guid? userId, int? limit, CancellationToken cancellationToken);
+
+        /// <summary>
         /// Gets the channel items.
         /// </summary>
         /// <param name="query">The query.</param>

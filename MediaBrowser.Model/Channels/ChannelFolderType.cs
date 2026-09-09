@@ -14,6 +14,8 @@ namespace MediaBrowser.Model.Channels
 
         Series = 4,
 
-        Season = 5
+        Season = 5,
+
+        BoxSet = 6
     }
 }

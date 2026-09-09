@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading;
@@ -21,14 +22,12 @@ namespace Jellyfin.LiveTv.Tests
     public class M3UTunerHostTests
     {
         [Theory]
-        // A manifest is not a byte stream, so it must never be offered for direct play.
-        [InlineData("http://example.com/live/1234.m3u8", false)]
-        [InlineData("http://example.com/live/1234.m3u8?token=abc", false)]
-        [InlineData("http://example.com/live/1234.mpd", false)]
-        // Byte streams are unaffected.
-        [InlineData("http://example.com/live/1234.ts", true)]
-        [InlineData("http://example.com/live/1234", true)]
-        public async Task GetChannelStreamMediaSources_ManifestPath_DisablesDirectPlay(string path, bool expectDirectPlay)
+        [InlineData("http://example.com/live/1234.m3u8")]
+        [InlineData("http://example.com/live/1234.m3u8?token=abc")]
+        [InlineData("http://example.com/live/1234.mpd")]
+        [InlineData("http://example.com/live/1234.ts")]
+        [InlineData("http://example.com/live/1234")]
+        public async Task GetChannelStreamMediaSources_NeverAdvertisesDirectPlayOrProbe(string path)
         {
             var mediaSourceManager = new Mock<IMediaSourceManager>();
             mediaSourceManager.Setup(x => x.GetPathProtocol(It.IsAny<string>())).Returns(MediaProtocol.Http);
@@ -47,7 +46,45 @@ namespace Jellyfin.LiveTv.Tests
                 new TunerHostInfo { TunerCount = 0, EnableStreamLooping = false },
                 new ChannelInfo { Path = path });
 
-            Assert.Equal(expectDirectPlay, sources[0].SupportsDirectPlay);
+            Assert.False(sources[0].SupportsDirectPlay);
+            Assert.False(sources[0].SupportsProbing);
+            Assert.True(sources[0].RequiresOpening);
+        }
+
+        [Fact]
+        public async Task GetChannelStreamMediaSources_UsesChannelHeadersAndLiveNowToken()
+        {
+            var mediaSourceManager = new Mock<IMediaSourceManager>();
+            mediaSourceManager.Setup(x => x.GetPathProtocol(It.IsAny<string>())).Returns(MediaProtocol.Http);
+
+            var host = new TestableM3UTunerHost(
+                Mock.Of<IServerConfigurationManager>(),
+                mediaSourceManager.Object,
+                Mock.Of<ILogger<M3UTunerHost>>(),
+                Mock.Of<IFileSystem>(),
+                Mock.Of<IHttpClientFactory>(),
+                Mock.Of<IServerApplicationHost>(),
+                Mock.Of<INetworkManager>(),
+                Mock.Of<IStreamHelper>());
+
+            var sources = await host.GetMediaSources(
+                new TunerHostInfo { UserAgent = "TunerAgent", Referrer = "https://tuner.example" },
+                new ChannelInfo
+                {
+                    Path = "http://ingest.example/live.ts?t={lutc}",
+                    RequiredHttpHeaders = new Dictionary<string, string>
+                    {
+                        ["User-Agent"] = "ChannelAgent",
+                        ["Origin"] = "https://channel.example"
+                    }
+                });
+
+            var source = Assert.Single(sources);
+            Assert.Equal("ChannelAgent", source.RequiredHttpHeaders["User-Agent"]);
+            Assert.Equal("https://channel.example", source.RequiredHttpHeaders["Origin"]);
+            Assert.Equal("https://tuner.example", source.RequiredHttpHeaders["Referer"]);
+            Assert.DoesNotContain("{lutc}", source.Path, StringComparison.Ordinal);
+            Assert.Contains("t=", source.Path, StringComparison.Ordinal);
         }
 
         private sealed class TestableM3UTunerHost : M3UTunerHost

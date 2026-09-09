@@ -1,0 +1,12 @@
+#EXTM3U
+#EXTINF:-1 tvg-id="ard.de" tvg-name="Das_Erste" group-title="DE;HD",Das Erste
+#EXTVLCOPT:http-user-agent=VLC/3.0.20
+#EXTVLCOPT:http-referrer=https://provider.example/
+#EXTVLCOPT:http-origin=https://provider.example
+http://ingest.example/ard.ts|user-agent=OverrideAgent&referer=https://pipe.example
+#EXTGRP:Sports
+#EXTINF:-1 tvg-id="sky.de" tvg-chno="10",Sky Sport
+http://ingest.example/sky.ts?start={lutc}
+#EXTINF:-1 tvg-id=unquoted.de tvg-name=UnquotedName group-title=News,Unquoted
+#KODIPROP:inputstream.adaptive.stream_headers=user-agent=KodiAgent&origin=https://kodi.example
+https://ingest.example/unquoted.m3u8
