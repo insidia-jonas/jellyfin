@@ -20,6 +20,7 @@ public class SabnzbdClient
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<SabnzbdClient> _logger;
+    private volatile DownloadStatusSnapshot? _lastDownloadStatus;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SabnzbdClient"/> class.
@@ -40,6 +41,12 @@ public class SabnzbdClient
     /// </summary>
     public static bool IsConfigured =>
         !string.IsNullOrWhiteSpace(Config.SabnzbdUrl) && !string.IsNullOrWhiteSpace(Config.SabnzbdApiKey);
+
+    /// <summary>
+    /// Gets the last successful queue/history snapshot (used to overlay Downloads progress
+    /// without forcing ChannelManager to rebuild indexer folders).
+    /// </summary>
+    public DownloadStatusSnapshot? LastDownloadStatus => _lastDownloadStatus;
 
     /// <summary>
     /// Verifies connectivity by querying the SABnzbd version endpoint.
@@ -283,6 +290,13 @@ public class SabnzbdClient
             }
         }
 
+        var snapshot = new DownloadStatusSnapshot
+        {
+            Speed = speed,
+            Items = items,
+            At = DateTimeOffset.UtcNow
+        };
+        _lastDownloadStatus = snapshot;
         return (speed, items);
     }
 
@@ -309,6 +323,21 @@ public class SabnzbdClient
     {
         var invalid = System.IO.Path.GetInvalidFileNameChars();
         return new string(name.Select(c => invalid.Contains(c) ? '_' : c).ToArray());
+    }
+
+    /// <summary>
+    /// Last successful SABnzbd queue/history read.
+    /// </summary>
+    public sealed class DownloadStatusSnapshot
+    {
+        /// <summary>Gets the queue speed.</summary>
+        public string? Speed { get; init; }
+
+        /// <summary>Gets the queue and history rows.</summary>
+        public IReadOnlyList<SabDownloadStatus> Items { get; init; } = Array.Empty<SabDownloadStatus>();
+
+        /// <summary>Gets when the snapshot was taken.</summary>
+        public DateTimeOffset At { get; init; }
     }
 
     /// <summary>

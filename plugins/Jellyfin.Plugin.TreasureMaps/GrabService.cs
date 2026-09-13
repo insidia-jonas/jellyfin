@@ -88,12 +88,30 @@ public class GrabService
             var ids = await _sabnzbd.AddNzbAsync(payload, jobName, category, cancellationToken).ConfigureAwait(false);
             RegisterGrab(ids, jobName, coverUrl, title, quality, guid, isTv ? "tv" : "movie");
             _logger.LogInformation("Grabbed '{Name}' into SABnzbd category '{Category}' ({Ids})", title, category, string.Join(",", ids));
+            _ = RefreshDownloadOverlayAsync();
             return ids;
         }
         catch
         {
             _handled.TryRemove(guid, out _);
             throw;
+        }
+    }
+
+    private async Task RefreshDownloadOverlayAsync()
+    {
+        try
+        {
+            if (!SabnzbdClient.IsConfigured)
+            {
+                return;
+            }
+
+            await _sabnzbd.GetDownloadStatusAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not refresh Downloads overlay after grab");
         }
     }
 
