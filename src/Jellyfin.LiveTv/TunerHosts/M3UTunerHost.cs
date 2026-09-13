@@ -37,6 +37,7 @@ namespace Jellyfin.LiveTv.TunerHosts
         private readonly INetworkManager _networkManager;
         private readonly IMediaSourceManager _mediaSourceManager;
         private readonly IStreamHelper _streamHelper;
+        private (string PlaylistUrl, M3uListingFetchResult Result)? _lastValidated;
 
         public M3UTunerHost(
             IServerConfigurationManager config,
@@ -67,14 +68,47 @@ namespace Jellyfin.LiveTv.TunerHosts
 
         protected override async Task<List<ChannelInfo>> GetChannelsInternal(TunerHostInfo tuner, CancellationToken cancellationToken)
         {
-            var channelIdPrefix = GetFullChannelIdPrefix(tuner);
+            var refreshed = await RefreshListingAsync(tuner, PeekListingSnapshot(tuner?.Id), cancellationToken).ConfigureAwait(false);
+            return refreshed.Channels;
+        }
 
-            var playlist = await new M3uParser(Logger, _httpClientFactory)
-                .ParsePlaylist(tuner, channelIdPrefix, cancellationToken)
+        /// <inheritdoc />
+        internal override async Task<M3uListingRefreshResult> RefreshListingAsync(
+            TunerHostInfo tuner,
+            M3uListingSnapshot previous,
+            CancellationToken cancellationToken)
+        {
+            var channelIdPrefix = GetFullChannelIdPrefix(tuner);
+            var fetched = await new M3uParser(Logger, _httpClientFactory)
+                .FetchPlaylist(
+                    tuner,
+                    channelIdPrefix,
+                    previous?.ETag,
+                    previous?.LastModified,
+                    cancellationToken)
                 .ConfigureAwait(false);
 
+            if (fetched.NotModified)
+            {
+                return new M3uListingRefreshResult
+                {
+                    NotModified = true,
+                    ETag = fetched.ETag,
+                    LastModified = fetched.LastModified,
+                    PlaylistUrl = fetched.PlaylistUrl,
+                    Channels = previous?.Channels ?? []
+                };
+            }
+
+            var playlist = fetched.Playlist ?? new M3uPlaylist();
             ApplyPlaylistMetadata(tuner, playlist);
-            return playlist.Channels;
+            return new M3uListingRefreshResult
+            {
+                Channels = playlist.Channels,
+                ETag = fetched.ETag,
+                LastModified = fetched.LastModified,
+                PlaylistUrl = fetched.PlaylistUrl
+            };
         }
 
         protected override async Task<ILiveStream> GetChannelStream(TunerHostInfo tunerHost, ChannelInfo channel, string streamId, IList<ILiveStream> currentLiveStreams, CancellationToken cancellationToken)
@@ -112,11 +146,44 @@ namespace Jellyfin.LiveTv.TunerHosts
         {
             M3uUrlFailover.NormalizeTunerUrls(info);
 
-            var playlist = await new M3uParser(Logger, _httpClientFactory)
-                .ParsePlaylist(info, GetFullChannelIdPrefix(info), CancellationToken.None)
+            var fetched = await new M3uParser(Logger, _httpClientFactory)
+                .FetchPlaylist(info, GetFullChannelIdPrefix(info), null, null, CancellationToken.None)
                 .ConfigureAwait(false);
 
+            var playlist = fetched.Playlist ?? new M3uPlaylist();
             ApplyPlaylistMetadata(info, playlist);
+            _lastValidated = (fetched.PlaylistUrl, fetched);
+            if (!string.IsNullOrEmpty(info.Id) && playlist.Channels.Count > 0)
+            {
+                AcceptListingSnapshot(info, playlist.Channels, fetched.ETag, fetched.LastModified, fetched.PlaylistUrl);
+            }
+        }
+
+        /// <summary>
+        /// Persists the listing parsed during <see cref="Validate"/> after the tuner id is assigned.
+        /// </summary>
+        /// <param name="info">The saved tuner.</param>
+        internal void CommitValidatedSnapshot(TunerHostInfo info)
+        {
+            if (info is null || string.IsNullOrEmpty(info.Id) || _lastValidated is null)
+            {
+                return;
+            }
+
+            var (playlistUrl, fetched) = _lastValidated.Value;
+            var channels = fetched.Playlist?.Channels;
+            if (channels is null || channels.Count == 0)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(playlistUrl)
+                && !string.Equals(playlistUrl, M3uUrlFailover.GetPlaylistUrl(info), StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            AcceptListingSnapshot(info, channels, fetched.ETag, fetched.LastModified, fetched.PlaylistUrl);
         }
 
         protected override Task<List<MediaSourceInfo>> GetChannelStreamMediaSources(TunerHostInfo tuner, ChannelInfo channel, CancellationToken cancellationToken)

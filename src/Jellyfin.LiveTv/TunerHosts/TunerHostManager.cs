@@ -94,6 +94,11 @@ public class TunerHostManager : ITunerHostManager
 
         _config.SaveConfiguration("livetv", config);
 
+        if (provider is M3UTunerHost m3uHost)
+        {
+            m3uHost.CommitValidatedSnapshot(info);
+        }
+
         if (dataSourceChanged)
         {
             _taskManager.CancelIfRunningAndQueue<RefreshGuideScheduledTask>();

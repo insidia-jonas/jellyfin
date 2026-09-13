@@ -890,7 +890,13 @@ namespace Jellyfin.LiveTv.Channels
                 }
             }
 
-            return _libraryManager.GetItemsResult(query);
+            var result = _libraryManager.GetItemsResult(query);
+            if (channelProvider is LiveTvLibraryChannel liveTv)
+            {
+                liveTv.OverlayPresentation(result.Items);
+            }
+
+            return result;
         }
 
         /// <inheritdoc />
