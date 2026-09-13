@@ -6,7 +6,9 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -47,10 +49,86 @@ namespace Jellyfin.LiveTv.TunerHosts
 
         internal async Task<M3uPlaylist> ParsePlaylist(TunerHostInfo info, string channelIdPrefix, CancellationToken cancellationToken)
         {
-            using (var reader = new StreamReader(await GetListingsStream(info, cancellationToken).ConfigureAwait(false)))
+            var fetched = await FetchPlaylist(info, channelIdPrefix, null, null, cancellationToken).ConfigureAwait(false);
+            return fetched.Playlist ?? new M3uPlaylist();
+        }
+
+        /// <summary>
+        /// Downloads or revalidates the M3U listing URL only. Never opens ingest hosts or media streams.
+        /// </summary>
+        /// <param name="info">The tuner whose playlist URL should be fetched.</param>
+        /// <param name="channelIdPrefix">Prefix applied to generated channel ids.</param>
+        /// <param name="etag">Last ETag for If-None-Match, or <c>null</c>.</param>
+        /// <param name="lastModified">Last Last-Modified for If-Modified-Since.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>The fetch result (304 or a parsed playlist).</returns>
+        internal async Task<M3uListingFetchResult> FetchPlaylist(
+            TunerHostInfo info,
+            string channelIdPrefix,
+            string etag,
+            DateTimeOffset? lastModified,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(info);
+
+            var listingsUrl = M3uUrlFailover.GetPlaylistUrl(info);
+            if (string.IsNullOrWhiteSpace(listingsUrl))
             {
-                return await GetPlaylistAsync(reader, channelIdPrefix, info.Id).ConfigureAwait(false);
+                throw new InvalidOperationException("M3U tuner has no playlist listing URL.");
             }
+
+            if (M3uUrlFailover.IsIngestEndpoint(listingsUrl))
+            {
+                throw new InvalidOperationException("Refusing to GET an ingest host as an M3U listing.");
+            }
+
+            if (!listingsUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            {
+                using var reader = new StreamReader(AsyncFile.OpenRead(listingsUrl));
+                var local = await GetPlaylistAsync(reader, channelIdPrefix, info.Id).ConfigureAwait(false);
+                return new M3uListingFetchResult
+                {
+                    Playlist = local,
+                    PlaylistUrl = listingsUrl
+                };
+            }
+
+            using var requestMessage = new HttpRequestMessage(HttpMethod.Get, listingsUrl);
+            if (!string.IsNullOrEmpty(info.UserAgent))
+            {
+                requestMessage.Headers.UserAgent.TryParseAdd(info.UserAgent);
+            }
+
+            ApplyConditionalHeaders(requestMessage, etag, lastModified);
+
+            // ResponseHeadersRead avoids buffering the whole playlist before parse starts.
+            using var response = await _httpClientFactory.CreateClient(NamedClient.Default)
+                .SendAsync(requestMessage, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (response.StatusCode == HttpStatusCode.NotModified)
+            {
+                return new M3uListingFetchResult
+                {
+                    NotModified = true,
+                    ETag = ReadETag(response) ?? etag,
+                    LastModified = ReadLastModified(response) ?? lastModified,
+                    PlaylistUrl = listingsUrl
+                };
+            }
+
+            response.EnsureSuccessStatusCode();
+
+            using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var httpReader = new StreamReader(stream);
+            var playlist = await GetPlaylistAsync(httpReader, channelIdPrefix, info.Id).ConfigureAwait(false);
+            return new M3uListingFetchResult
+            {
+                Playlist = playlist,
+                ETag = ReadETag(response),
+                LastModified = ReadLastModified(response),
+                PlaylistUrl = listingsUrl
+            };
         }
 
         public async Task<Stream> GetListingsStream(TunerHostInfo info, CancellationToken cancellationToken)
@@ -58,6 +136,11 @@ namespace Jellyfin.LiveTv.TunerHosts
             ArgumentNullException.ThrowIfNull(info);
 
             var listingsUrl = M3uUrlFailover.GetPlaylistUrl(info);
+            if (M3uUrlFailover.IsIngestEndpoint(listingsUrl))
+            {
+                throw new InvalidOperationException("Refusing to GET an ingest host as an M3U listing.");
+            }
+
             if (!listingsUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
             {
                 return AsyncFile.OpenRead(listingsUrl);
@@ -76,6 +159,36 @@ namespace Jellyfin.LiveTv.TunerHosts
             response.EnsureSuccessStatusCode();
 
             return await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        private static void ApplyConditionalHeaders(HttpRequestMessage request, string etag, DateTimeOffset? lastModified)
+        {
+            if (!string.IsNullOrWhiteSpace(etag))
+            {
+                if (EntityTagHeaderValue.TryParse(etag, out var parsed))
+                {
+                    request.Headers.IfNoneMatch.Add(parsed);
+                }
+                else if (EntityTagHeaderValue.TryParse("\"" + etag.Trim('"') + "\"", out parsed))
+                {
+                    request.Headers.IfNoneMatch.Add(parsed);
+                }
+            }
+
+            if (lastModified.HasValue)
+            {
+                request.Headers.IfModifiedSince = lastModified.Value.UtcDateTime;
+            }
+        }
+
+        private static string ReadETag(HttpResponseMessage response)
+        {
+            return response.Headers.ETag?.ToString();
+        }
+
+        private static DateTimeOffset? ReadLastModified(HttpResponseMessage response)
+        {
+            return response.Content.Headers.LastModified;
         }
 
         private async Task<M3uPlaylist> GetPlaylistAsync(TextReader reader, string channelIdPrefix, string tunerHostId)

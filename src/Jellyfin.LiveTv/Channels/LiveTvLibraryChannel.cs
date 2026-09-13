@@ -26,7 +26,6 @@ namespace Jellyfin.LiveTv.Channels;
 public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCacheKey
 {
     private readonly ITunerHostManager _tunerHostManager;
-    private readonly IListingsManager _listingsManager;
     private readonly ILibraryManager _libraryManager;
     private readonly IUserManager _userManager;
     private readonly ILogger<LiveTvLibraryChannel> _logger;
@@ -35,19 +34,16 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCa
     /// Initializes a new instance of the <see cref="LiveTvLibraryChannel"/> class.
     /// </summary>
     /// <param name="tunerHostManager">The tuner host manager.</param>
-    /// <param name="listingsManager">The listings manager (logos from XMLTV).</param>
     /// <param name="libraryManager">The library manager (imported guide).</param>
     /// <param name="userManager">The user manager.</param>
     /// <param name="logger">The logger.</param>
     public LiveTvLibraryChannel(
         ITunerHostManager tunerHostManager,
-        IListingsManager listingsManager,
         ILibraryManager libraryManager,
         IUserManager userManager,
         ILogger<LiveTvLibraryChannel> logger)
     {
         _tunerHostManager = tunerHostManager;
-        _listingsManager = listingsManager;
         _libraryManager = libraryManager;
         _userManager = userManager;
         _logger = logger;
@@ -60,7 +56,7 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCa
     public string Description => "Live television and IPTV channels.";
 
     /// <inheritdoc />
-    public string DataVersion => "7";
+    public string DataVersion => "8";
 
     /// <inheritdoc />
     public string HomePageUrl => string.Empty;
@@ -71,10 +67,11 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCa
     /// <inheritdoc />
     public string? GetCacheKey(string? userId)
     {
-        // Titles refresh every two minutes; the web list also ticks the progress bar from Start/End.
-        var now = DateTime.UtcNow;
-        return now.ToString("yyyyMMddHH", System.Globalization.CultureInfo.InvariantCulture)
-               + (now.Minute / 2).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        // Channel identities only. Now/next is overlaid from the local guide without
+        // bumping this key (which would make ChannelManager rebuild every folder).
+        _ = userId;
+        var identity = LiveTvChannelSetIdentity.Current;
+        return string.IsNullOrEmpty(identity) ? "channels" : identity;
     }
 
     /// <inheritdoc />
@@ -118,17 +115,7 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCa
             }
         }
 
-        if (channels.Count > 0)
-        {
-            try
-            {
-                await _listingsManager.AddProviderMetadata(channels, true, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Could not attach XMLTV logos to Live TV channel tiles");
-            }
-        }
+        LiveTvChannelSetIdentity.ReplaceFromChannels("library", channels);
 
         var guide = LoadNowNext();
         var items = LiveTvLibraryChannelItems.Build(channels, query.FolderId, guide, DateTime.UtcNow);
@@ -137,6 +124,44 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCa
             Items = items,
             TotalRecordCount = items.Count
         };
+    }
+
+    /// <summary>
+    /// Writes now/next from the already-imported guide onto existing folder items
+    /// without deleting or recreating them.
+    /// </summary>
+    /// <param name="items">Library items for the current Live TV folder.</param>
+    public void OverlayPresentation(IReadOnlyList<BaseItem> items)
+    {
+        if (items is null || items.Count == 0)
+        {
+            return;
+        }
+
+        var guide = LoadNowNext();
+        foreach (var item in items)
+        {
+            if (item is null || item.IsFolder || string.IsNullOrWhiteSpace(item.ExternalId))
+            {
+                continue;
+            }
+
+            guide.TryGetValue(item.ExternalId, out var nowNext);
+            var subtitle = LiveTvLibraryChannelPresentation.ProgramSubtitle(nowNext);
+            item.OriginalTitle = string.IsNullOrWhiteSpace(subtitle) ? item.Name : subtitle;
+            item.Overview = LiveTvLibraryChannelPresentation.Overview(nowNext);
+            item.PremiereDate = nowNext?.NowStart;
+            item.EndDate = nowNext?.NowEnd;
+            if (!string.IsNullOrWhiteSpace(nowNext?.NowTitle))
+            {
+                item.SetProviderId(LiveTvLibraryChannelItems.ProviderNowKey, nowNext.NowTitle.Trim());
+            }
+
+            if (!string.IsNullOrWhiteSpace(nowNext?.NextTitle))
+            {
+                item.SetProviderId(LiveTvLibraryChannelItems.ProviderNextKey, nowNext.NextTitle.Trim());
+            }
+        }
     }
 
     private IReadOnlyDictionary<string, LiveTvNowNext> LoadNowNext()

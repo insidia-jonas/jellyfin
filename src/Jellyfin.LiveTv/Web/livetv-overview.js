@@ -466,6 +466,7 @@
         }
     }
 
+    /* Items / LiveTv/Channels on this Jellyfin only — never the IPTV playlist. */
     function fetchOfficial() {
         var client = api();
         if (!client || typeof client.getJSON !== 'function') {
