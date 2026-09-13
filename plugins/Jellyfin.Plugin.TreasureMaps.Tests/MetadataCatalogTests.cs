@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Jellyfin.Plugin.TreasureMaps.Channels;
 using Jellyfin.Plugin.TreasureMaps.Metadata;
 using Xunit;
 
@@ -39,5 +40,17 @@ public class MetadataCatalogTests
         };
 
         Assert.Null(MetadataCatalog.PickBest("Inception", 2010, hits));
+    }
+
+    [Fact]
+    public void CatalogKey_PrefersImdbIdentity()
+    {
+        var withImdb = new ReleaseGroup { Kind = "movie", Title = "Dune", Year = 2021, Imdb = "tt1160419" };
+        var otherTitle = new ReleaseGroup { Kind = "movie", Title = "Something Else", Year = 1999, Imdb = "tt1160419" };
+        Assert.Equal(MetadataCatalog.CatalogKey(withImdb), MetadataCatalog.CatalogKey(otherTitle));
+        Assert.Contains("imdb:", MetadataCatalog.CatalogKey(withImdb), System.StringComparison.OrdinalIgnoreCase);
+
+        var byTitle = new ReleaseGroup { Kind = "tv", Title = "Silo", Year = 2023 };
+        Assert.Contains("title:tv|Silo|2023", MetadataCatalog.CatalogKey(byTitle), System.StringComparison.Ordinal);
     }
 }
