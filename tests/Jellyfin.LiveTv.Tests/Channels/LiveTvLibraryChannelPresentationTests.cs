@@ -56,4 +56,46 @@ public class LiveTvLibraryChannelPresentationTests
         Assert.Equal(string.Empty, LiveTvLibraryChannelPresentation.Overview(null));
         Assert.Equal(string.Empty, LiveTvLibraryChannelPresentation.ProgramSubtitle(null));
     }
+
+    [Fact]
+    public void ProgressPercent_IsHalfWayThroughTheCurrentShow()
+    {
+        var start = new DateTime(2026, 9, 13, 18, 0, 0, DateTimeKind.Utc);
+        var end = new DateTime(2026, 9, 13, 18, 20, 0, DateTimeKind.Utc);
+        var now = new DateTime(2026, 9, 13, 18, 10, 0, DateTimeKind.Utc);
+
+        var percent = LiveTvLibraryChannelPresentation.ProgressPercent(
+            new LiveTvNowNext
+            {
+                NowTitle = "Tagesschau",
+                NowStart = start,
+                NowEnd = end
+            },
+            now);
+
+        Assert.Equal(50, percent);
+    }
+
+    [Theory]
+    [InlineData(-5, 0)]
+    [InlineData(25, 100)]
+    public void ProgressPercent_ClampsBeforeAndAfterTheWindow(int minutesFromStart, double expected)
+    {
+        var start = new DateTime(2026, 9, 13, 18, 0, 0, DateTimeKind.Utc);
+        var end = new DateTime(2026, 9, 13, 18, 20, 0, DateTimeKind.Utc);
+        var now = start.AddMinutes(minutesFromStart);
+
+        var percent = LiveTvLibraryChannelPresentation.ProgressPercent(
+            new LiveTvNowNext { NowStart = start, NowEnd = end },
+            now);
+
+        Assert.Equal(expected, percent);
+    }
+
+    [Fact]
+    public void ProgressPercent_IsNullWithoutTimes()
+    {
+        Assert.Null(LiveTvLibraryChannelPresentation.ProgressPercent(null, DateTime.UtcNow));
+        Assert.Null(LiveTvLibraryChannelPresentation.ProgressPercent(new LiveTvNowNext { NowTitle = "X" }, DateTime.UtcNow));
+    }
 }

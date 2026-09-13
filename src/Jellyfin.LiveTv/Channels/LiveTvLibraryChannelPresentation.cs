@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using MediaBrowser.Model.LiveTv;
 
 namespace Jellyfin.LiveTv.Channels;
 
@@ -151,6 +152,22 @@ internal static partial class LiveTvLibraryChannelPresentation
         }
 
         return text.ToString();
+    }
+
+    /// <summary>
+    /// How far through the current program (0–100), or <c>null</c> without a valid window.
+    /// </summary>
+    /// <param name="guide">The now/next block, or <c>null</c>.</param>
+    /// <param name="utcNow">The current UTC instant.</param>
+    /// <returns>Percent, or <c>null</c>.</returns>
+    public static double? ProgressPercent(LiveTvNowNext? guide, DateTime utcNow)
+    {
+        if (guide is null)
+        {
+            return null;
+        }
+
+        return LiveTvProgress.GetPercent(guide.NowStart, guide.NowEnd, utcNow);
     }
 
     private static void AppendRange(StringBuilder text, DateTime? start, DateTime? end)

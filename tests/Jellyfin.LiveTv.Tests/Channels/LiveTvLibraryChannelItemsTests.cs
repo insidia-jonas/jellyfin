@@ -67,7 +67,8 @@ public class LiveTvLibraryChannelItemsTests
             }
         };
 
-        var items = LiveTvLibraryChannelItems.Build(channels, null, guide);
+        var now = new DateTime(2026, 9, 13, 18, 6, 0, DateTimeKind.Utc);
+        var items = LiveTvLibraryChannelItems.Build(channels, null, guide, now);
 
         var tile = Assert.Single(items);
         Assert.Equal("Das Erste", tile.Name);
@@ -79,6 +80,12 @@ public class LiveTvLibraryChannelItemsTests
         Assert.Equal(new DateTime(2026, 9, 13, 18, 0, 0, DateTimeKind.Utc), tile.PremiereDate);
         Assert.Equal(new DateTime(2026, 9, 13, 18, 0, 0, DateTimeKind.Utc), tile.StartDate);
         Assert.Equal(new DateTime(2026, 9, 13, 18, 15, 0, DateTimeKind.Utc), tile.EndDate);
+        Assert.Equal(40, tile.CompletionPercentage);
+        Assert.Equal(TimeSpan.FromMinutes(15).Ticks, tile.RunTimeTicks);
+        Assert.Equal("1", tile.ProviderIds[LiveTvLibraryChannelItems.ProviderKey]);
+        Assert.Equal("Tagesschau", tile.ProviderIds[LiveTvLibraryChannelItems.ProviderNowKey]);
+        Assert.Equal("Wetter", tile.ProviderIds[LiveTvLibraryChannelItems.ProviderNextKey]);
+        Assert.Contains("livestream", tile.Tags);
         Assert.StartsWith("00001.00", tile.SortName, StringComparison.Ordinal);
         Assert.Equal(default, tile.DateCreated);
     }

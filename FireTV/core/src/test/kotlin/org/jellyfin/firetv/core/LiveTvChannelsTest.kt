@@ -17,11 +17,18 @@ class LiveTvChannelsTest {
                   "Type": "TvChannel",
                   "ExternalId": "m3u_ard",
                   "ImageTags": { "Primary": "tag-1" },
+                  "CompletionPercentage": 40.0,
                   "CurrentProgram": {
                     "Name": "Tagesschau",
                     "StartDate": "2026-09-09T20:00:00.0000000Z",
                     "EndDate": "2026-09-09T20:15:00.0000000Z",
-                    "Overview": "Nachrichten"
+                    "Overview": "Nachrichten",
+                    "CompletionPercentage": 40.0
+                  },
+                  "NextProgram": {
+                    "Name": "Wetter",
+                    "StartDate": "2026-09-09T20:15:00.0000000Z",
+                    "EndDate": "2026-09-09T20:20:00.0000000Z"
                   }
                 }
               ]
@@ -35,6 +42,16 @@ class LiveTvChannelsTest {
         assertEquals("Tagesschau", channels[0].nowTitle)
         assertEquals("20:00", LiveTvChannels.clock(channels[0].nowStart))
         assertTrue(LiveTvChannels.nowLine(channels[0])!!.contains("Tagesschau"))
+        assertEquals("Wetter", channels[0].nextTitle)
+        assertTrue(LiveTvChannels.nextLine(channels[0])!!.contains("Wetter"))
+        assertEquals(40.0, channels[0].progressPercent)
+        assertEquals(
+            40.0,
+            LiveTvChannels.progressPercent(
+                channels[0],
+                java.time.Instant.parse("2026-09-09T20:06:00Z").toEpochMilli(),
+            ),
+        )
         assertEquals("m3u_ard", channels[0].externalId)
     }
 }

@@ -801,6 +801,12 @@ namespace MediaBrowser.Model.Dto
         /// <value>The current program.</value>
         public BaseItemDto CurrentProgram { get; set; }
 
+        /// <summary>
+        /// Gets or sets the following program (Danach), when the guide has one.
+        /// </summary>
+        /// <value>The next program.</value>
+        public BaseItemDto NextProgram { get; set; }
+
         public string OriginalLanguage { get; set; }
     }
 }

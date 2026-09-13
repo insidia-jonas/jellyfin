@@ -226,6 +226,14 @@ namespace MediaBrowser.Controller.LiveTv
         /// <param name="user">The user.</param>
         void AddChannelInfo(IReadOnlyCollection<(BaseItemDto ItemDto, LiveTvChannel Channel)> items, DtoOptions options, User user);
 
+        /// <summary>
+        /// Copies now/next times and progress onto Live TV IChannel item DTOs
+        /// so clients that ignore custom JS still get a usable grid contract.
+        /// </summary>
+        /// <param name="dto">The item DTO.</param>
+        /// <param name="item">The library item.</param>
+        void AttachLibraryChannelGuide(BaseItemDto dto, BaseItem item);
+
         void AddInfoToRecordingDto(BaseItem item, BaseItemDto dto, ActiveRecordingInfo activeRecordingInfo, User user = null);
 
         Task<BaseItem[]> GetRecordingFoldersAsync(User user);
