@@ -59,6 +59,11 @@ internal static class LiveTvLibraryChannelPlayback
         ArgumentNullException.ThrowIfNull(hosts);
         ArgumentException.ThrowIfNullOrEmpty(channelId);
 
+        if (!IsTunerChannelId(channelId))
+        {
+            throw new FileNotFoundException();
+        }
+
         var shared = currentLiveStreams?.FirstOrDefault(stream =>
             string.Equals(stream.OriginalStreamId, channelId, StringComparison.OrdinalIgnoreCase)
             && stream.EnableStreamSharing);
@@ -89,6 +94,23 @@ internal static class LiveTvLibraryChannelPlayback
         }
 
         throw new ResourceNotFoundException($"Unable to open Live TV channel {channelId}");
+    }
+
+    /// <summary>
+    /// Returns true when <paramref name="channelId"/> is a tuner channel id (not a Treasure-Maps item).
+    /// </summary>
+    /// <param name="channelId">The open token or channel item id.</param>
+    /// <returns><c>true</c> if a tuner host can open this id.</returns>
+    public static bool IsTunerChannelId(string? channelId)
+    {
+        if (string.IsNullOrWhiteSpace(channelId)
+            || channelId.StartsWith(LiveTvLibraryChannelItems.GroupPrefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return channelId.StartsWith("m3u_", StringComparison.OrdinalIgnoreCase)
+               || channelId.StartsWith("hdhr_", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

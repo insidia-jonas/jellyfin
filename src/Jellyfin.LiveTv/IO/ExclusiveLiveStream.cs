@@ -34,6 +34,9 @@ namespace Jellyfin.LiveTv.IO
 
         public bool EnableStreamSharing { get; set; }
 
+        /// <inheritdoc />
+        public bool IsIdle => false;
+
         public MediaSourceInfo MediaSource { get; set; }
 
         public string UniqueId { get; }

@@ -11,7 +11,8 @@ internal sealed class M3uPlaylistHealthResult
     public required string Url { get; init; }
 
     /// <summary>
-    /// Gets a value indicating whether the playlist and a sample stream succeeded.
+    /// Gets a value indicating whether the listing or ingest host responded.
+    /// Media streams are never opened during a probe.
     /// </summary>
     public bool Success { get; init; }
 
@@ -26,7 +27,7 @@ internal sealed class M3uPlaylistHealthResult
     public long PlaylistMs { get; init; }
 
     /// <summary>
-    /// Gets how many stream bytes were read during the probe.
+    /// Gets how many stream bytes were read during the probe. Always 0: probes must not open IPTV media.
     /// </summary>
     public int BytesRead { get; init; }
 

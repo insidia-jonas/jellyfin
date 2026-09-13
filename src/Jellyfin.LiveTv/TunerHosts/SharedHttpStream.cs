@@ -2,7 +2,6 @@
 #pragma warning disable CS1591
 
 using System;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -27,6 +26,7 @@ namespace Jellyfin.LiveTv.TunerHosts
         private readonly IServerApplicationHost _appHost;
         private readonly TunerHostInfo _tunerHostInfo;
         private readonly IConfigurationManager _configurationManager;
+        private int _providerStarted;
 
         public SharedHttpStream(
             MediaSourceInfo mediaSource,
@@ -47,32 +47,48 @@ namespace Jellyfin.LiveTv.TunerHosts
             OriginalStreamId = originalStreamId;
         }
 
-        public override async Task Open(CancellationToken openCancellationToken)
+        /// <inheritdoc />
+        public override Task Open(CancellationToken openCancellationToken)
         {
             LiveStreamCancellationTokenSource.Token.ThrowIfCancellationRequested();
 
-            var mediaSource = OriginalMediaSource;
-
-            var url = mediaSource.Path;
-
             Directory.CreateDirectory(Path.GetDirectoryName(TempFilePath) ?? throw new InvalidOperationException("Path can't be a root directory."));
+            if (!File.Exists(TempFilePath))
+            {
+                File.WriteAllBytes(TempFilePath, []);
+            }
 
-            var typeName = GetType().Name;
-            Logger.LogInformation("Opening {StreamType} Live stream from {Url}", typeName, url);
-
-            var taskCompletionSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-            _ = StartStreaming(url, mediaSource, taskCompletionSource, LiveStreamCancellationTokenSource.Token);
-
+            // Do not GET the IPTV URL here. Fire TV AutoOpenLiveStream calls Open
+            // when focusing a tile; connecting now would steal the provider slot.
             MediaSource.Path = _appHost.GetApiUrlForLocalAccess() + "/LiveTv/LiveStreamFiles/" + UniqueId + "/stream.ts";
             MediaSource.Protocol = MediaProtocol.Http;
+            DateOpened = DateTime.UtcNow;
 
-            var res = await taskCompletionSource.Task.ConfigureAwait(false);
-            if (!res)
+            Logger.LogInformation("Prepared {StreamType} live stream {Id} (provider connect deferred until first read)", GetType().Name, UniqueId);
+            return Task.CompletedTask;
+        }
+
+        /// <inheritdoc />
+        public override Stream GetStream()
+        {
+            EnsureProviderConnected();
+            return base.GetStream();
+        }
+
+        private void EnsureProviderConnected()
+        {
+            if (Interlocked.Exchange(ref _providerStarted, 1) != 0)
             {
-                Logger.LogWarning("Zero bytes copied from stream {StreamType} to {FilePath} but no exception raised", GetType().Name, TempFilePath);
-                throw new EndOfStreamException(string.Format(CultureInfo.InvariantCulture, "Zero bytes copied from stream {0}", GetType().Name));
+                return;
             }
+
+            var mediaSource = OriginalMediaSource;
+            Logger.LogInformation("Opening {StreamType} Live stream from {Url}", GetType().Name, mediaSource.Path);
+            _ = StartStreaming(
+                mediaSource.Path,
+                mediaSource,
+                new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+                LiveStreamCancellationTokenSource.Token);
         }
 
         private Task StartStreaming(string url, MediaSourceInfo mediaSource, TaskCompletionSource<bool> openTaskCompletionSource, CancellationToken cancellationToken)
@@ -107,9 +123,10 @@ namespace Jellyfin.LiveTv.TunerHosts
                                 try
                                 {
                                     using var request = new HttpRequestMessage(HttpMethod.Get, url);
+                                    request.Headers.ConnectionClose = true;
                                     ApplyRequiredHeaders(request, mediaSource.RequiredHttpHeaders);
 
-                                    var response = await _httpClientFactory.CreateClient(NamedClient.Default)
+                                    var response = await _httpClientFactory.CreateClient(NamedClient.Iptv)
                                         .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
                                         .ConfigureAwait(false);
 

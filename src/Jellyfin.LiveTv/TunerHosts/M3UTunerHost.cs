@@ -30,6 +30,8 @@ namespace Jellyfin.LiveTv.TunerHosts
 {
     public class M3UTunerHost : BaseTunerHost, ITunerHost, IConfigurableTunerHost
     {
+        private static readonly string[] _manifestExtensions = [".m3u8", ".m3u", ".mpd"];
+
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IServerApplicationHost _appHost;
         private readonly INetworkManager _networkManager;
@@ -124,31 +126,59 @@ namespace Jellyfin.LiveTv.TunerHosts
 
         protected virtual MediaSourceInfo CreateMediaSourceInfo(TunerHostInfo info, ChannelInfo channel)
         {
-            var path = M3uUrlFailover.RewriteStreamUrl(
-                channel.Path,
-                M3uUrlFailover.GetPrimaryUrl(info));
+            var path = M3uStreamUrl.SubstituteLiveNow(
+                M3uUrlFailover.RewriteStreamUrl(
+                    channel.Path,
+                    M3uUrlFailover.GetPrimaryUrl(info)),
+                DateTime.UtcNow);
 
-            var supportsDirectPlay = !info.EnableStreamLooping && info.TunerCount == 0;
+            // Never advertise DirectPlay. Fire TV would hit the raw IPTV URL (no VLC
+            // user-agent) while AutoOpen also holds a server connection — two slots,
+            // and the client play usually fails.
+            var supportsDirectPlay = false;
             var supportsDirectStream = !info.EnableStreamLooping;
 
             var protocol = _mediaSourceManager.GetPathProtocol(path);
 
             var isRemote = true;
-            if (Uri.TryCreate(path, UriKind.Absolute, out var uri))
+            Uri.TryCreate(path, UriKind.Absolute, out var uri);
+            if (uri is not null)
             {
                 isRemote = !_networkManager.IsInLocalNetwork(uri.Host);
             }
 
-            var httpHeaders = new Dictionary<string, string>();
+            // A manifest is not a byte stream. Serving one directly hands the client a playlist whose
+            // variant and segment URIs are relative to the origin, and those do not resolve against the
+            // Jellyfin url the client fetched it from. Remux or transcode these instead.
+            if (IsManifest(path, uri))
+            {
+                supportsDirectPlay = false;
+            }
+
+            var httpHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
             if (protocol == MediaProtocol.Http)
             {
-                // Use user-defined user-agent. If there isn't one, make it look like a browser.
-                httpHeaders[HeaderNames.UserAgent] = string.IsNullOrWhiteSpace(info.UserAgent) ?
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" :
-                    info.UserAgent;
+                if (channel.RequiredHttpHeaders is not null)
+                {
+                    foreach (var header in channel.RequiredHttpHeaders)
+                    {
+                        if (!string.IsNullOrWhiteSpace(header.Key) && !string.IsNullOrWhiteSpace(header.Value))
+                        {
+                            httpHeaders[header.Key] = header.Value;
+                        }
+                    }
+                }
 
-                if (!string.IsNullOrWhiteSpace(info.Referrer))
+                if (!httpHeaders.ContainsKey(HeaderNames.UserAgent))
+                {
+                    httpHeaders[HeaderNames.UserAgent] = string.IsNullOrWhiteSpace(info.UserAgent)
+                        ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                        : info.UserAgent;
+                }
+
+                if (!httpHeaders.ContainsKey(HeaderNames.Referer)
+                    && !string.IsNullOrWhiteSpace(info.Referrer))
                 {
                     httpHeaders[HeaderNames.Referer] = info.Referrer;
                 }
@@ -178,6 +208,7 @@ namespace Jellyfin.LiveTv.TunerHosts
                 RequiresOpening = true,
                 RequiresClosing = true,
                 RequiresLooping = info.EnableStreamLooping,
+                SupportsProbing = false,
 
                 ReadAtNativeFramerate = info.ReadAtNativeFramerate,
 
@@ -200,6 +231,20 @@ namespace Jellyfin.LiveTv.TunerHosts
             mediaSource.InferTotalBitrate();
 
             return mediaSource;
+        }
+
+        /// <summary>
+        /// Determines whether a channel path points at an HLS or DASH manifest rather than at a byte stream.
+        /// </summary>
+        /// <param name="path">The channel path.</param>
+        /// <param name="uri">The channel path parsed as an absolute uri, or <c>null</c> if it is not one.</param>
+        /// <returns><c>true</c> if the path names a streaming manifest.</returns>
+        private static bool IsManifest(string path, Uri uri)
+        {
+            // Use the uri path when there is one so that a query string does not hide the extension.
+            var extension = Path.GetExtension(uri is null ? path : uri.AbsolutePath);
+
+            return _manifestExtensions.Contains(extension, StringComparison.OrdinalIgnoreCase);
         }
 
         public Task<List<TunerHostInfo>> DiscoverDevices(int discoveryDurationMs, CancellationToken cancellationToken)

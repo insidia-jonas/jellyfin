@@ -20,8 +20,12 @@ internal static class LiveTvLibraryChannelItems
     /// </summary>
     /// <param name="channels">Tuner channels.</param>
     /// <param name="folderId">The folder being browsed, or <c>null</c> for the root.</param>
+    /// <param name="guide">Now/next EPG keyed by tuner channel id.</param>
     /// <returns>Channel items to display.</returns>
-    public static IReadOnlyList<ChannelItemInfo> Build(IReadOnlyList<ChannelInfo> channels, string? folderId)
+    public static IReadOnlyList<ChannelItemInfo> Build(
+        IReadOnlyList<ChannelInfo> channels,
+        string? folderId,
+        IReadOnlyDictionary<string, LiveTvNowNext>? guide = null)
     {
         ArgumentNullException.ThrowIfNull(channels);
 
@@ -30,35 +34,46 @@ internal static class LiveTvLibraryChannelItems
             var groupName = DecodeGroupId(folderId);
             return channels
                 .Where(channel => string.Equals(channel.ChannelGroup, groupName, StringComparison.OrdinalIgnoreCase))
-                .Select(CreateMediaItem)
+                .Select(channel => CreateMediaItem(channel, guide))
+                .OrderBy(static item => item.SortName, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
         }
 
         var groups = channels
-            .Select(channel => channel.ChannelGroup)
+            .Select(static channel => channel.ChannelGroup)
             .Where(static group => !string.IsNullOrWhiteSpace(group))
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(static group => group, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static group => LiveTvLibraryChannelPresentation.CleanName(group), StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         var items = new List<ChannelItemInfo>();
         foreach (var group in groups)
         {
+            var inGroup = channels
+                .Where(channel => string.Equals(channel.ChannelGroup, group, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var label = LiveTvLibraryChannelPresentation.CleanName(group);
+            if (string.IsNullOrWhiteSpace(label))
+            {
+                label = group;
+            }
+
             items.Add(new ChannelItemInfo
             {
                 Id = EncodeGroupId(group),
-                Name = group,
+                Name = label + "  ·  " + inGroup.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                SortName = "0-" + label,
                 Type = ChannelItemType.Folder,
                 FolderType = ChannelFolderType.Container,
-                ImageUrl = channels.FirstOrDefault(channel =>
-                    string.Equals(channel.ChannelGroup, group, StringComparison.OrdinalIgnoreCase)
-                    && !string.IsNullOrWhiteSpace(channel.ImageUrl))?.ImageUrl
+                Overview = inGroup.Count == 1 ? "1 Sender" : inGroup.Count + " Sender",
+                ImageUrl = inGroup.FirstOrDefault(static channel => !string.IsNullOrWhiteSpace(channel.ImageUrl))?.ImageUrl
             });
         }
 
         items.AddRange(channels
             .Where(static channel => string.IsNullOrWhiteSpace(channel.ChannelGroup))
-            .Select(CreateMediaItem));
+            .Select(channel => CreateMediaItem(channel, guide))
+            .OrderBy(static item => item.SortName, StringComparer.OrdinalIgnoreCase));
 
         return items;
     }
@@ -86,18 +101,37 @@ internal static class LiveTvLibraryChannelItems
         return folderId;
     }
 
-    private static ChannelItemInfo CreateMediaItem(ChannelInfo channel)
+    private static ChannelItemInfo CreateMediaItem(ChannelInfo channel, IReadOnlyDictionary<string, LiveTvNowNext>? guide)
     {
+        LiveTvNowNext? nowNext = null;
+        guide?.TryGetValue(channel.Id, out nowNext);
+        var name = LiveTvLibraryChannelPresentation.CleanName(channel.Name);
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            name = channel.Name ?? channel.Id;
+        }
+
+        var image = channel.ImageUrl;
+        if (string.IsNullOrWhiteSpace(image)
+            && nowNext is not null
+            && !string.IsNullOrWhiteSpace(nowNext.NowImageUrl)
+            && nowNext.NowImageUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        {
+            image = nowNext.NowImageUrl;
+        }
+
         return new ChannelItemInfo
         {
             Id = channel.Id,
-            Name = channel.Name,
-            ImageUrl = channel.ImageUrl,
+            Name = LiveTvLibraryChannelPresentation.CardName(name, nowNext),
+            OriginalTitle = name,
+            SortName = LiveTvLibraryChannelPresentation.SortName(channel.Number, name),
+            ImageUrl = image,
+            Overview = LiveTvLibraryChannelPresentation.Overview(nowNext),
             Type = ChannelItemType.Media,
             MediaType = ChannelMediaType.Video,
             ContentType = ChannelMediaContentType.TvExtra,
             IsLiveStream = true,
-            DateCreated = DateTime.UtcNow,
             Tags = string.IsNullOrWhiteSpace(channel.ChannelGroup) ? [] : [channel.ChannelGroup]
         };
     }

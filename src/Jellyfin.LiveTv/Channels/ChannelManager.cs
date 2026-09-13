@@ -624,6 +624,55 @@ namespace Jellyfin.LiveTv.Channels
                 return new QueryResult<BaseItem>();
             }
 
+            var latestFromProvider = new List<BaseItem>();
+            foreach (var channel in channels)
+            {
+                if (channel is not ISupportsLatestMedia latestProvider)
+                {
+                    await RefreshLatestChannelItems(channel, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                try
+                {
+                    var internalChannel = await GetChannel(channel, cancellationToken).ConfigureAwait(false);
+                    var infos = await latestProvider.GetLatestMedia(
+                        new ChannelLatestMediaSearch
+                        {
+                            UserId = query.User?.Id.ToString("N", CultureInfo.InvariantCulture)
+                        },
+                        cancellationToken).ConfigureAwait(false);
+
+                    foreach (var info in infos)
+                    {
+                        if (info is null || IsPlayToDownloadClip(info))
+                        {
+                            continue;
+                        }
+
+                        latestFromProvider.Add(await GetChannelItemEntityAsync(
+                            info,
+                            channel,
+                            internalChannel.Id,
+                            internalChannel,
+                            cancellationToken).ConfigureAwait(false));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "GetLatestMedia failed for channel {Channel}", channel.Name);
+                    await RefreshLatestChannelItems(channel, cancellationToken).ConfigureAwait(false);
+                }
+            }
+
+            if (latestFromProvider.Count > 0)
+            {
+                var start = query.StartIndex ?? 0;
+                var take = query.Limit ?? latestFromProvider.Count;
+                var page = latestFromProvider.Skip(start).Take(take).ToArray();
+                return new QueryResult<BaseItem>(start, latestFromProvider.Count, page);
+            }
+
             foreach (var channel in channels)
             {
                 await RefreshLatestChannelItems(channel, cancellationToken).ConfigureAwait(false);
@@ -651,7 +700,94 @@ namespace Jellyfin.LiveTv.Channels
                 };
             }
 
-            return _libraryManager.GetItemsResult(query);
+            var result = _libraryManager.GetItemsResult(query);
+            if (result.Items.Count == 0)
+            {
+                return result;
+            }
+
+            var filtered = result.Items.Where(i => !IsPlayToDownloadClip(i)).ToArray();
+            return new QueryResult<BaseItem>(result.StartIndex, filtered.Length, filtered);
+        }
+
+        /// <inheritdoc />
+        public async Task<IReadOnlyList<BaseItem>> SearchChannelItemsAsync(string searchTerm, Guid? userId, int? limit, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(searchTerm))
+            {
+                return Array.Empty<BaseItem>();
+            }
+
+            var channels = GetAllChannels().Where(i => i is ISupportsSearch).ToArray();
+            if (channels.Length == 0)
+            {
+                return Array.Empty<BaseItem>();
+            }
+
+            var results = new List<BaseItem>();
+            foreach (var channel in channels)
+            {
+                if (channel is not ISupportsSearch searchable)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var internalChannel = await GetChannel(channel, cancellationToken).ConfigureAwait(false);
+                    var infos = await searchable.GetSearchResults(
+                        new ChannelSearchInfo
+                        {
+                            SearchTerm = searchTerm,
+                            UserId = userId?.ToString("N", CultureInfo.InvariantCulture),
+                            Limit = limit
+                        },
+                        cancellationToken).ConfigureAwait(false);
+
+                    foreach (var info in infos)
+                    {
+                        if (info is null || IsPlayToDownloadClip(info) || info.Type == ChannelItemType.Media)
+                        {
+                            continue;
+                        }
+
+                        results.Add(await GetChannelItemEntityAsync(
+                            info,
+                            channel,
+                            internalChannel.Id,
+                            internalChannel,
+                            cancellationToken).ConfigureAwait(false));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Channel search failed for {Channel}", channel.Name);
+                }
+            }
+
+            return results;
+        }
+
+        private static bool IsPlayToDownloadClip(ChannelItemInfo info)
+        {
+            if (info.Type != ChannelItemType.Media)
+            {
+                return false;
+            }
+
+            var id = info.Id ?? string.Empty;
+            var name = info.Name ?? string.Empty;
+            return id.StartsWith("grab::", StringComparison.Ordinal)
+                   || name.Contains("Start download", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsPlayToDownloadClip(BaseItem item)
+        {
+            var id = item.ExternalId ?? string.Empty;
+            var name = item.Name ?? string.Empty;
+            return id.StartsWith("grab::", StringComparison.Ordinal)
+                   || id.Contains("grab::", StringComparison.Ordinal)
+                   || name.Contains("Start download", StringComparison.OrdinalIgnoreCase);
         }
 
         private async Task RefreshLatestChannelItems(IChannel channel, CancellationToken cancellationToken)
@@ -971,6 +1107,7 @@ namespace Jellyfin.LiveTv.Channels
                     ChannelFolderType.PhotoAlbum => GetItemById<PhotoAlbum>(info.Id, channelProvider.Name, out isNew),
                     ChannelFolderType.Series => GetItemById<Series>(info.Id, channelProvider.Name, out isNew),
                     ChannelFolderType.Season => GetItemById<Season>(info.Id, channelProvider.Name, out isNew),
+                    ChannelFolderType.BoxSet => GetItemById<MediaBrowser.Controller.Entities.Movies.BoxSet>(info.Id, channelProvider.Name, out isNew),
                     _ => GetItemById<Folder>(info.Id, channelProvider.Name, out isNew)
                 };
             }
@@ -1005,29 +1142,27 @@ namespace Jellyfin.LiveTv.Channels
 
             if (isNew)
             {
-                item.Name = info.Name;
-                item.Genres = info.Genres.ToArray();
-                item.Studios = info.Studios.ToArray();
-                item.CommunityRating = info.CommunityRating;
-                item.Overview = info.Overview;
-                item.IndexNumber = info.IndexNumber;
-                item.ParentIndexNumber = info.ParentIndexNumber;
-                item.PremiereDate = info.PremiereDate;
-                item.ProductionYear = info.ProductionYear;
-                item.ProviderIds = info.ProviderIds;
-                item.OfficialRating = info.OfficialRating;
+                ApplyChannelItemMetadata(item, info, isNew: true);
                 item.DateCreated = info.DateCreated ?? DateTime.UtcNow;
-                item.Tags = info.Tags.ToArray();
-                item.OriginalTitle = info.OriginalTitle;
             }
-            else if (info.Type == ChannelItemType.Folder && info.FolderType == ChannelFolderType.Container)
+            else
             {
-                // At least update names of container folders
-                if (item.Name != info.Name)
+                // Channel items use static external ids, so they are almost never "new" again.
+                // TV clients (Fire TV) keep showing the first cached name/overview/poster unless
+                // we copy provider-supplied metadata onto the reused entity.
+                if (ApplyChannelItemMetadata(item, info, isNew: false))
                 {
-                    item.Name = info.Name;
                     forceUpdate = true;
                 }
+            }
+
+            // Honor a provider-supplied creation date on reused items too (channels use static
+            // external ids for their category folders, so those entities are practically never
+            // "new" again, but providers may still want to control the Date-added sort).
+            if (!isNew && info.DateCreated.HasValue && item.DateCreated != info.DateCreated.Value)
+            {
+                item.DateCreated = info.DateCreated.Value;
+                forceUpdate = true;
             }
 
             if (item is IHasArtist hasArtists)
@@ -1109,11 +1244,16 @@ namespace Jellyfin.LiveTv.Channels
                 item.Path = mediaSource?.Path;
             }
 
-            if (!string.IsNullOrEmpty(info.ImageUrl) && !item.HasImage(ImageType.Primary))
+            if (!string.IsNullOrEmpty(info.ImageUrl))
             {
-                item.SetImagePath(ImageType.Primary, info.ImageUrl);
-                _logger.LogDebug("Forcing update due to ImageUrl {0}", item.Name);
-                forceUpdate = true;
+                var currentPrimary = item.GetImagePath(ImageType.Primary);
+                if (!item.HasImage(ImageType.Primary)
+                    || !string.Equals(currentPrimary, info.ImageUrl, StringComparison.Ordinal))
+                {
+                    item.SetImagePath(ImageType.Primary, info.ImageUrl);
+                    _logger.LogDebug("Forcing update due to ImageUrl {0}", item.Name);
+                    forceUpdate = true;
+                }
             }
 
             if (!info.IsLiveStream)
@@ -1140,15 +1280,15 @@ namespace Jellyfin.LiveTv.Channels
             if (isNew)
             {
                 _libraryManager.CreateItem(item, parentFolder);
-
-                if (info.People is not null && info.People.Count > 0)
-                {
-                    await _libraryManager.UpdatePeopleAsync(item, info.People, cancellationToken).ConfigureAwait(false);
-                }
             }
             else if (forceUpdate)
             {
                 await item.UpdateToRepositoryAsync(ItemUpdateType.None, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (info.People is not null && info.People.Count > 0 && (isNew || forceUpdate || item is MediaBrowser.Controller.Entities.Movies.BoxSet))
+            {
+                await _libraryManager.UpdatePeopleAsync(item, info.People, cancellationToken).ConfigureAwait(false);
             }
 
             if ((isNew || forceUpdate) && info.Type == ChannelItemType.Media)
@@ -1163,12 +1303,114 @@ namespace Jellyfin.LiveTv.Channels
                 }
             }
 
-            if (isNew || forceUpdate || item.DateLastRefreshed == DateTime.MinValue)
+            // Channel box sets carry their metadata from the channel provider; don't queue a
+            // scraper refresh for them or the TMDB box-set provider matches them by name and
+            // overwrites the title/metadata with a "... Collection" entry.
+            if ((isNew || forceUpdate || item.DateLastRefreshed == DateTime.MinValue)
+                && item is not MediaBrowser.Controller.Entities.Movies.BoxSet)
             {
                 _providerManager.QueueRefresh(item.Id, new MetadataRefreshOptions(new DirectoryService(_fileSystem)), RefreshPriority.Normal);
             }
 
             return item;
+        }
+
+        private static bool ApplyChannelItemMetadata(BaseItem item, ChannelItemInfo info, bool isNew)
+        {
+            var changed = isNew;
+
+            if (isNew || !string.Equals(item.Name, info.Name, StringComparison.Ordinal))
+            {
+                item.Name = info.Name;
+                changed = true;
+            }
+
+            if (isNew || !string.Equals(item.Overview, info.Overview, StringComparison.Ordinal))
+            {
+                item.Overview = info.Overview;
+                changed = true;
+            }
+
+            if (isNew || item.CommunityRating != info.CommunityRating)
+            {
+                item.CommunityRating = info.CommunityRating;
+                changed = true;
+            }
+
+            if (isNew || item.ProductionYear != info.ProductionYear)
+            {
+                item.ProductionYear = info.ProductionYear;
+                changed = true;
+            }
+
+            if (isNew || item.PremiereDate != info.PremiereDate)
+            {
+                item.PremiereDate = info.PremiereDate;
+                changed = true;
+            }
+
+            if (isNew || item.IndexNumber != info.IndexNumber)
+            {
+                item.IndexNumber = info.IndexNumber;
+                changed = true;
+            }
+
+            if (isNew || item.ParentIndexNumber != info.ParentIndexNumber)
+            {
+                item.ParentIndexNumber = info.ParentIndexNumber;
+                changed = true;
+            }
+
+            if (isNew || !string.Equals(item.OfficialRating, info.OfficialRating, StringComparison.Ordinal))
+            {
+                item.OfficialRating = info.OfficialRating;
+                changed = true;
+            }
+
+            if (isNew || !string.Equals(item.OriginalTitle, info.OriginalTitle, StringComparison.Ordinal))
+            {
+                item.OriginalTitle = info.OriginalTitle;
+                changed = true;
+            }
+
+            if (isNew || !(item.Genres ?? Array.Empty<string>()).SequenceEqual(info.Genres))
+            {
+                item.Genres = info.Genres.ToArray();
+                changed = true;
+            }
+
+            if (isNew || !(item.Tags ?? Array.Empty<string>()).SequenceEqual(info.Tags))
+            {
+                item.Tags = info.Tags.ToArray();
+                changed = true;
+            }
+
+            if (isNew)
+            {
+                item.Studios = info.Studios.ToArray();
+                item.ProviderIds = info.ProviderIds;
+            }
+            else
+            {
+                foreach (var pair in info.ProviderIds)
+                {
+                    if (!item.ProviderIds.TryGetValue(pair.Key, out var existing)
+                        || !string.Equals(existing, pair.Value, StringComparison.Ordinal))
+                    {
+                        item.SetProviderId(pair.Key, pair.Value);
+                        changed = true;
+                    }
+                }
+            }
+
+            if (!string.IsNullOrEmpty(info.SortName)
+                && !string.Equals(item.ForcedSortName, info.SortName, StringComparison.Ordinal))
+            {
+                item.ForcedSortName = info.SortName;
+                changed = true;
+            }
+
+            return changed;
         }
 
         internal IChannel GetChannelProvider(Channel channel)

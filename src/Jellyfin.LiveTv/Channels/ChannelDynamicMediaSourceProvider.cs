@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -41,6 +42,11 @@ namespace Jellyfin.LiveTv.Channels
         /// <inheritdoc />
         public Task<ILiveStream> OpenMediaSource(string openToken, List<ILiveStream> currentLiveStreams, CancellationToken cancellationToken)
         {
+            if (!LiveTvLibraryChannelPlayback.IsTunerChannelId(openToken))
+            {
+                throw new FileNotFoundException();
+            }
+
             return LiveTvLibraryChannelPlayback.OpenAsync(
                 _tunerHostManager.TunerHosts,
                 openToken,

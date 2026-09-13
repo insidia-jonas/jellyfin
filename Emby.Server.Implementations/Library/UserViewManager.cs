@@ -109,7 +109,7 @@ namespace Emby.Server.Implementations.Library
 
             if (_config.Configuration.EnableFolderView)
             {
-                var name = _localizationManager.GetLocalizedString("Folders");
+                var name = _localizationManager.GetServerLocalizedString("Folders");
                 list.Add(_libraryManager.GetNamedView(name, CollectionType.folders, string.Empty));
             }
 
@@ -164,7 +164,7 @@ namespace Emby.Server.Implementations.Library
 
         public UserView GetUserSubView(Guid parentId, CollectionType? type, string localizationKey, string sortName)
         {
-            var name = _localizationManager.GetLocalizedString(localizationKey);
+            var name = _localizationManager.GetServerLocalizedString(localizationKey);
 
             return GetUserSubViewWithName(name, parentId, type, sortName);
         }
@@ -187,7 +187,7 @@ namespace Emby.Server.Implementations.Library
                 return GetUserView((Folder)parents[0], viewType, string.Empty);
             }
 
-            var name = _localizationManager.GetLocalizedString(localizationKey);
+            var name = _localizationManager.GetServerLocalizedString(localizationKey);
             return _libraryManager.GetNamedView(user, name, viewType, sortName);
         }
 
@@ -391,6 +391,12 @@ namespace Emby.Server.Implementations.Library
                 {
                     query.Limit = limit;
                     return _libraryManager.GetLatestItemList(query, parents, CollectionType.movies);
+                }
+
+                if (collectionType is null)
+                {
+                    query.Limit = limit;
+                    return _libraryManager.GetLatestItemList(query, parents, CollectionType.unknown);
                 }
             }
 
