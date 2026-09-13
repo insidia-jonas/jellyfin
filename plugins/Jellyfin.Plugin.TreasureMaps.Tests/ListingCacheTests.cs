@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.TreasureMaps;
 using Jellyfin.Plugin.TreasureMaps.Api;
 using Jellyfin.Plugin.TreasureMaps.Listing;
+using MediaBrowser.Controller.Channels;
 using Xunit;
 
 namespace Jellyfin.Plugin.TreasureMaps.Tests;
@@ -225,6 +226,83 @@ public class ListingCacheTests
 
         Assert.Equal("same", Assert.Single(again!.Items).Guid);
         Assert.True(cache.TryGetFresh<ReleaseListResponse>("etag", out _, out _));
+    }
+
+    [Fact]
+    public async Task TryGetFreshOrSchedule_DoesNotAwaitIndexer_AndDoesNotServeExpired()
+    {
+        var now = new DateTimeOffset(2026, 9, 13, 16, 0, 0, TimeSpan.Zero);
+        var cache = new TreasureMapsListingCache(() => now, () => "idx");
+        await cache.GetOrFetchAsync(
+            "movies",
+            TimeSpan.FromMinutes(5),
+            (_, _) => Task.FromResult(ListingFetch<ReleaseListResponse>.Store(Page("old"))),
+            CancellationToken.None);
+
+        now = now.AddMinutes(6);
+        var fetches = 0;
+        var gate = new TaskCompletionSource<ReleaseListResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = DateTime.UtcNow;
+        var served = cache.TryGetFreshOrSchedule<ReleaseListResponse>(
+            "movies",
+            TimeSpan.FromMinutes(5),
+            async (_, _) =>
+            {
+                Interlocked.Increment(ref fetches);
+                return ListingFetch<ReleaseListResponse>.Store(await gate.Task);
+            },
+            out var expired);
+
+        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(1));
+        Assert.False(served);
+        Assert.Null(expired);
+        await WaitUntil(() => Volatile.Read(ref fetches) == 1);
+        Assert.False(cache.TryGetFresh<ReleaseListResponse>("movies", out _, out _));
+
+        gate.SetResult(Page("fresh"));
+        await WaitUntil(() => cache.TryGetFresh<ReleaseListResponse>("movies", out _, out _));
+        Assert.True(cache.TryGetFresh<ReleaseListResponse>("movies", out var next, out _));
+        Assert.Equal("fresh", Assert.Single(next!.Items).Guid);
+    }
+
+    [Fact]
+    public async Task TryGetFreshOrSchedule_ReturnsFreshSnapshotImmediately()
+    {
+        var now = new DateTimeOffset(2026, 9, 13, 16, 0, 0, TimeSpan.Zero);
+        var cache = new TreasureMapsListingCache(() => now, () => "idx");
+        await cache.GetOrFetchAsync(
+            "tv",
+            TimeSpan.FromMinutes(5),
+            (_, _) => Task.FromResult(ListingFetch<ReleaseListResponse>.Store(Page("live"))),
+            CancellationToken.None);
+
+        var fetches = 0;
+        var started = DateTime.UtcNow;
+        var served = cache.TryGetFreshOrSchedule<ReleaseListResponse>(
+            "tv",
+            TimeSpan.FromMinutes(5),
+            (_, _) =>
+            {
+                fetches++;
+                return Task.FromResult(ListingFetch<ReleaseListResponse>.Store(Page("nope")));
+            },
+            out var hit);
+
+        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(1));
+        Assert.True(served);
+        Assert.Equal("live", Assert.Single(hit!.Items).Guid);
+        Assert.Equal(0, fetches);
+    }
+
+    [Fact]
+    public void FolderSnapshot_EmptyOrPending_IsNotCurrent()
+    {
+        Assert.True(TreasureMapsListingCache.IsEmptyListing(ChannelItemResult.Pending()));
+        Assert.True(TreasureMapsListingCache.IsEmptyListing(new ChannelItemResult()));
+        Assert.False(TreasureMapsListingCache.IsEmptyListing(new ChannelItemResult
+        {
+            Items = [new ChannelItemInfo { Id = "movies|1", Name = "Title" }]
+        }));
     }
 
     [Fact]

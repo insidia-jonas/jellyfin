@@ -21,17 +21,17 @@ public class ChannelCacheKeyTests
     }
 
     [Fact]
-    public void Build_ChangesWhenEpochOrGenerationChanges()
+    public void Build_ChangesWhenGenerationChanges_NotWhenClockMoves()
     {
         var epoch = TreasureMapsListingCache.BrowseFreshTtl;
         var start = new DateTimeOffset(epoch.Ticks * 4000, TimeSpan.Zero);
-        var next = start.Add(epoch);
+        var next = start.Add(epoch).AddHours(3);
 
         var before = TreasureMapsChannelCacheKey.Build("user", "38", 0, start);
         var afterEpoch = TreasureMapsChannelCacheKey.Build("user", "38", 0, next);
         var afterInvalidate = TreasureMapsChannelCacheKey.Build("user", "38", 1, start);
 
-        Assert.NotEqual(before, afterEpoch);
+        Assert.Equal(before, afterEpoch);
         Assert.NotEqual(before, afterInvalidate);
     }
 

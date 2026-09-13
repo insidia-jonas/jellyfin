@@ -186,12 +186,15 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
 
             if (string.Equals(folderId, "new", StringComparison.Ordinal))
             {
-                return await GetRecentlyAddedAsync(cancellationToken).ConfigureAwait(false);
+                return FastFolder("folder:new", TreasureMapsListingCache.BrowseFreshTtl, GetRecentlyAddedAsync);
             }
 
             if (string.Equals(folderId, "foryou", StringComparison.Ordinal))
             {
-                return await GetForYouAsync(query.UserId, cancellationToken).ConfigureAwait(false);
+                return FastFolder(
+                    "folder:foryou:" + query.UserId.ToString("N"),
+                    TreasureMapsListingCache.BrowseFreshTtl,
+                    ct => GetForYouAsync(query.UserId, ct));
             }
 
             if (string.Equals(folderId, "downloads", StringComparison.Ordinal))
@@ -209,17 +212,43 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
             // A title card (GRP) opens into episodes (series) or qualities (movie).
             if (folderId.StartsWith(GroupPrefix, StringComparison.Ordinal))
             {
-                return await OpenGroupAsync(folderId, cancellationToken).ConfigureAwait(false);
+                if (!TryParseTitleCardId(folderId, GroupPrefix, out _, out _, out var groupTitle, out _, out _)
+                    || string.IsNullOrWhiteSpace(groupTitle))
+                {
+                    throw new InvalidOperationException("Treasure-Maps could not open this title.");
+                }
+
+                return FastFolder(
+                    "folder:" + folderId,
+                    TreasureMapsListingCache.BrowseFreshTtl,
+                    ct => OpenGroupAsync(folderId, ct));
             }
 
             if (folderId.StartsWith(SeasonPrefix, StringComparison.Ordinal))
             {
-                return await OpenSeasonAsync(folderId, cancellationToken).ConfigureAwait(false);
+                if (!TryParseTitleCardId(folderId, SeasonPrefix, out _, out _, out _, out _, out var seasonExtra)
+                    || !int.TryParse(seasonExtra, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+                {
+                    throw new InvalidOperationException("Treasure-Maps could not open this season.");
+                }
+
+                return FastFolder(
+                    "folder:" + folderId,
+                    TreasureMapsListingCache.BrowseFreshTtl,
+                    ct => OpenSeasonAsync(folderId, ct));
             }
 
             if (folderId.StartsWith(EpisodePrefix, StringComparison.Ordinal))
             {
-                return await OpenEpisodeAsync(folderId, cancellationToken).ConfigureAwait(false);
+                if (!TryParseTitleCardId(folderId, EpisodePrefix, out _, out _, out _, out _, out _))
+                {
+                    throw new InvalidOperationException("Treasure-Maps could not open this episode.");
+                }
+
+                return FastFolder(
+                    "folder:" + folderId,
+                    TreasureMapsListingCache.BrowseFreshTtl,
+                    ct => OpenEpisodeAsync(folderId, ct));
             }
 
             // A release tile (REL) is a folder too; opening it shows a small grab detail rather
@@ -251,42 +280,57 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
 
             if (folderId.StartsWith(FeedPrefix, StringComparison.Ordinal))
             {
-                return await GetSpotlightFeedAsync(folderId, cancellationToken).ConfigureAwait(false);
+                return FastFolder(
+                    "folder:" + folderId,
+                    TreasureMapsListingCache.SpotlightFreshTtl,
+                    ct => GetSpotlightFeedAsync(folderId, ct));
             }
 
             if (CategoryBrowse.TryParsePageFolder(folderId, out var pageScope, out var pageNumber)
                 && TryCategorySpec(pageScope, out var pageKind, out var pageGenre, out var pageCats))
             {
-                return await GetCategoryAsync(pageScope, pageKind, pageGenre, pageCats, pageNumber, cancellationToken)
-                    .ConfigureAwait(false);
+                return FastFolder(
+                    "folder:" + folderId,
+                    TreasureMapsListingCache.BrowseFreshTtl,
+                    ct => GetCategoryAsync(pageScope, pageKind, pageGenre, pageCats, pageNumber, ct));
             }
 
             if (string.Equals(folderId, "movies", StringComparison.Ordinal))
             {
-                return await GetCategoryAsync(folderId, "movie", null, null, 1, cancellationToken).ConfigureAwait(false);
+                return FastFolder(
+                    "folder:movies",
+                    TreasureMapsListingCache.BrowseFreshTtl,
+                    ct => GetCategoryAsync(folderId, "movie", null, null, 1, ct));
             }
 
             if (string.Equals(folderId, "tv", StringComparison.Ordinal))
             {
-                return await GetCategoryAsync(folderId, "tv", null, null, 1, cancellationToken).ConfigureAwait(false);
+                return FastFolder(
+                    "folder:tv",
+                    TreasureMapsListingCache.BrowseFreshTtl,
+                    ct => GetCategoryAsync(folderId, "tv", null, null, 1, ct));
             }
 
             // German rows, mirroring the website's "Movies - DE" / "TV - DE" category blocks.
             if (string.Equals(folderId, "movies-de", StringComparison.Ordinal))
             {
-                return await GetCategoryAsync(folderId, "movie", null, TreasureMapsApiClient.GermanMovieCategories, 1, cancellationToken)
-                    .ConfigureAwait(false);
+                return FastFolder(
+                    "folder:movies-de",
+                    TreasureMapsListingCache.BrowseFreshTtl,
+                    ct => GetCategoryAsync(folderId, "movie", null, TreasureMapsApiClient.GermanMovieCategories, 1, ct));
             }
 
             if (string.Equals(folderId, "tv-de", StringComparison.Ordinal))
             {
-                return await GetCategoryAsync(folderId, "tv", null, TreasureMapsApiClient.GermanTvCategories, 1, cancellationToken)
-                    .ConfigureAwait(false);
+                return FastFolder(
+                    "folder:tv-de",
+                    TreasureMapsListingCache.BrowseFreshTtl,
+                    ct => GetCategoryAsync(folderId, "tv", null, TreasureMapsApiClient.GermanTvCategories, 1, ct));
             }
 
             if (string.Equals(folderId, "genres", StringComparison.Ordinal))
             {
-                return await GetGenreFoldersAsync(cancellationToken).ConfigureAwait(false);
+                return FastFolder("folder:genres", TreasureMapsListingCache.CapsFreshTtl, GetGenreFoldersAsync);
             }
 
             if (string.Equals(folderId, "find", StringComparison.Ordinal))
@@ -296,18 +340,28 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
 
             if (folderId.StartsWith(FindPrefix, StringComparison.Ordinal))
             {
-                return await SearchByLetterAsync(folderId[FindPrefix.Length..], cancellationToken).ConfigureAwait(false);
+                var letter = folderId[FindPrefix.Length..];
+                return FastFolder(
+                    "folder:find:" + letter,
+                    TreasureMapsListingCache.BrowseFreshTtl,
+                    ct => SearchByLetterAsync(letter, ct));
             }
 
             if (folderId.StartsWith("search:", StringComparison.Ordinal))
             {
-                return await SearchLiveAsync(folderId["search:".Length..], cancellationToken).ConfigureAwait(false);
+                var term = folderId["search:".Length..];
+                return FastFolder(
+                    "folder:search:" + term.ToLowerInvariant(),
+                    TreasureMapsApiClient.CacheTtlForQuery(term),
+                    ct => SearchLiveAsync(term, ct));
             }
 
             if (folderId.StartsWith(GenrePrefix, StringComparison.Ordinal))
             {
-                return await GetCategoryAsync(folderId, "movie", folderId[GenrePrefix.Length..], null, 1, cancellationToken)
-                    .ConfigureAwait(false);
+                return FastFolder(
+                    "folder:" + folderId,
+                    TreasureMapsListingCache.BrowseFreshTtl,
+                    ct => GetCategoryAsync(folderId, "movie", folderId[GenrePrefix.Length..], null, 1, ct));
             }
 
             return Hint("unknown-folder", "Nothing here", "This Treasure-Maps category has no titles right now.");
@@ -682,11 +736,43 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
     /// <inheritdoc />
     public string? GetCacheKey(string? userId)
     {
-        // Identity + DataVersion + listing generation + browse-TTL epoch.
-        // A 2-minute time bucket used to rebuild every folder on every open. Download
-        // percent is overlaid locally; indexer rows must not stay on ChannelManager's
-        // 3-hour disk cache after the snapshot expires.
+        // Identity + DataVersion + listing generation. A 2-minute time bucket used to
+        // rebuild every folder on every open. Download percent is overlaid locally;
+        // indexer freshness is enforced by the listing cache (expired rows are not
+        // returned as current) rather than rotating this key.
         return TreasureMapsChannelCacheKey.Build(userId, DataVersion, _listingCache.Generation, DateTime.UtcNow);
+    }
+
+    /// <summary>
+    /// Returns a still-fresh folder snapshot immediately. Expired or missing snapshots
+    /// start a coalesced background build and return a pending result so Items does not
+    /// wait on indexer HTTP or IMDb lookups.
+    /// </summary>
+    private ChannelItemResult FastFolder(
+        string key,
+        TimeSpan ttl,
+        Func<CancellationToken, Task<ChannelItemResult>> build)
+    {
+        if (_listingCache.TryGetFreshOrSchedule(
+                key,
+                ttl,
+                async (_, token) =>
+                {
+                    var result = await build(token).ConfigureAwait(false);
+                    if (result is null || result.RefreshPending || TreasureMapsListingCache.IsEmptyListing(result))
+                    {
+                        return ListingFetch<ChannelItemResult>.DoNotStore(result);
+                    }
+
+                    return ListingFetch<ChannelItemResult>.Store(result, hash: TreasureMapsListingCache.HashPayload(result));
+                },
+                out var hit)
+            && hit is not null)
+        {
+            return hit;
+        }
+
+        return ChannelItemResult.Pending();
     }
 
     /// <inheritdoc />
@@ -1730,23 +1816,34 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
 
         try
         {
-            var movies = await _client.SearchMoviesAsync(null, null, PageSize, cancellationToken).ConfigureAwait(false);
-            foreach (var card in (await BuildGroupCardsAsync(movies?.Items, "latest", Config.ResultLimit, null, cancellationToken).ConfigureAwait(false)).Items)
+            var latest = FastFolder(
+                "folder:latest",
+                TreasureMapsListingCache.BrowseFreshTtl,
+                async ct =>
+                {
+                    var movies = await _client.SearchMoviesAsync(null, null, PageSize, ct).ConfigureAwait(false);
+                    return await BuildGroupCardsAsync(movies?.Items, "latest", Config.ResultLimit, null, ct).ConfigureAwait(false);
+                });
+
+            if (!latest.RefreshPending)
             {
-                if (card.Type == ChannelItemType.Media)
+                foreach (var card in latest.Items)
                 {
-                    continue;
-                }
+                    if (card.Type == ChannelItemType.Media)
+                    {
+                        continue;
+                    }
 
-                if (!seen.Add(card.Name ?? card.Id))
-                {
-                    continue;
-                }
+                    if (!seen.Add(card.Name ?? card.Id))
+                    {
+                        continue;
+                    }
 
-                items.Add(card);
-                if (items.Count >= 24)
-                {
-                    break;
+                    items.Add(card);
+                    if (items.Count >= 24)
+                    {
+                        break;
+                    }
                 }
             }
         }
