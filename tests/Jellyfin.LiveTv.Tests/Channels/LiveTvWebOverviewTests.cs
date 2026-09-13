@@ -48,6 +48,9 @@ public class LiveTvWebOverviewTests
         Assert.Contains("never the IPTV playlist", js, StringComparison.Ordinal);
         Assert.DoesNotContain("TreasureMaps/Search", js, StringComparison.Ordinal);
         Assert.DoesNotContain(".m3u", js, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("requestAnimationFrame", js, StringComparison.Ordinal);
+        Assert.Contains("ROW_CHUNK", js, StringComparison.Ordinal);
+        Assert.Contains("render('progress')", js, StringComparison.Ordinal);
     }
 
     [Fact]
