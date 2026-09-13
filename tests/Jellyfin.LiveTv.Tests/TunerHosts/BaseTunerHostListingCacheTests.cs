@@ -68,6 +68,40 @@ public sealed class BaseTunerHostListingCacheTests
     }
 
     [Fact]
+    public async Task GetCachedChannels_DoesNotWaitForPlaylistHttp()
+    {
+        var tuner = Tuner();
+        var host = CreateHost(tuner);
+        host.EnableBackgroundListingRefresh = true;
+        host.SeedListingSnapshot(tuner.Id, FreshSnapshot(tuner.Url, stale: true));
+        host.BlockNextRefresh();
+
+        var started = DateTime.UtcNow;
+        var served = host.GetCachedChannels();
+        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(1));
+        Assert.Equal("old", Assert.Single(served).Id);
+        Assert.Equal(0, host.CompletedRefreshes);
+
+        host.ReleaseRefresh.TrySetResult();
+        await host.CompletedRefresh.Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public void GetCachedChannels_ColdStart_ReturnsEmptyWithoutWaiting()
+    {
+        var tuner = Tuner();
+        var host = CreateHost(tuner);
+        host.EnableBackgroundListingRefresh = false;
+        host.BlockNextRefresh();
+
+        var started = DateTime.UtcNow;
+        var served = host.GetCachedChannels();
+        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(1));
+        Assert.Empty(served);
+        Assert.Equal(0, host.CompletedRefreshes);
+    }
+
+    [Fact]
     public async Task GetChannels_CacheHit_DoesNotCallRefresh()
     {
         var tuner = Tuner();

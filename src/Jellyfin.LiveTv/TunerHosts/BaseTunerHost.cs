@@ -219,6 +219,54 @@ namespace Jellyfin.LiveTv.TunerHosts
             return list;
         }
 
+        /// <summary>
+        /// Returns last-good listings without waiting for a playlist GET.
+        /// Missing tuners start a background refresh so the Items request can return.
+        /// </summary>
+        /// <returns>Cached channels, or an empty list when no snapshot exists yet.</returns>
+        public List<ChannelInfo> GetCachedChannels()
+        {
+            var list = new List<ChannelInfo>();
+
+            foreach (var host in GetTunerHosts())
+            {
+                try
+                {
+                    var snapshot = GetOrLoadSnapshot(host);
+                    if (HasChannels(snapshot))
+                    {
+                        ScheduleBackgroundRefreshIfNeeded(host, snapshot);
+                        list.AddRange(snapshot.Channels.Where(i => !list.Any(l => string.Equals(i.Id, l.Id, StringComparison.OrdinalIgnoreCase))));
+                    }
+                    else
+                    {
+                        ScheduleColdRefresh(host);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogDebug(ex, "Error reading cached Live TV channels");
+                }
+            }
+
+            return list;
+        }
+
+        private void ScheduleColdRefresh(TunerHostInfo tuner)
+        {
+            if (!EnableBackgroundListingRefresh || tuner is null || string.IsNullOrEmpty(tuner.Id))
+            {
+                return;
+            }
+
+            if (!_backgroundRefresh.TryAdd(tuner.Id, 0))
+            {
+                return;
+            }
+
+            _ = Task.Run(() => RefreshInBackgroundAsync(tuner), CancellationToken.None);
+        }
+
         private async Task<List<ChannelInfo>> RefreshTunerLockedAsync(TunerHostInfo tuner, bool enableCache, CancellationToken cancellationToken)
         {
             var key = SnapshotKey(tuner);

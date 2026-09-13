@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Jellyfin.Data;
 using Jellyfin.Data.Enums;
 using Jellyfin.Database.Implementations.Enums;
+using Jellyfin.LiveTv.TunerHosts;
 using MediaBrowser.Controller.Channels;
 using MediaBrowser.Controller.Dto;
 using MediaBrowser.Controller.Entities;
@@ -23,7 +24,7 @@ namespace Jellyfin.LiveTv.Channels;
 /// <summary>
 /// A My Media library tile for Live TV, shown next to Movies, TV Shows, and other channels.
 /// </summary>
-public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCacheKey
+public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCacheKey, IChannelPresentationOverlay
 {
     private readonly ITunerHostManager _tunerHostManager;
     private readonly ILibraryManager _libraryManager;
@@ -106,8 +107,15 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCa
         {
             try
             {
-                var hostChannels = await host.GetChannels(true, cancellationToken).ConfigureAwait(false);
-                channels.AddRange(hostChannels);
+                if (host is BaseTunerHost cached)
+                {
+                    channels.AddRange(cached.GetCachedChannels());
+                }
+                else
+                {
+                    var hostChannels = await host.GetChannels(true, cancellationToken).ConfigureAwait(false);
+                    channels.AddRange(hostChannels);
+                }
             }
             catch (Exception ex)
             {
@@ -117,8 +125,9 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCa
 
         LiveTvChannelSetIdentity.ReplaceFromChannels("library", channels);
 
-        var guide = LoadNowNext();
-        var items = LiveTvLibraryChannelItems.Build(channels, query.FolderId, guide, DateTime.UtcNow);
+        // Now/next is overlaid after ChannelManager reuses existing entities.
+        // Baking it into ChannelItemInfo here forced a full rewrite on every open.
+        var items = LiveTvLibraryChannelItems.Build(channels, query.FolderId, guide: null, DateTime.UtcNow);
         return new ChannelItemResult
         {
             Items = items,
