@@ -52,6 +52,10 @@
         if (/live[\s-]?tv/i.test(pageTitle())) {
             return true;
         }
+        // Cheap gate first: one selector probe instead of scanning every card's text.
+        if (!document.querySelector(".card[data-type='TvChannel'], .card[data-type='Program'], .card[data-type='LiveTvProgram'], .posterItem[data-type='TvChannel']")) {
+            return false;
+        }
         var cards = document.querySelectorAll(".card, .posterItem");
         if (cards.length < 3) {
             return false;
@@ -59,9 +63,7 @@
         var hits = 0;
         for (var i = 0; i < cards.length; i++) {
             var type = String(cards[i].getAttribute("data-type") || "").toLowerCase();
-            var text = String(cards[i].textContent || "");
-            if (type === "tvchannel" || type === "program" || type === "livetvprogram" ||
-                /Jetzt:|Danach:|\b\d+\s+Sender\b/.test(text)) {
+            if (type === "tvchannel" || type === "program" || type === "livetvprogram") {
                 hits += 1;
             }
         }
@@ -85,7 +87,7 @@
             deviceId: device.deviceId || "",
             deviceName: device.deviceName || "Fire TV",
             appName: device.appName || "Jellyfin Fire TV",
-            appVersion: device.appVersion || "2.2.0"
+            appVersion: device.appVersion || "2.3.0"
         };
     }
 
@@ -382,8 +384,12 @@
             sync();
         });
         var observer = new MutationObserver(function () {
+            // While the overlay owns the page, hashchange drives updates — no DOM scans.
+            if (document.documentElement.classList.contains("firetv-live-on")) {
+                return;
+            }
             window.clearTimeout(syncTimer);
-            syncTimer = window.setTimeout(sync, 240);
+            syncTimer = window.setTimeout(sync, 400);
         });
         if (document.documentElement) {
             observer.observe(document.documentElement, { childList: true, subtree: true });

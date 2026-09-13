@@ -41,28 +41,8 @@
             document.body.style.height = "100%";
             document.body.style.overflow = "hidden";
         }
-        fitVisualViewport();
-    }
-
-    function fitVisualViewport() {
-        if (window.__firetvViewportFit) {
-            return;
-        }
-        try {
-            var visual = window.visualViewport ? window.visualViewport.width : window.innerWidth;
-            if (!visual || visual < 200) {
-                return;
-            }
-            var ratio = visual / 1920;
-            if (ratio >= 0.88 && ratio <= 1.12) {
-                window.__firetvViewportFit = true;
-                return;
-            }
-            if ((ratio >= 0.4 && ratio <= 0.75) || (ratio >= 1.6 && ratio <= 2.5)) {
-                document.documentElement.style.zoom = String(ratio);
-                window.__firetvViewportFit = true;
-            }
-        } catch (e) { /* ignore */ }
+        // Scaling is owned natively (WebViewDisplayFit.setInitialScale). A JS zoom
+        // here raced with it and double-shrank the UI on the Cube — do not re-add.
     }
 
     function injectPerformanceCss() {
@@ -221,7 +201,7 @@
             deviceId: "firetv-web",
             deviceName: "Fire TV",
             appName: "Jellyfin Fire TV",
-            appVersion: "2.2.0"
+            appVersion: "2.3.0"
         };
     }
 

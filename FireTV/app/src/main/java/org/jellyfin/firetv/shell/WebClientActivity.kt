@@ -26,6 +26,7 @@ import org.jellyfin.firetv.R
 import org.jellyfin.firetv.connect.ConnectActivity
 import org.jellyfin.firetv.core.FireTvClient
 import org.jellyfin.firetv.core.NativeServerList
+import org.jellyfin.firetv.core.PlayerPayloadStore
 import org.jellyfin.firetv.core.ServerUrl
 import org.jellyfin.firetv.databinding.ActivityWebClientBinding
 import org.jellyfin.firetv.databinding.ItemDownloadBinding
@@ -44,6 +45,7 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
     private lateinit var mediaSession: PlaybackMediaSession
     private var ignoreSsl: Boolean = false
     private lateinit var nativeshellJs: String
+    private var documentStartActive: Boolean = false
     private var lastBackAt: Long = 0L
     private var initialWebFocusDone: Boolean = false
     private val refreshDownloads = object : Runnable {
@@ -151,9 +153,11 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
 
         binding.webView.addJavascriptInterface(NativeInterface(this), "NativeInterface")
         binding.webView.addJavascriptInterface(NativePlayerBridge(this), "NativePlayer")
+        documentStartActive = installDocumentStartScript()
         binding.webView.webViewClient = JellyfinWebViewClient(
             context = this,
             ignoreSslErrors = ignoreSsl,
+            injectMainFrame = !documentStartActive,
             callbacks = object : JellyfinWebViewClient.Callbacks {
                 override fun onPageReady() {
                     runOnUiThread {
@@ -173,6 +177,7 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
                 override fun onRendererCrashed() {
                     runOnUiThread {
                         Toast.makeText(this@WebClientActivity, R.string.webview_recovered, Toast.LENGTH_LONG).show()
+                        destroyWebView()
                         recreate()
                     }
                 }
@@ -185,16 +190,18 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
 
             override fun onHideCustomView() = Unit
         }
-
-        installDocumentStartScript()
     }
 
-    private fun installDocumentStartScript() {
-        if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-            return
+    private fun installDocumentStartScript(): Boolean {
+        if (nativeshellJs.isBlank() ||
+            !WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)
+        ) {
+            return false
         }
         val origin = ServerUrl.origin(serverUrl)
-        WebViewCompat.addDocumentStartJavaScript(binding.webView, nativeshellJs, setOf(origin))
+        return runCatching {
+            WebViewCompat.addDocumentStartJavaScript(binding.webView, nativeshellJs, setOf(origin))
+        }.isSuccess
     }
 
     private fun loadWebClient() {
@@ -367,10 +374,11 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
     }
 
     override fun launchPlayer(payload: String) {
+        val payloadId = PlayerPayloadStore.put(payload)
         runOnUiThread {
             startActivity(
                 android.content.Intent(this, PlayerActivity::class.java).apply {
-                    putExtra(PlayerActivity.EXTRA_PAYLOAD, payload)
+                    putExtra(PlayerActivity.EXTRA_PAYLOAD_ID, payloadId)
                     putExtra(PlayerActivity.EXTRA_IGNORE_SSL, ignoreSsl)
                 },
             )
@@ -432,11 +440,19 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
             binding.downloadsOverlay.removeCallbacks(refreshDownloads)
         }
         if (::mediaSession.isInitialized) {
-            mediaSession.release()
+            runCatching { mediaSession.release() }
         }
-        if (::binding.isInitialized) {
+        destroyWebView()
+        super.onDestroy()
+    }
+
+    private fun destroyWebView() {
+        if (!::binding.isInitialized) {
+            return
+        }
+        runCatching {
             binding.webView.apply {
-                loadUrl("about:blank")
+                (parent as? android.view.ViewGroup)?.removeView(this)
                 stopLoading()
                 webChromeClient = null
                 removeJavascriptInterface("NativeInterface")
@@ -444,7 +460,6 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
                 destroy()
             }
         }
-        super.onDestroy()
     }
 
     companion object {

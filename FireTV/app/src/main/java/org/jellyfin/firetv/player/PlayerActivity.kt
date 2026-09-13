@@ -43,6 +43,7 @@ import org.jellyfin.firetv.core.LiveTvNowNextText
 import org.jellyfin.firetv.core.MediaTrack
 import org.jellyfin.firetv.core.MediaTracks
 import org.jellyfin.firetv.core.PlaybackPayload
+import org.jellyfin.firetv.core.PlayerPayloadStore
 import org.jellyfin.firetv.core.PlayerSyncState
 import org.jellyfin.firetv.core.RemoteSubtitle
 import org.jellyfin.firetv.core.RemoteSubtitles
@@ -124,7 +125,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         styleSubtitles()
         PlayerCommands.listener = this
         ignoreSsl = intent.getBooleanExtra(EXTRA_IGNORE_SSL, false)
-        beginResolve(intent.getStringExtra(EXTRA_PAYLOAD))
+        beginResolve(payloadFrom(intent))
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -132,7 +133,12 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         setIntent(intent)
         ignoreSsl = intent.getBooleanExtra(EXTRA_IGNORE_SSL, ignoreSsl)
         queuePayload = null
-        beginResolve(intent.getStringExtra(EXTRA_PAYLOAD), resetQueue = true, resetRetries = true)
+        beginResolve(payloadFrom(intent), resetQueue = true, resetRetries = true)
+    }
+
+    private fun payloadFrom(intent: Intent): String? {
+        return PlayerPayloadStore.take(intent.getStringExtra(EXTRA_PAYLOAD_ID))
+            ?: intent.getStringExtra(EXTRA_PAYLOAD)
     }
 
     private fun beginResolve(payload: String?, resetQueue: Boolean = true, resetRetries: Boolean = true) {
@@ -982,6 +988,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
 
     companion object {
         const val EXTRA_PAYLOAD = "payload"
+        const val EXTRA_PAYLOAD_ID = "payload_id"
         const val EXTRA_IGNORE_SSL = "ignore_ssl"
         private const val MAX_LIVE_RETRIES = 3
     }

@@ -28,6 +28,7 @@ class JellyfinWebViewClient(
     private val context: Context,
     private val ignoreSslErrors: Boolean,
     private val callbacks: Callbacks,
+    private val injectMainFrame: Boolean = true,
 ) : WebViewClient() {
 
     interface Callbacks {
@@ -53,7 +54,8 @@ class JellyfinWebViewClient(
         if (ResourceKind.isMedia(path)) {
             return null
         }
-        if (request.method.equals("GET", ignoreCase = true) &&
+        if (injectMainFrame &&
+            request.method.equals("GET", ignoreCase = true) &&
             request.isForMainFrame &&
             ResourceKind.isWebDocument(path)
         ) {

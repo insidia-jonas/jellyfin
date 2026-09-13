@@ -56,6 +56,19 @@ class PlayerCompatTest {
     }
 
     @Test
+    fun `player payload store hands big live queues without an intent extra`() {
+        val big = buildString {
+            append("""{"ids":[""")
+            repeat(800) { append(if (it == 0) "\"ch-$it\"" else ",\"ch-$it\"") }
+            append("]}")
+        }
+        val id = PlayerPayloadStore.put(big)
+        assertEquals(big, PlayerPayloadStore.take(id))
+        assertEquals(null, PlayerPayloadStore.take("other"))
+        assertEquals(null, PlayerPayloadStore.take(null))
+    }
+
+    @Test
     fun `native server list uses jellyfin-web findServers fields`() {
         val json = NativeServerList.toNativeShellJson(
             listOf(DiscoveredServer(address = "http://192.168.1.10:8096", id = "abc", name = "Home")),
