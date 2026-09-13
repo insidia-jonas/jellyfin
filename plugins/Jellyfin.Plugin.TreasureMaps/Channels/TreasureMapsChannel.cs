@@ -109,7 +109,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
             var c = Config;
             return string.Join(
                 '|',
-                "37",
+                "38",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -1295,7 +1295,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         if (!TryParseTitleCardId(seasonId, SeasonPrefix, out var kind, out var key, out var title, out var cover, out var extra)
             || !int.TryParse(extra, NumberStyles.Integer, CultureInfo.InvariantCulture, out var season))
         {
-            return new ChannelItemResult();
+            throw new InvalidOperationException("Treasure-Maps could not open this season.");
         }
 
         var matching = await FetchShowReleasesAsync(title, key, cancellationToken).ConfigureAwait(false);
@@ -1318,7 +1318,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         if (!TryParseTitleCardId(episodeId, EpisodePrefix, out _, out var key, out var title, out var cover, out var episodeKey)
             || string.IsNullOrWhiteSpace(episodeKey))
         {
-            return new ChannelItemResult();
+            throw new InvalidOperationException("Treasure-Maps could not open this episode.");
         }
 
         var matching = await FetchShowReleasesAsync(title, key, cancellationToken).ConfigureAwait(false);
@@ -1410,7 +1410,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
                 SeriesName = title,
                 SortName = "s" + season.ToString("00", CultureInfo.InvariantCulture),
                 Type = ChannelItemType.Folder,
-                FolderType = ChannelFolderType.Season,
+                FolderType = SeriesBrowse.NativeChildFolderType,
                 ContentType = ChannelMediaContentType.TvExtra,
                 ImageUrl = string.IsNullOrWhiteSpace(cover) ? null : cover,
                 IndexNumber = season,
@@ -1452,7 +1452,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
                 SeriesName = title,
                 SortName = bundle.Slot.SortKey,
                 Type = ChannelItemType.Folder,
-                FolderType = ChannelFolderType.Container,
+                FolderType = SeriesBrowse.NativeChildFolderType,
                 ContentType = ChannelMediaContentType.TvExtra,
                 ImageUrl = string.IsNullOrWhiteSpace(cover) ? null : cover,
                 IndexNumber = bundle.Slot.Episode,

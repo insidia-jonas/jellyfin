@@ -117,7 +117,7 @@
                     enhanceDownloadsList(item);
                 } else if (isDownloadItem(item)) {
                     enhanceDownloadDetail(item);
-                } else if (item.Type === 'BoxSet' && item.ChannelId) {
+                } else if (item.ChannelId && (item.Type === 'BoxSet' || item.Type === 'Season' || looksEpisodeOrSeason(item))) {
                     enhanceTitlePage(item);
                 } else if (item.ProviderIds && item.ProviderIds.TreasureMaps) {
                     enhanceReleasePage(item);
