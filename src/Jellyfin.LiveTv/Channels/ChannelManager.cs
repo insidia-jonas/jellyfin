@@ -1343,9 +1343,16 @@ namespace Jellyfin.LiveTv.Channels
                 changed = true;
             }
 
-            if (isNew || item.PremiereDate != info.PremiereDate)
+            var premiere = info.PremiereDate ?? info.StartDate;
+            if (isNew || item.PremiereDate != premiere)
             {
-                item.PremiereDate = info.PremiereDate;
+                item.PremiereDate = premiere;
+                changed = true;
+            }
+
+            if (isNew || item.EndDate != info.EndDate)
+            {
+                item.EndDate = info.EndDate;
                 changed = true;
             }
 

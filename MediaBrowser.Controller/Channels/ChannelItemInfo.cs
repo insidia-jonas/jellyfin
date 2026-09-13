@@ -80,6 +80,11 @@ namespace MediaBrowser.Controller.Channels
 
         public DateTime? EndDate { get; set; }
 
+        /// <summary>
+        /// Gets or sets how far the current Live TV program has progressed (0–100).
+        /// </summary>
+        public double? CompletionPercentage { get; set; }
+
         public int? IndexNumber { get; set; }
 
         public int? ParentIndexNumber { get; set; }

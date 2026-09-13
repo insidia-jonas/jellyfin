@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Jellyfin.Plugin.TreasureMaps.Api;
+using MediaBrowser.Model.Channels;
 
 namespace Jellyfin.Plugin.TreasureMaps.Channels;
 
@@ -164,6 +165,13 @@ public enum SeriesCoverLayout
 /// </summary>
 public static class SeriesBrowse
 {
+    /// <summary>
+    /// Season and episode cards must be BoxSets. <see cref="ChannelFolderType.Season"/>
+    /// becomes a real Season whose GetChildren only returns Episode items under a Series
+    /// parent. Title cards are BoxSets, so a Season child opens empty on Fire TV / web.
+    /// </summary>
+    public const ChannelFolderType NativeChildFolderType = ChannelFolderType.BoxSet;
+
     private static readonly Regex Episode = new(
         @"[._\s\-][sS](?<s>\d{1,2})[eE](?<e>\d{1,3})(?:\s*[-–]\s*[eE]?(?<e2>\d{1,3})|[eE](?<e2>\d{1,3}))?",
         RegexOptions.Compiled);

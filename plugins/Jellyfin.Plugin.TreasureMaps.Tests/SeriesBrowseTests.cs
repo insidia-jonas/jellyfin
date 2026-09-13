@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using Jellyfin.Plugin.TreasureMaps.Api;
 using Jellyfin.Plugin.TreasureMaps.Channels;
+using MediaBrowser.Model.Channels;
 using Xunit;
 
 namespace Jellyfin.Plugin.TreasureMaps.Tests;
@@ -170,5 +171,13 @@ public class SeriesBrowseTests
         var e10 = SeriesBrowse.Parse("Show.S01E10");
         var ordered = new[] { e10, pack, e2 }.OrderBy(s => s.SortKey).Select(s => s.Key).ToArray();
         Assert.Equal(new[] { "s01pack", "s01e02", "s01e10" }, ordered);
+    }
+
+    [Fact]
+    public void NativeChildFolderType_IsBoxSetNotSeason()
+    {
+        Assert.Equal(ChannelFolderType.BoxSet, SeriesBrowse.NativeChildFolderType);
+        Assert.NotEqual(ChannelFolderType.Season, SeriesBrowse.NativeChildFolderType);
+        Assert.NotEqual(ChannelFolderType.Container, SeriesBrowse.NativeChildFolderType);
     }
 }

@@ -23,7 +23,8 @@ public class LiveTvLibraryChannelItemsTests
 
         Assert.Equal(2, items.Count);
         Assert.Equal(ChannelItemType.Folder, items[0].Type);
-        Assert.Equal("News  ·  2", items[0].Name);
+        Assert.Equal("News", items[0].Name);
+        Assert.Equal("2 Sender", items[0].Overview);
         Assert.Equal("https://logo/cnn.png", items[0].ImageUrl);
         Assert.Equal(ChannelItemType.Media, items[1].Type);
         Assert.Equal("Extra", items[1].Name);
@@ -60,17 +61,31 @@ public class LiveTvLibraryChannelItemsTests
             ["cnn"] = new()
             {
                 NowTitle = "Tagesschau",
+                NowStart = new DateTime(2026, 9, 13, 18, 0, 0, DateTimeKind.Utc),
+                NowEnd = new DateTime(2026, 9, 13, 18, 15, 0, DateTimeKind.Utc),
                 NextTitle = "Wetter"
             }
         };
 
-        var items = LiveTvLibraryChannelItems.Build(channels, null, guide);
+        var now = new DateTime(2026, 9, 13, 18, 6, 0, DateTimeKind.Utc);
+        var items = LiveTvLibraryChannelItems.Build(channels, null, guide, now);
 
         var tile = Assert.Single(items);
-        Assert.Equal("Das Erste  ·  Tagesschau", tile.Name);
-        Assert.Equal("Das Erste", tile.OriginalTitle);
+        Assert.Equal("Das Erste", tile.Name);
+        Assert.DoesNotContain("Tagesschau", tile.Name, StringComparison.Ordinal);
+        Assert.StartsWith("Jetzt: Tagesschau", tile.OriginalTitle, StringComparison.Ordinal);
+        Assert.Contains("Danach: Wetter", tile.OriginalTitle, StringComparison.Ordinal);
         Assert.Contains("Jetzt: Tagesschau", tile.Overview, StringComparison.Ordinal);
         Assert.Contains("Danach: Wetter", tile.Overview, StringComparison.Ordinal);
+        Assert.Equal(new DateTime(2026, 9, 13, 18, 0, 0, DateTimeKind.Utc), tile.PremiereDate);
+        Assert.Equal(new DateTime(2026, 9, 13, 18, 0, 0, DateTimeKind.Utc), tile.StartDate);
+        Assert.Equal(new DateTime(2026, 9, 13, 18, 15, 0, DateTimeKind.Utc), tile.EndDate);
+        Assert.Equal(40, tile.CompletionPercentage);
+        Assert.Equal(TimeSpan.FromMinutes(15).Ticks, tile.RunTimeTicks);
+        Assert.Equal("1", tile.ProviderIds[LiveTvLibraryChannelItems.ProviderKey]);
+        Assert.Equal("Tagesschau", tile.ProviderIds[LiveTvLibraryChannelItems.ProviderNowKey]);
+        Assert.Equal("Wetter", tile.ProviderIds[LiveTvLibraryChannelItems.ProviderNextKey]);
+        Assert.Contains("livestream", tile.Tags);
         Assert.StartsWith("00001.00", tile.SortName, StringComparison.Ordinal);
         Assert.Equal(default, tile.DateCreated);
     }

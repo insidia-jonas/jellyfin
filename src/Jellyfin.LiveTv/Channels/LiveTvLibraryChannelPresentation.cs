@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using MediaBrowser.Model.LiveTv;
 
 namespace Jellyfin.LiveTv.Channels;
 
@@ -58,19 +59,50 @@ internal static partial class LiveTvLibraryChannelPresentation
     }
 
     /// <summary>
-    /// Card title: sender name, plus the current program when the guide has one.
+    /// Card title: the sender name only. Program titles belong on
+    /// <see cref="ProgramSubtitle"/> / <see cref="Overview"/> so Fire TV and web
+    /// posters stay scannable (Kodi PVR channel list vs now/next).
     /// </summary>
     /// <param name="channelName">The cleaned channel name.</param>
-    /// <param name="guide">The now/next block, or <c>null</c>.</param>
+    /// <param name="guide">Ignored; kept so existing call sites stay valid.</param>
     /// <returns>The tile title.</returns>
     public static string CardName(string channelName, LiveTvNowNext? guide)
     {
-        if (guide is null || string.IsNullOrWhiteSpace(guide.NowTitle))
+        _ = guide;
+        return channelName;
+    }
+
+    /// <summary>
+    /// One-line now/next subtitle (start–end times) for OriginalTitle / details.
+    /// </summary>
+    /// <param name="guide">The now/next block, or <c>null</c>.</param>
+    /// <returns>The subtitle, or empty.</returns>
+    public static string ProgramSubtitle(LiveTvNowNext? guide)
+    {
+        if (guide is null)
         {
-            return channelName;
+            return string.Empty;
         }
 
-        return channelName + "  ·  " + guide.NowTitle.Trim();
+        var text = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(guide.NowTitle))
+        {
+            text.Append("Jetzt: ").Append(guide.NowTitle.Trim());
+            AppendRange(text, guide.NowStart, guide.NowEnd);
+        }
+
+        if (!string.IsNullOrWhiteSpace(guide.NextTitle))
+        {
+            if (text.Length > 0)
+            {
+                text.Append("  ·  ");
+            }
+
+            text.Append("Danach: ").Append(guide.NextTitle.Trim());
+            AppendRange(text, guide.NextStart, guide.NextEnd);
+        }
+
+        return text.ToString();
     }
 
     /// <summary>
@@ -120,6 +152,22 @@ internal static partial class LiveTvLibraryChannelPresentation
         }
 
         return text.ToString();
+    }
+
+    /// <summary>
+    /// How far through the current program (0–100), or <c>null</c> without a valid window.
+    /// </summary>
+    /// <param name="guide">The now/next block, or <c>null</c>.</param>
+    /// <param name="utcNow">The current UTC instant.</param>
+    /// <returns>Percent, or <c>null</c>.</returns>
+    public static double? ProgressPercent(LiveTvNowNext? guide, DateTime utcNow)
+    {
+        if (guide is null)
+        {
+            return null;
+        }
+
+        return LiveTvProgress.GetPercent(guide.NowStart, guide.NowEnd, utcNow);
     }
 
     private static void AppendRange(StringBuilder text, DateTime? start, DateTime? end)

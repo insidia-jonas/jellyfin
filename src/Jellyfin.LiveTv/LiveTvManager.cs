@@ -13,6 +13,7 @@ using Jellyfin.Data.Enums;
 using Jellyfin.Data.Events;
 using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Database.Implementations.Enums;
+using Jellyfin.LiveTv.Channels;
 using Jellyfin.LiveTv.Configuration;
 using MediaBrowser.Common.Extensions;
 using MediaBrowser.Controller.Channels;
@@ -548,6 +549,8 @@ namespace Jellyfin.LiveTv
                 var program = (LiveTvProgram)item;
 
                 dto.StartDate = program.StartDate;
+                dto.EndDate = program.EndDate;
+                MediaBrowser.Model.LiveTv.LiveTvProgress.Apply(dto, program.StartDate, program.EndDate, DateTime.UtcNow);
                 dto.EpisodeTitle = program.EpisodeTitle;
                 dto.IsRepeat |= program.IsRepeat;
                 dto.IsMovie |= program.IsMovie;
@@ -1009,9 +1012,76 @@ namespace Jellyfin.LiveTv
                     if (programDto.ChannelId.HasValue && currentChannelsDict.TryGetValue(programDto.ChannelId.Value, out BaseItemDto channelDto))
                     {
                         channelDto.CurrentProgram = programDto;
+                        MediaBrowser.Model.LiveTv.LiveTvProgress.Apply(channelDto, programDto.StartDate, programDto.EndDate, now);
+                    }
+                }
+
+                var upcoming = _libraryManager.GetItemList(new InternalItemsQuery(user)
+                {
+                    IncludeItemTypes = [BaseItemKind.LiveTvProgram],
+                    ChannelIds = channelIds,
+                    MinStartDate = now,
+                    MaxStartDate = now.AddHours(8),
+                    OrderBy = [(ItemSortBy.StartDate, SortOrder.Ascending)],
+                    TopParentIds = [GetInternalLiveTvFolder(CancellationToken.None).Id],
+                    DtoOptions = options
+                });
+
+                var nextPrograms = upcoming
+                    .OfType<LiveTvProgram>()
+                    .GroupBy(static program => program.ChannelId)
+                    .Select(static group => group.OrderBy(static program => program.StartDate).First())
+                    .Cast<BaseItem>()
+                    .ToList();
+
+                if (nextPrograms.Count > 0)
+                {
+                    var nextDtos = _dtoService.GetBaseItemDtos(nextPrograms, options, user);
+                    foreach (var programDto in nextDtos)
+                    {
+                        if (programDto.ChannelId.HasValue && currentChannelsDict.TryGetValue(programDto.ChannelId.Value, out BaseItemDto channelDto))
+                        {
+                            channelDto.NextProgram = programDto;
+                        }
                     }
                 }
             }
+        }
+
+        /// <inheritdoc />
+        public void AttachLibraryChannelGuide(BaseItemDto dto, BaseItem item)
+        {
+            if (dto is null || item is null)
+            {
+                return;
+            }
+
+            if (item.SourceType != SourceType.Channel || item.IsFolder)
+            {
+                return;
+            }
+
+            if (item.ProviderIds is not null && item.ProviderIds.ContainsKey("TreasureMaps"))
+            {
+                return;
+            }
+
+            var taggedLive = item.Tags is not null
+                && item.Tags.Contains("livestream", StringComparer.OrdinalIgnoreCase);
+            var markedLive = item.ProviderIds is not null
+                && item.ProviderIds.ContainsKey(LiveTvLibraryChannelItems.ProviderKey);
+            var liveTvChannel = string.Equals(dto.ChannelName, "Live TV", StringComparison.OrdinalIgnoreCase);
+            if (!taggedLive && !markedLive && !liveTvChannel)
+            {
+                return;
+            }
+
+            if (item.PremiereDate is null && item.EndDate is null)
+            {
+                return;
+            }
+
+            MediaBrowser.Model.LiveTv.LiveTvProgress.Apply(dto, item.PremiereDate, item.EndDate, DateTime.UtcNow);
         }
 
         private async Task<Tuple<SeriesTimerInfo, ILiveTvService>> GetNewTimerDefaultsInternal(CancellationToken cancellationToken, LiveTvProgram program = null)

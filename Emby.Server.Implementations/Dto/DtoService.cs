@@ -464,6 +464,11 @@ namespace Emby.Server.Implementations.Dto
                 dto.HasLyrics = audio.GetMediaStreams().Any(s => s.Type == MediaStreamType.Lyric);
             }
 
+            if (item.SourceType == SourceType.Channel)
+            {
+                LivetvManager.AttachLibraryChannelGuide(dto, item);
+            }
+
             return dto;
         }
 

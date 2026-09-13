@@ -6,6 +6,7 @@ using Jellyfin.LiveTv.Recordings;
 using Jellyfin.LiveTv.Timers;
 using Jellyfin.LiveTv.TunerHosts;
 using Jellyfin.LiveTv.TunerHosts.HdHomerun;
+using Jellyfin.LiveTv.Web;
 using MediaBrowser.Controller.Channels;
 using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Model.IO;
@@ -46,5 +47,6 @@ public static class LiveTvServiceCollectionExtensions
         services.AddSingleton<IListingsProvider>(s => s.GetRequiredService<SchedulesDirect>());
         services.AddSingleton<ISchedulesDirectService>(s => s.GetRequiredService<SchedulesDirect>());
         services.AddSingleton<IListingsProvider, XmlTvListingsProvider>();
+        services.AddHostedService<LiveTvWebScriptInjector>();
     }
 }

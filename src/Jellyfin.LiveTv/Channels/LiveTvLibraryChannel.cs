@@ -60,7 +60,7 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCa
     public string Description => "Live television and IPTV channels.";
 
     /// <inheritdoc />
-    public string DataVersion => "5";
+    public string DataVersion => "7";
 
     /// <inheritdoc />
     public string HomePageUrl => string.Empty;
@@ -71,10 +71,10 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCa
     /// <inheritdoc />
     public string? GetCacheKey(string? userId)
     {
-        // Refresh now/next every 10 minutes so Fire TV tiles do not stay on a finished show.
+        // Titles refresh every two minutes; the web list also ticks the progress bar from Start/End.
         var now = DateTime.UtcNow;
         return now.ToString("yyyyMMddHH", System.Globalization.CultureInfo.InvariantCulture)
-               + (now.Minute / 10).ToString(System.Globalization.CultureInfo.InvariantCulture);
+               + (now.Minute / 2).ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
     /// <inheritdoc />
@@ -131,7 +131,7 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCa
         }
 
         var guide = LoadNowNext();
-        var items = LiveTvLibraryChannelItems.Build(channels, query.FolderId, guide);
+        var items = LiveTvLibraryChannelItems.Build(channels, query.FolderId, guide, DateTime.UtcNow);
         return new ChannelItemResult
         {
             Items = items,
