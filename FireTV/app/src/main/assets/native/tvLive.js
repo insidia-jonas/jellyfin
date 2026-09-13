@@ -42,14 +42,29 @@
         return h.indexOf("livetv") !== -1 || h.indexOf("live-tv") !== -1;
     }
 
+    function injectedOwns() {
+        return window.JellyfinLiveTvOverview && typeof window.JellyfinLiveTvOverview.ownsPage === "function" &&
+            window.JellyfinLiveTvOverview.ownsPage();
+    }
+
     function looksLikeLiveLibrary() {
         if (isGuidePage()) {
+            return false;
+        }
+        if (injectedOwns() || document.getElementById("jf-livetv-overview")) {
             return false;
         }
         if (isLiveHash()) {
             return true;
         }
+        if (/treasure/i.test(pageTitle())) {
+            return false;
+        }
         if (/live[\s-]?tv/i.test(pageTitle())) {
+            return true;
+        }
+        var labeled = document.querySelector(".card .cardText, .card .cardText-secondary, .posterItem");
+        if (labeled && /Jetzt:|Danach:/.test(String(labeled.textContent || ""))) {
             return true;
         }
         // Cheap gate first: one selector probe instead of scanning every card's text.
@@ -102,12 +117,54 @@
     function nowLine(item) {
         var program = item.CurrentProgram;
         if (!program || !program.Name) {
-            return "";
+            var overview = String(item.OriginalTitle || item.Overview || "");
+            var hit = overview.split(/\r?\n/).filter(function (line) {
+                return /Jetzt:|Now:/i.test(line);
+            })[0];
+            return hit ? hit.trim() : "";
         }
         var start = clock(program.StartDate);
         var end = clock(program.EndDate);
         var range = start && end ? " (" + start + "–" + end + ")" : (start ? " (" + start + ")" : "");
         return (german() ? "Jetzt: " : "Now: ") + program.Name + range;
+    }
+
+    function nextLine(item) {
+        var next = item.NextProgram;
+        if (next && next.Name) {
+            var start = clock(next.StartDate);
+            var end = clock(next.EndDate);
+            var range = start && end ? " (" + start + "–" + end + ")" : (start ? " (" + start + ")" : "");
+            return (german() ? "Danach: " : "Next: ") + next.Name + range;
+        }
+        var overview = String(item.OriginalTitle || item.Overview || "");
+        var hit = overview.split(/\r?\n| {2}· {2}/).filter(function (line) {
+            return /Danach:|Next:/i.test(line);
+        })[0];
+        return hit ? hit.trim() : "";
+    }
+
+    function progressOf(item, nowMs) {
+        var program = item.CurrentProgram || item;
+        var start = Date.parse(program.StartDate || item.StartDate || item.PremiereDate || "");
+        var end = Date.parse(program.EndDate || item.EndDate || "");
+        if (start && end && end > start) {
+            var ratio = ((nowMs - start) / (end - start)) * 100;
+            if (ratio < 0) {
+                return 0;
+            }
+            if (ratio > 100) {
+                return 100;
+            }
+            return Math.round(ratio * 10) / 10;
+        }
+        if (program.CompletionPercentage != null) {
+            return Math.max(0, Math.min(100, Number(program.CompletionPercentage)));
+        }
+        if (item.CompletionPercentage != null) {
+            return Math.max(0, Math.min(100, Number(item.CompletionPercentage)));
+        }
+        return null;
     }
 
     function posterUrl(item) {
@@ -280,8 +337,27 @@
             var now = document.createElement("div");
             now.className = "firetv-live-now";
             now.textContent = nowLine(item) || (german() ? "Keine EPG-Daten" : "No guide data");
+            var bar = document.createElement("div");
+            bar.className = "firetv-live-bar";
+            var fill = document.createElement("span");
+            var percent = progressOf(item, Date.now());
+            if (percent != null) {
+                fill.style.width = percent + "%";
+                bar.appendChild(fill);
+                bar.setAttribute("role", "progressbar");
+                bar.setAttribute("aria-valuenow", String(Math.round(percent)));
+            }
+            var next = document.createElement("div");
+            next.className = "firetv-live-next";
+            next.textContent = nextLine(item);
             copy.appendChild(name);
             copy.appendChild(now);
+            if (fill.parentNode) {
+                copy.appendChild(bar);
+            }
+            if (next.textContent) {
+                copy.appendChild(next);
+            }
             row.appendChild(logo);
             row.appendChild(copy);
             row.addEventListener("focus", function () { row.classList.add("focused"); });
@@ -339,6 +415,10 @@
     }
 
     function sync() {
+        if (injectedOwns() || document.getElementById("jf-livetv-overview")) {
+            hide();
+            return;
+        }
         if (looksLikeLiveLibrary()) {
             load();
         } else {
@@ -399,7 +479,9 @@
 
     window.FireTvLive = {
         sync: sync,
-        play: play
+        play: play,
+        progressOf: progressOf,
+        nextLine: nextLine
     };
 
     if (document.readyState === "loading") {

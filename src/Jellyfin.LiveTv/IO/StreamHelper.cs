@@ -11,15 +11,41 @@ namespace Jellyfin.LiveTv.IO
 {
     public class StreamHelper : IStreamHelper
     {
-        public async Task CopyToAsync(Stream source, Stream destination, int bufferSize, Action? onStarted, CancellationToken cancellationToken)
+        public Task CopyToAsync(Stream source, Stream destination, int bufferSize, Action? onStarted, CancellationToken cancellationToken)
+            => CopyToAsync(source, destination, bufferSize, onStarted, Timeout.InfiniteTimeSpan, cancellationToken);
+
+        public async Task CopyToAsync(Stream source, Stream destination, int bufferSize, Action? onStarted, TimeSpan idleTimeout, CancellationToken cancellationToken)
         {
             byte[] buffer = ArrayPool<byte>.Shared.Rent(bufferSize);
             try
             {
-                int read;
-                while ((read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) != 0)
+                while (true)
                 {
+                    int read;
+                    if (idleTimeout > TimeSpan.Zero && idleTimeout != Timeout.InfiniteTimeSpan)
+                    {
+                        using var readCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                        readCts.CancelAfter(idleTimeout);
+                        try
+                        {
+                            read = await source.ReadAsync(buffer, readCts.Token).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                        {
+                            throw new TimeoutException("Live stream produced no data before the hang timeout.");
+                        }
+                    }
+                    else
+                    {
+                        read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+                    }
+
                     cancellationToken.ThrowIfCancellationRequested();
+
+                    if (read == 0)
+                    {
+                        return;
+                    }
 
                     await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
 

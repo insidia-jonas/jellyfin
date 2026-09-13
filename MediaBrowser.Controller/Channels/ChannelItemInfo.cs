@@ -28,6 +28,8 @@ namespace MediaBrowser.Controller.Channels
 
         public string Name { get; set; }
 
+        public string SortName { get; set; }
+
         public string SeriesName { get; set; }
 
         public string Id { get; set; }
@@ -77,6 +79,11 @@ namespace MediaBrowser.Controller.Channels
         public DateTime? StartDate { get; set; }
 
         public DateTime? EndDate { get; set; }
+
+        /// <summary>
+        /// Gets or sets how far the current Live TV program has progressed (0–100).
+        /// </summary>
+        public double? CompletionPercentage { get; set; }
 
         public int? IndexNumber { get; set; }
 

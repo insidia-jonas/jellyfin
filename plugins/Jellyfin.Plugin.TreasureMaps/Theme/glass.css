@@ -1,0 +1,319 @@
+/* ================================================================
+   Treasure Glass — a macOS-like glassmorphism theme for Jellyfin
+   Applied via Dashboard > Branding (Custom CSS) by the
+   Treasure-Maps plugin ("Apply glass theme" button).
+   ================================================================ */
+
+:root {
+    --tg-accent: #0a84ff;
+    --tg-accent-soft: rgba(10, 132, 255, 0.85);
+    --tg-glass: rgba(28, 30, 44, 0.55);
+    --tg-glass-strong: rgba(24, 26, 38, 0.78);
+    --tg-glass-border: rgba(255, 255, 255, 0.12);
+    --tg-text: rgba(255, 255, 255, 0.92);
+    --tg-radius: 16px;
+    --tg-radius-small: 12px;
+    --tg-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+
+/* ---- Wallpaper: soft colorful macOS-like gradient ---- */
+html,
+.backgroundContainer,
+.backdropContainer {
+    background: radial-gradient(1200px 800px at 12% -10%, rgba(94, 92, 230, 0.35), transparent 60%),
+        radial-gradient(1000px 700px at 95% 15%, rgba(10, 132, 255, 0.28), transparent 55%),
+        radial-gradient(900px 900px at 50% 110%, rgba(191, 90, 242, 0.22), transparent 60%),
+        linear-gradient(160deg, #101322 0%, #151a2e 45%, #1a1430 100%) !important;
+    background-attachment: fixed !important;
+}
+
+.backgroundContainer.withBackdrop {
+    background: rgba(12, 14, 24, 0.72) !important;
+    -webkit-backdrop-filter: blur(28px) saturate(140%);
+    backdrop-filter: blur(28px) saturate(140%);
+}
+
+/* ---- Typography ---- */
+html,
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+        "Segoe UI", Roboto, "Helvetica Neue", sans-serif !important;
+    color: var(--tg-text);
+    letter-spacing: 0.1px;
+}
+
+h1, h2, h3, .sectionTitle {
+    font-weight: 650 !important;
+    letter-spacing: -0.2px;
+}
+
+/* ---- Top bar: frosted glass ---- */
+.skinHeader,
+.skinHeader.semiTransparent,
+.skinHeader-withBackground {
+    background: var(--tg-glass) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    backdrop-filter: blur(24px) saturate(180%);
+    border-bottom: 1px solid var(--tg-glass-border);
+    box-shadow: 0 2px 20px rgba(0, 0, 0, 0.25);
+}
+
+.headerTabs {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+}
+
+.emby-tab-button {
+    border-radius: 999px !important;
+    margin: 0 0.15em;
+    transition: background 0.2s ease, color 0.2s ease;
+}
+
+.emby-tab-button.emby-tab-button-active {
+    background: rgba(255, 255, 255, 0.14);
+    color: #fff !important;
+}
+
+.emby-tab-button:hover {
+    background: rgba(255, 255, 255, 0.09);
+}
+
+/* ---- Side drawer: glass panel ---- */
+.mainDrawer {
+    background: var(--tg-glass-strong) !important;
+    -webkit-backdrop-filter: blur(28px) saturate(160%);
+    backdrop-filter: blur(28px) saturate(160%);
+    border-right: 1px solid var(--tg-glass-border);
+}
+
+.navMenuOption {
+    border-radius: var(--tg-radius-small) !important;
+    margin: 2px 10px !important;
+    transition: background 0.15s ease;
+}
+
+.navMenuOption:hover {
+    background: rgba(255, 255, 255, 0.1) !important;
+}
+
+.navMenuOption-selected {
+    background: var(--tg-accent-soft) !important;
+    color: #fff !important;
+}
+
+/* ---- Cards: rounded glass with hover lift ---- */
+.cardBox {
+    border-radius: var(--tg-radius) !important;
+    overflow: hidden;
+    background: transparent;
+}
+
+.cardImageContainer,
+.cardPadder,
+.cardContent {
+    border-radius: var(--tg-radius) !important;
+}
+
+.card .cardBox {
+    transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.3, 1.2), box-shadow 0.22s ease;
+}
+
+.card:hover .cardBox {
+    transform: translateY(-4px) scale(1.025);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--tg-glass-border);
+}
+
+.cardImageContainer {
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.cardText {
+    letter-spacing: 0;
+}
+
+/* Uniform glass look for imageless (category) tiles */
+.defaultCardBackground,
+.defaultCardBackground0,
+.defaultCardBackground1,
+.defaultCardBackground2,
+.defaultCardBackground3,
+.defaultCardBackground4,
+.defaultCardBackground5 {
+    background: linear-gradient(145deg, rgba(88, 96, 148, 0.55), rgba(46, 52, 90, 0.6)) !important;
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--tg-glass-border);
+    color: #fff;
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* ---- Buttons: pill glass ---- */
+.raised,
+button.raised.emby-button {
+    border-radius: 999px !important;
+    background: rgba(255, 255, 255, 0.12) !important;
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--tg-glass-border);
+    color: var(--tg-text) !important;
+    transition: background 0.18s ease, transform 0.18s ease;
+}
+
+.raised:hover,
+button.raised.emby-button:hover {
+    background: rgba(255, 255, 255, 0.2) !important;
+    transform: translateY(-1px);
+}
+
+.button-submit,
+button.raised.button-submit.emby-button {
+    background: var(--tg-accent) !important;
+    border-color: transparent;
+    color: #fff !important;
+    box-shadow: 0 6px 18px rgba(10, 132, 255, 0.4);
+}
+
+.fab {
+    border-radius: 999px !important;
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+}
+
+.paper-icon-button-light:hover {
+    background: rgba(255, 255, 255, 0.12) !important;
+    border-radius: 999px;
+}
+
+/* ---- Inputs: rounded frosted fields ---- */
+.emby-input,
+.emby-textarea,
+.emby-select {
+    border-radius: var(--tg-radius-small) !important;
+    background: rgba(255, 255, 255, 0.08) !important;
+    border: 1px solid var(--tg-glass-border) !important;
+    color: var(--tg-text) !important;
+}
+
+.emby-input:focus,
+.emby-textarea:focus,
+.emby-select:focus {
+    border-color: var(--tg-accent) !important;
+    box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.25);
+}
+
+/* ---- Dialogs, menus, toasts: heavy glass ---- */
+.dialog,
+.actionSheet {
+    background: var(--tg-glass-strong) !important;
+    -webkit-backdrop-filter: blur(30px) saturate(160%);
+    backdrop-filter: blur(30px) saturate(160%);
+    border-radius: 20px !important;
+    border: 1px solid var(--tg-glass-border);
+    box-shadow: var(--tg-shadow);
+}
+
+.formDialogHeader {
+    background: transparent !important;
+}
+
+.formDialogFooter {
+    background: rgba(255, 255, 255, 0.04) !important;
+}
+
+.actionSheetMenuItem:hover {
+    background: rgba(255, 255, 255, 0.1) !important;
+    border-radius: 10px;
+}
+
+.toast {
+    background: var(--tg-glass-strong) !important;
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    border-radius: 14px !important;
+    border: 1px solid var(--tg-glass-border);
+}
+
+/* ---- Lists / detail pages ---- */
+.listItem {
+    border-radius: var(--tg-radius-small) !important;
+    transition: background 0.15s ease;
+}
+
+.listItem:hover {
+    background: rgba(255, 255, 255, 0.08) !important;
+}
+
+.paperList,
+.visualCardBox {
+    background: var(--tg-glass) !important;
+    -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(16px);
+    border-radius: var(--tg-radius) !important;
+    border: 1px solid var(--tg-glass-border);
+}
+
+.detailPagePrimaryContainer {
+    background: transparent !important;
+}
+
+.itemDetailImage {
+    border-radius: var(--tg-radius) !important;
+    box-shadow: var(--tg-shadow);
+}
+
+.detailPageWrapperContainer .emby-button.detailButton {
+    border-radius: 999px !important;
+    background: rgba(255, 255, 255, 0.1);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    margin-right: 0.35em;
+}
+
+/* ---- Scrollbars: slim macOS style ---- */
+::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.22);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.35);
+    background-clip: content-box;
+}
+
+/* ---- Progress / sliders ---- */
+.mdl-slider::-webkit-slider-thumb {
+    background: var(--tg-accent);
+}
+
+.itemProgressBarForeground {
+    background: var(--tg-accent) !important;
+    border-radius: 999px;
+}
+
+/* ---- Alphabet picker + misc chrome ---- */
+.alphaPickerButton {
+    border-radius: 8px !important;
+}
+
+.alphaPickerButton-selected {
+    background: var(--tg-accent-soft) !important;
+    color: #fff !important;
+}
+
+.emby-scrollbuttons-button {
+    background: var(--tg-glass) !important;
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    border-radius: 999px !important;
+}

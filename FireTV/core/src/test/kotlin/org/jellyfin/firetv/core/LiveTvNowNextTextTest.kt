@@ -52,6 +52,30 @@ class LiveTvNowNextTextTest {
     }
 
     @Test
+    fun `reads sender from Name and now next from OriginalTitle`() {
+        val guide = LiveTvNowNextText.parse(
+            name = "Das Erste",
+            originalTitle = "Jetzt: Tagesschau (20:00–20:15)  ·  Danach: Wetter (20:15–20:20)",
+            overview = """
+                Jetzt: Tagesschau (20:00–20:15)
+                Danach: Wetter (20:15–20:20)
+            """.trimIndent(),
+        )
+        assertEquals("Das Erste", guide.channelName)
+        assertEquals("Tagesschau", guide.nowTitle)
+        assertEquals("20:00–20:15", guide.nowRange)
+        assertEquals("Wetter", guide.nextTitle)
+        assertFalse(guide.isGroupFolder)
+        assertTrue(
+            LiveTvNowNextText.looksLikeLibraryTile(
+                "Das Erste",
+                "Jetzt: Tagesschau (20:00–20:15)",
+                "Jetzt: Tagesschau (20:00–20:15)",
+            ),
+        )
+    }
+
+    @Test
     fun `falls back to the card name when the guide is empty`() {
         val guide = LiveTvNowNextText.parse("ZDF", null, "")
         assertEquals("ZDF", guide.channelName)

@@ -1,9 +1,11 @@
 package org.jellyfin.firetv.core
 
 /**
- * Reads the Live TV library-channel tile contract from server PR #1:
- * [Name] = "Sender  ·  Jetzt-Titel", [OriginalTitle] = Sender,
+ * Reads the Live TV library-channel tile contract:
+ * [Name] = Sender only,
+ * [OriginalTitle] = "Jetzt: … (HH:mm–HH:mm)  ·  Danach: …" (or the sender on older caches),
  * [Overview] = "Jetzt: … (HH:mm–HH:mm)\nDanach: …\n\nPlot".
+ * Older caches that mashed "Sender  ·  Jetzt-Titel" into [Name] are still parsed.
  */
 object LiveTvNowNextText {
     data class Guide(
@@ -41,27 +43,35 @@ object LiveTvNowNextText {
         val overviewLines = overview?.replace("\r\n", "\n")?.trim().orEmpty()
         val nowFromOverview = labeledLine(overviewLines, NOW_LABELS)
         val nextFromOverview = labeledLine(overviewLines, NEXT_LABELS)
+        val originalLines = original?.replace("  ·  ", "\n").orEmpty()
+        val nowFromOriginal = original?.let { labeledLine(originalLines, NOW_LABELS) }
+        val nextFromOriginal = original?.let { labeledLine(originalLines, NEXT_LABELS) }
         val senderCount = SENDER_COUNT.find(overviewLines)?.groupValues?.get(1)?.toIntOrNull()
             ?: split.second?.toIntOrNull()?.takeIf { split.second?.all(Char::isDigit) == true && overviewLines.contains("Sender") }
         val isFolder = senderCount != null &&
             nowFromOverview == null &&
+            nowFromOriginal == null &&
             (overviewLines.isBlank() || overviewLines.contains("Sender"))
+        val originalIsGuide = nowFromOriginal != null || nextFromOriginal != null
         val channel = when {
-            !isFolder && !original.isNullOrBlank() -> original
+            isFolder && split.first.isNotBlank() -> split.first
+            !isFolder && !original.isNullOrBlank() && !originalIsGuide -> original
             split.first.isNotBlank() -> split.first
             else -> rawName
         }
         val nowTitle = if (isFolder) {
             null
         } else {
-            nowFromOverview?.title ?: split.second?.takeIf { it.any { ch -> !ch.isDigit() } }
+            nowFromOverview?.title
+                ?: nowFromOriginal?.title
+                ?: split.second?.takeIf { it.any { ch -> !ch.isDigit() } }
         }
         return Guide(
             channelName = channel.ifBlank { rawName },
             nowTitle = nowTitle?.trim()?.takeIf { it.isNotBlank() },
-            nowRange = nowFromOverview?.range,
-            nextTitle = if (isFolder) null else nextFromOverview?.title,
-            nextRange = nextFromOverview?.range,
+            nowRange = nowFromOverview?.range ?: nowFromOriginal?.range,
+            nextTitle = if (isFolder) null else (nextFromOverview?.title ?: nextFromOriginal?.title),
+            nextRange = nextFromOverview?.range ?: nextFromOriginal?.range,
             plot = if (isFolder) null else plotFromOverview(overviewLines),
             isGroupFolder = isFolder,
             groupCount = senderCount,

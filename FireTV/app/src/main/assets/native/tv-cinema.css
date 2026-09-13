@@ -362,6 +362,30 @@ body.firetv-live-on .liveTvPage .itemsContainer {
     font-size: 0.95em;
 }
 
+#firetv-live .firetv-live-bar {
+    margin-top: 0.35em;
+    height: 8px;
+    border-radius: 99px;
+    background: #1c2430;
+    overflow: hidden;
+    max-width: 28em;
+}
+
+#firetv-live .firetv-live-bar > span {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: #3d8bfd;
+    border-radius: 99px;
+}
+
+#firetv-live .firetv-live-next {
+    margin-top: 0.2em;
+    color: #7f8b9b;
+    font-weight: 550;
+    font-size: 0.88em;
+}
+
 #firetv-live .firetv-live-empty {
     color: #9aa6b6;
     font-size: 1.1em;

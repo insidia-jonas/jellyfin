@@ -1,0 +1,3 @@
+#EXTM3U x-tvg-url="https://alt.example.com/xmltv.xml"
+#EXTINF:-1 tvg-id="demo.1",Demo Channel
+http://stream.example.com/demo

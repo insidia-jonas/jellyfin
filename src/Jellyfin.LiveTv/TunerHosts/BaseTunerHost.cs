@@ -45,6 +45,21 @@ namespace Jellyfin.LiveTv.TunerHosts
 
         protected virtual string ChannelIdPrefix => Type + "_";
 
+        /// <summary>
+        /// Clears the in-memory channel list cache, optionally for one tuner.
+        /// </summary>
+        /// <param name="tunerId">The tuner id, or <c>null</c> to clear every cached list.</param>
+        public void ClearChannelCache(string tunerId = null)
+        {
+            if (string.IsNullOrEmpty(tunerId))
+            {
+                _cache.Clear();
+                return;
+            }
+
+            _cache.TryRemove(tunerId, out _);
+        }
+
         protected abstract Task<List<ChannelInfo>> GetChannelsInternal(TunerHostInfo tuner, CancellationToken cancellationToken);
 
         public async Task<List<ChannelInfo>> GetChannels(TunerHostInfo tuner, bool enableCache, CancellationToken cancellationToken)

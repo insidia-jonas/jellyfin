@@ -132,6 +132,12 @@ namespace MediaBrowser.Controller.Library
         /// <returns>Task.</returns>
         Task CloseLiveStream(string id);
 
+        /// <summary>
+        /// Closes live streams that no client is reading (AutoOpen leftovers, ghost ConsumerCount).
+        /// </summary>
+        /// <returns>The number of streams closed.</returns>
+        Task<int> CloseIdleLiveStreams();
+
         Task<MediaSourceInfo> GetLiveStreamMediaInfo(string id, CancellationToken cancellationToken);
 
         bool SupportsDirectStream(string path, MediaProtocol protocol);

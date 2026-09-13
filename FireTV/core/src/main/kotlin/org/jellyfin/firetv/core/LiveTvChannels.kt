@@ -13,6 +13,10 @@ data class LiveTvChannel(
     val nowStart: String? = null,
     val nowEnd: String? = null,
     val nowOverview: String? = null,
+    val nextTitle: String? = null,
+    val nextStart: String? = null,
+    val nextEnd: String? = null,
+    val progressPercent: Double? = null,
     val imageTag: String? = null,
     val externalId: String? = null,
 )
@@ -27,6 +31,7 @@ object LiveTvChannels {
         val id = jsonStringField(json, "Id") ?: jsonStringField(json, "id") ?: return null
         val name = jsonStringField(json, "Name") ?: jsonStringField(json, "name") ?: return null
         val program = jsonObjectField(json, "CurrentProgram")
+        val next = jsonObjectField(json, "NextProgram")
         val tags = jsonStringArray(json, "Tags")
         return LiveTvChannel(
             id = id,
@@ -38,6 +43,11 @@ object LiveTvChannels {
             nowStart = program?.let { jsonStringField(it, "StartDate") },
             nowEnd = program?.let { jsonStringField(it, "EndDate") },
             nowOverview = program?.let { jsonStringField(it, "Overview") },
+            nextTitle = next?.let { jsonStringField(it, "Name") },
+            nextStart = next?.let { jsonStringField(it, "StartDate") },
+            nextEnd = next?.let { jsonStringField(it, "EndDate") },
+            progressPercent = jsonDoubleField(program ?: json, "CompletionPercentage")
+                ?: jsonDoubleField(json, "CompletionPercentage"),
             imageTag = jsonObjectField(json, "ImageTags")?.let { jsonStringField(it, "Primary") },
             externalId = jsonStringField(json, "ExternalId"),
         )
@@ -62,5 +72,35 @@ object LiveTvChannels {
         }
         val prefix = if (german) "Jetzt: " else "Now: "
         return prefix + title + range
+    }
+
+    fun nextLine(channel: LiveTvChannel, german: Boolean = true): String? {
+        val title = channel.nextTitle?.takeIf { it.isNotBlank() } ?: return null
+        val start = clock(channel.nextStart)
+        val end = clock(channel.nextEnd)
+        val range = when {
+            start != null && end != null -> " ($start–$end)"
+            start != null -> " ($start)"
+            else -> ""
+        }
+        val prefix = if (german) "Danach: " else "Next: "
+        return prefix + title + range
+    }
+
+    fun progressPercent(channel: LiveTvChannel, nowEpochMs: Long): Double? {
+        val startMs = parseEpochMs(channel.nowStart)
+        val endMs = parseEpochMs(channel.nowEnd)
+        if (startMs != null && endMs != null && endMs > startMs) {
+            val raw = 100.0 * (nowEpochMs - startMs) / (endMs - startMs)
+            return raw.coerceIn(0.0, 100.0).let { Math.round(it * 10.0) / 10.0 }
+        }
+        return channel.progressPercent?.coerceIn(0.0, 100.0)
+    }
+
+    private fun parseEpochMs(iso: String?): Long? {
+        if (iso.isNullOrBlank()) {
+            return null
+        }
+        return runCatching { java.time.Instant.parse(iso).toEpochMilli() }.getOrNull()
     }
 }

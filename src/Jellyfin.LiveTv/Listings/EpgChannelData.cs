@@ -23,16 +23,29 @@ namespace Jellyfin.LiveTv.Listings
             foreach (var channel in channels)
             {
                 _channelsById[channel.Id] = channel;
+                if (!string.IsNullOrEmpty(channel.CallSign))
+                {
+                    _channelsById.TryAdd(channel.CallSign, channel);
+                }
+
+                if (!string.IsNullOrEmpty(channel.TvgName))
+                {
+                    _channelsById.TryAdd(channel.TvgName, channel);
+                }
 
                 if (!string.IsNullOrEmpty(channel.Number))
                 {
                     _channelsByNumber[channel.Number] = channel;
                 }
 
-                var normalizedName = NormalizeName(channel.Name ?? string.Empty);
-                if (!string.IsNullOrWhiteSpace(normalizedName))
+                foreach (var name in NameKeys(channel.Name))
                 {
-                    _channelsByName[normalizedName] = channel;
+                    _channelsByName.TryAdd(name, channel);
+                }
+
+                foreach (var name in NameKeys(channel.TvgName))
+                {
+                    _channelsByName.TryAdd(name, channel);
                 }
             }
         }
@@ -44,11 +57,55 @@ namespace Jellyfin.LiveTv.Listings
             => _channelsByNumber.GetValueOrDefault(number);
 
         public ChannelInfo? GetChannelByName(string name)
-            => _channelsByName.GetValueOrDefault(name);
+        {
+            foreach (var key in NameKeys(name))
+            {
+                if (_channelsByName.TryGetValue(key, out var channel))
+                {
+                    return channel;
+                }
+            }
+
+            return null;
+        }
 
         public static string NormalizeName(string value)
         {
-            return value.Replace(" ", string.Empty, StringComparison.Ordinal).Replace("-", string.Empty, StringComparison.Ordinal);
+            return StripQualitySuffix(
+                value.Replace(" ", string.Empty, StringComparison.Ordinal)
+                    .Replace("-", string.Empty, StringComparison.Ordinal)
+                    .Replace("_", string.Empty, StringComparison.Ordinal));
+        }
+
+        private static IEnumerable<string> NameKeys(string? name)
+        {
+            var normalized = NormalizeName(name ?? string.Empty);
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                yield break;
+            }
+
+            yield return normalized;
+            var stripped = StripQualitySuffix(normalized);
+            if (!string.Equals(stripped, normalized, StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(stripped))
+            {
+                yield return stripped;
+            }
+        }
+
+        private static string StripQualitySuffix(string value)
+        {
+            foreach (var suffix in new[] { "UHD", "FHD", "HEVC", "HDR", "HD", "SD" })
+            {
+                if (value.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+                    && value.Length > suffix.Length)
+                {
+                    return value[..^suffix.Length];
+                }
+            }
+
+            return value;
         }
     }
 }

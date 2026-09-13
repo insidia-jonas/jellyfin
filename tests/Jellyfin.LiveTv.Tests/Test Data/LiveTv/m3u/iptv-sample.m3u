@@ -1,0 +1,7 @@
+#EXTM3U url-tvg="https://epg.example.com/guide.xml,https://backup.example.com/epg.xml" x-tvg-url="https://ignored.example.com/epg.xml"
+#EXTVLCOPT:http-user-agent=VLC/3.0.20
+#EXTVLCOPT:http-referrer=https://provider.example
+#EXTINF:-1 tvg-id="cnn.us" tvg-name="CNN" tvg-logo="https://logo.example/cnn.png" group-title="News",CNN HD
+http://stream.example.com/cnn.ts
+#EXTINF:-1 tvg-id="bbc.uk" tvg-chno="2" group-title="News",BBC One
+https://stream.example.com/bbc.m3u8
