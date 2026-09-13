@@ -30,8 +30,6 @@ namespace Jellyfin.LiveTv.TunerHosts
 {
     public class M3UTunerHost : BaseTunerHost, ITunerHost, IConfigurableTunerHost
     {
-        private static readonly string[] _mimeTypesCanShareHttpStream = ["video/MP2T"];
-        private static readonly string[] _extensionsCanShareHttpStream = [".ts", ".tsv", ".m2t"];
         private static readonly string[] _manifestExtensions = [".m3u8", ".m3u", ".mpd"];
 
         private readonly IHttpClientFactory _httpClientFactory;
@@ -71,9 +69,12 @@ namespace Jellyfin.LiveTv.TunerHosts
         {
             var channelIdPrefix = GetFullChannelIdPrefix(tuner);
 
-            return await new M3uParser(Logger, _httpClientFactory)
-                .Parse(tuner, channelIdPrefix, cancellationToken)
+            var playlist = await new M3uParser(Logger, _httpClientFactory)
+                .ParsePlaylist(tuner, channelIdPrefix, cancellationToken)
                 .ConfigureAwait(false);
+
+            ApplyPlaylistMetadata(tuner, playlist);
+            return playlist.Channels;
         }
 
         protected override async Task<ILiveStream> GetChannelStream(TunerHostInfo tunerHost, ChannelInfo channel, string streamId, IList<ILiveStream> currentLiveStreams, CancellationToken cancellationToken)
@@ -95,36 +96,13 @@ namespace Jellyfin.LiveTv.TunerHosts
 
             var mediaSource = sources[0];
 
-            if (tunerHost.AllowStreamSharing && mediaSource.Protocol == MediaProtocol.Http && !mediaSource.RequiresLooping)
+            // MPEG-TS IPTV must go through the HTTP proxy so hang detection can fail over ingest hosts.
+            // HLS playlists stay on ffmpeg, which already has HTTP reconnect flags.
+            if (mediaSource.Protocol == MediaProtocol.Http
+                && !mediaSource.RequiresLooping
+                && !M3uUrlFailover.IsHls(mediaSource.Path, mediaSource.Container))
             {
-                var extension = Path.GetExtension(new UriBuilder(mediaSource.Path).Path);
-
-                if (string.IsNullOrEmpty(extension))
-                {
-                    try
-                    {
-                        using var message = new HttpRequestMessage(HttpMethod.Head, mediaSource.Path);
-                        using var response = await _httpClientFactory.CreateClient(NamedClient.Default)
-                            .SendAsync(message, cancellationToken)
-                            .ConfigureAwait(false);
-
-                        if (response.IsSuccessStatusCode)
-                        {
-                            if (_mimeTypesCanShareHttpStream.Contains(response.Content.Headers.ContentType?.MediaType, StringComparison.OrdinalIgnoreCase))
-                            {
-                                return new SharedHttpStream(mediaSource, tunerHost, streamId, FileSystem, _httpClientFactory, Logger, Config, _appHost, _streamHelper);
-                            }
-                        }
-                    }
-                    catch (Exception)
-                    {
-                        Logger.LogWarning("HEAD request to check MIME type failed, shared stream disabled");
-                    }
-                }
-                else if (_extensionsCanShareHttpStream.Contains(extension, StringComparison.OrdinalIgnoreCase))
-                {
-                    return new SharedHttpStream(mediaSource, tunerHost, streamId, FileSystem, _httpClientFactory, Logger, Config, _appHost, _streamHelper);
-                }
+                return new SharedHttpStream(mediaSource, tunerHost, streamId, FileSystem, _httpClientFactory, Logger, Config, _appHost, _streamHelper);
             }
 
             return new LiveStream(mediaSource, tunerHost, FileSystem, Logger, Config, _streamHelper);
@@ -132,9 +110,13 @@ namespace Jellyfin.LiveTv.TunerHosts
 
         public async Task Validate(TunerHostInfo info)
         {
-            using (await new M3uParser(Logger, _httpClientFactory).GetListingsStream(info, CancellationToken.None).ConfigureAwait(false))
-            {
-            }
+            M3uUrlFailover.NormalizeTunerUrls(info);
+
+            var playlist = await new M3uParser(Logger, _httpClientFactory)
+                .ParsePlaylist(info, GetFullChannelIdPrefix(info), CancellationToken.None)
+                .ConfigureAwait(false);
+
+            ApplyPlaylistMetadata(info, playlist);
         }
 
         protected override Task<List<MediaSourceInfo>> GetChannelStreamMediaSources(TunerHostInfo tuner, ChannelInfo channel, CancellationToken cancellationToken)
@@ -144,9 +126,16 @@ namespace Jellyfin.LiveTv.TunerHosts
 
         protected virtual MediaSourceInfo CreateMediaSourceInfo(TunerHostInfo info, ChannelInfo channel)
         {
-            var path = channel.Path;
+            var path = M3uStreamUrl.SubstituteLiveNow(
+                M3uUrlFailover.RewriteStreamUrl(
+                    channel.Path,
+                    M3uUrlFailover.GetPrimaryUrl(info)),
+                DateTime.UtcNow);
 
-            var supportsDirectPlay = !info.EnableStreamLooping && info.TunerCount == 0;
+            // Never advertise DirectPlay. Fire TV would hit the raw IPTV URL (no VLC
+            // user-agent) while AutoOpen also holds a server connection — two slots,
+            // and the client play usually fails.
+            var supportsDirectPlay = false;
             var supportsDirectStream = !info.EnableStreamLooping;
 
             var protocol = _mediaSourceManager.GetPathProtocol(path);
@@ -166,20 +155,40 @@ namespace Jellyfin.LiveTv.TunerHosts
                 supportsDirectPlay = false;
             }
 
-            var httpHeaders = new Dictionary<string, string>();
+            var httpHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
             if (protocol == MediaProtocol.Http)
             {
-                // Use user-defined user-agent. If there isn't one, make it look like a browser.
-                httpHeaders[HeaderNames.UserAgent] = string.IsNullOrWhiteSpace(info.UserAgent) ?
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" :
-                    info.UserAgent;
+                if (channel.RequiredHttpHeaders is not null)
+                {
+                    foreach (var header in channel.RequiredHttpHeaders)
+                    {
+                        if (!string.IsNullOrWhiteSpace(header.Key) && !string.IsNullOrWhiteSpace(header.Value))
+                        {
+                            httpHeaders[header.Key] = header.Value;
+                        }
+                    }
+                }
+
+                if (!httpHeaders.ContainsKey(HeaderNames.UserAgent))
+                {
+                    httpHeaders[HeaderNames.UserAgent] = string.IsNullOrWhiteSpace(info.UserAgent)
+                        ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                        : info.UserAgent;
+                }
+
+                if (!httpHeaders.ContainsKey(HeaderNames.Referer)
+                    && !string.IsNullOrWhiteSpace(info.Referrer))
+                {
+                    httpHeaders[HeaderNames.Referer] = info.Referrer;
+                }
             }
 
             var mediaSource = new MediaSourceInfo
             {
                 Path = path,
                 Protocol = protocol,
+                Container = InferLiveContainer(path),
                 MediaStreams = new MediaStream[]
                 {
                     new MediaStream
@@ -199,6 +208,7 @@ namespace Jellyfin.LiveTv.TunerHosts
                 RequiresOpening = true,
                 RequiresClosing = true,
                 RequiresLooping = info.EnableStreamLooping,
+                SupportsProbing = false,
 
                 ReadAtNativeFramerate = info.ReadAtNativeFramerate,
 
@@ -207,6 +217,9 @@ namespace Jellyfin.LiveTv.TunerHosts
                 IsRemote = isRemote,
 
                 IgnoreDts = info.IgnoreDts,
+                GenPtsInput = true,
+                AnalyzeDurationMs = 5000,
+                BufferMs = 3000,
                 SupportsDirectPlay = supportsDirectPlay,
                 SupportsDirectStream = supportsDirectStream,
 
@@ -237,6 +250,49 @@ namespace Jellyfin.LiveTv.TunerHosts
         public Task<List<TunerHostInfo>> DiscoverDevices(int discoveryDurationMs, CancellationToken cancellationToken)
         {
             return Task.FromResult(new List<TunerHostInfo>());
+        }
+
+        private static void ApplyPlaylistMetadata(TunerHostInfo info, M3uPlaylist playlist)
+        {
+            if (string.IsNullOrWhiteSpace(info.UserAgent) && !string.IsNullOrWhiteSpace(playlist.UserAgent))
+            {
+                info.UserAgent = playlist.UserAgent;
+            }
+
+            if (string.IsNullOrWhiteSpace(info.Referrer) && !string.IsNullOrWhiteSpace(playlist.Referrer))
+            {
+                info.Referrer = playlist.Referrer;
+            }
+
+            if (string.IsNullOrWhiteSpace(info.EpgUrl) && !string.IsNullOrWhiteSpace(playlist.EpgUrl))
+            {
+                info.EpgUrl = playlist.EpgUrl;
+            }
+        }
+
+        private static string InferLiveContainer(string path)
+        {
+            if (!Uri.TryCreate(path, UriKind.Absolute, out var uri))
+            {
+                return null;
+            }
+
+            var relativePath = uri.AbsolutePath;
+            if (relativePath.Contains("m3u8", StringComparison.OrdinalIgnoreCase)
+                || relativePath.Contains("/hls", StringComparison.OrdinalIgnoreCase))
+            {
+                return "hls";
+            }
+
+            if (relativePath.EndsWith(".ts", StringComparison.OrdinalIgnoreCase)
+                || relativePath.EndsWith(".m2t", StringComparison.OrdinalIgnoreCase)
+                || relativePath.EndsWith(".mp2t", StringComparison.OrdinalIgnoreCase)
+                || relativePath.Contains("mpegts", StringComparison.OrdinalIgnoreCase))
+            {
+                return "mpegts";
+            }
+
+            return null;
         }
     }
 }

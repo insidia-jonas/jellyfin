@@ -1,0 +1,18 @@
+<Project>
+  <!--
+    Intentionally self-contained: this file stops MSBuild from inheriting the
+    repository-root Directory.Build.props so the plugin builds like a normal
+    standalone Jellyfin plugin (no server-wide analyzers / warnings-as-errors /
+    central package management). This keeps the plugin decoupled from the server
+    solution and CI.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+</Project>

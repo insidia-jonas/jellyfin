@@ -7421,7 +7421,14 @@ namespace MediaBrowser.Controller.MediaEncoding
 
             if (state.MediaSource.RequiresLooping)
             {
-                inputModifier += " -stream_loop -1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 2";
+                inputModifier += " -stream_loop -1";
+            }
+
+            // Reconnect dropped HTTP live/IPTV inputs so brief provider blips do not stall playback.
+            if (state.MediaSource.RequiresLooping
+                || (state.MediaSource.IsInfiniteStream && state.MediaSource.Protocol == MediaProtocol.Http))
+            {
+                inputModifier += " -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5";
             }
 
             return inputModifier;

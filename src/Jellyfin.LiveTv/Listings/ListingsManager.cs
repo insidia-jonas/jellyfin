@@ -425,6 +425,28 @@ public class ListingsManager : IListingsManager
             }
         }
 
+        // Kodi IPTV Simple 2nd pass: tvg-name vs XMLTV id / display-name (spaces or _).
+        if (!string.IsNullOrWhiteSpace(tunerChannel.TvgName))
+        {
+            var mappedTvgName = GetMappedChannel(tunerChannel.TvgName, mappings);
+            if (string.IsNullOrWhiteSpace(mappedTvgName))
+            {
+                mappedTvgName = tunerChannel.TvgName;
+            }
+
+            var byId = epgChannelData.GetChannelById(mappedTvgName);
+            if (byId is not null)
+            {
+                return byId;
+            }
+
+            var byName = epgChannelData.GetChannelByName(mappedTvgName);
+            if (byName is not null)
+            {
+                return byName;
+            }
+        }
+
         if (!string.IsNullOrWhiteSpace(tunerChannel.Number))
         {
             var tunerChannelNumber = GetMappedChannel(tunerChannel.Number, mappings);

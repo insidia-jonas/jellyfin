@@ -84,7 +84,15 @@ namespace Jellyfin.LiveTv.Listings
                 {
                     _logger.LogInformation("Downloading xmltv listings from {Path}", info.Path);
 
-                    using var response = await _httpClientFactory.CreateClient(NamedClient.Default).GetAsync(info.Path, cancellationToken).ConfigureAwait(false);
+                    using var request = new HttpRequestMessage(HttpMethod.Get, info.Path);
+                    if (!string.IsNullOrWhiteSpace(info.UserAgent))
+                    {
+                        request.Headers.TryAddWithoutValidation("User-Agent", info.UserAgent);
+                    }
+
+                    using var response = await _httpClientFactory.CreateClient(NamedClient.Default)
+                        .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                        .ConfigureAwait(false);
                     var redirectedUrl = response.RequestMessage?.RequestUri?.ToString() ?? info.Path;
                     var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
                     await using (stream.ConfigureAwait(false))

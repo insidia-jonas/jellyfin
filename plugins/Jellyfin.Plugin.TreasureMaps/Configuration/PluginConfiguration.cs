@@ -1,0 +1,218 @@
+using MediaBrowser.Model.Plugins;
+
+namespace Jellyfin.Plugin.TreasureMaps.Configuration;
+
+/// <summary>
+/// Configuration for the Treasure-Maps plugin.
+/// </summary>
+public class PluginConfiguration : BasePluginConfiguration
+{
+    /// <summary>
+    /// Gets or sets the base URL of the Treasure-Maps API (for example <c>https://treasure-maps.example</c>).
+    /// The <c>/api/v1</c> prefix is appended automatically.
+    /// </summary>
+    public string BaseUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the AI-powered "For You" channel category is enabled.
+    /// </summary>
+    public bool EnableForYou { get; set; }
+
+    /// <summary>
+    /// Gets or sets the AI provider: <c>grok</c> (xAI), <c>openai</c> or <c>anthropic</c>.
+    /// </summary>
+    public string AiProvider { get; set; } = "openai";
+
+    /// <summary>
+    /// Gets or sets the AI provider API key.
+    /// </summary>
+    public string AiApiKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the model name (empty uses the provider's default:
+    /// grok-3-mini / gpt-4o-mini / claude-3-5-haiku-latest).
+    /// </summary>
+    public string AiModel { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets an optional base-URL override for the AI API (e.g. an OpenAI-compatible
+    /// gateway such as OpenRouter or a local server). Empty uses the provider's official endpoint.
+    /// </summary>
+    public string AiBaseUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets how many hours AI recommendations are cached per user.
+    /// </summary>
+    public int ForYouCacheHours { get; set; } = 6;
+
+    /// <summary>
+    /// Gets or sets how many AI recommendations to request (resolved against the indexer).
+    /// </summary>
+    public int ForYouCount { get; set; } = 24;
+
+    /// <summary>
+    /// Gets or sets an optional OMDb API key used to fill IMDb-quality posters, plots and cast
+    /// on Treasure-Maps title cards. Empty falls back to the public iTunes Search API.
+    /// </summary>
+    public string OmdbApiKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the API key sent as the <c>X-API-Key</c> header.
+    /// </summary>
+    public string ApiKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the maximum number of unique titles kept in a category folder
+    /// (Movies / TV / DE / genre). The indexer is queried until this many titles exist.
+    /// The web client then paginates that list.
+    /// </summary>
+    public int ResultLimit { get; set; } = 200;
+
+    /// <summary>
+    /// Gets or sets the minimum community rating used when browsing (0 disables the filter).
+    /// </summary>
+    public double MinRating { get; set; }
+
+    /// <summary>
+    /// Gets or sets the preferred (primary) language. Releases in this language are shown first.
+    /// Accepts an ISO code (<c>de</c>, <c>en</c>, <c>es</c>) or a language name (<c>German</c>).
+    /// </summary>
+    public string PrimaryLanguage { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the accepted secondary languages, in order of preference. Same format as
+    /// <see cref="PrimaryLanguage"/>.
+    /// </summary>
+    public string[] SecondaryLanguages { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets a value indicating whether releases that do not match the primary or any
+    /// secondary language are hidden. Releases without language information are always kept.
+    /// </summary>
+    public bool FilterByLanguage { get; set; }
+
+    /// <summary>
+    /// Gets or sets an optional local folder into which grabbed NZB files are written.
+    /// Used as a fallback when SABnzbd is not configured. Point a Usenet download client
+    /// (SABnzbd / NZBGet "watched folder") at this path to actually download the movie.
+    /// </summary>
+    public string NzbDropFolder { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the base URL of the SABnzbd instance (for example <c>http://localhost:8080</c>).
+    /// When set together with <see cref="SabnzbdApiKey"/>, grabbed releases are pushed straight
+    /// into the SABnzbd download queue instead of only being written to <see cref="NzbDropFolder"/>.
+    /// </summary>
+    public string SabnzbdUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the SABnzbd API key (SABnzbd → Config → General → API Key).
+    /// </summary>
+    public string SabnzbdApiKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether marking a Treasure-Maps item as a favorite (the heart)
+    /// in the normal Jellyfin UI triggers a grab (download to SABnzbd).
+    /// </summary>
+    public bool GrabOnFavorite { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the default/fallback SABnzbd category (used when a per-type category is not set).
+    /// </summary>
+    public string SabnzbdCategory { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the SABnzbd category for movie grabs (e.g. <c>movies</c>). SABnzbd routes this
+    /// category to its own completed folder, which you point the Jellyfin "Movies" library at.
+    /// </summary>
+    public string SabnzbdMovieCategory { get; set; } = "movies";
+
+    /// <summary>
+    /// Gets or sets the SABnzbd category for TV grabs (e.g. <c>tv</c>). SABnzbd routes this category
+    /// to its own completed folder, which you point the Jellyfin "Shows" library at.
+    /// </summary>
+    public string SabnzbdTvCategory { get; set; } = "tv";
+
+    /// <summary>
+    /// Gets or sets the download folder for the movie category, applied to SABnzbd by the
+    /// "Set up SABnzbd" action. Relative paths are resolved under SABnzbd's completed-downloads
+    /// folder; absolute paths are used as-is.
+    /// </summary>
+    public string SabnzbdMovieFolder { get; set; } = "movies";
+
+    /// <summary>
+    /// Gets or sets the download folder for the TV category, applied to SABnzbd by the
+    /// "Set up SABnzbd" action.
+    /// </summary>
+    public string SabnzbdTvFolder { get; set; } = "tv";
+
+    /// <summary>
+    /// Gets or sets a value indicating whether releases are enriched with xREL ratings
+    /// (looked up by release/scene name).
+    /// </summary>
+    public bool EnableXrel { get; set; }
+
+    /// <summary>
+    /// Gets or sets the xREL API base URL. Defaults to the public xREL v2 API.
+    /// </summary>
+    public string XrelBaseUrl { get; set; } = "https://api.xrel.to/v2";
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the OpenSubtitles subtitle provider is enabled.
+    /// </summary>
+    public bool EnableOpenSubtitles { get; set; }
+
+    /// <summary>
+    /// Gets or sets the OpenSubtitles API key (from your opensubtitles.com consumer/app).
+    /// </summary>
+    public string OpenSubtitlesApiKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the OpenSubtitles username (required to download subtitles).
+    /// </summary>
+    public string OpenSubtitlesUsername { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the OpenSubtitles password (required to download subtitles).
+    /// </summary>
+    public string OpenSubtitlesPassword { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the OpenSubtitles API base URL. Defaults to the public REST API.
+    /// </summary>
+    public string OpenSubtitlesBaseUrl { get; set; } = "https://api.opensubtitles.com/api/v1";
+
+    /// <summary>
+    /// Gets or sets a value indicating whether AI subtitle creation (Whisper + optional translation) is enabled.
+    /// </summary>
+    public bool EnableAiSubtitles { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets an optional OpenAI-compatible Whisper base URL (for example Groq).
+    /// Empty uses OpenAI, or <see cref="AiBaseUrl"/> when that is set.
+    /// </summary>
+    public string WhisperBaseUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the Whisper model name.
+    /// </summary>
+    public string WhisperModel { get; set; } = "whisper-1";
+
+    /// <summary>
+    /// Gets or sets a dedicated Whisper API key. Empty falls back to <see cref="AiApiKey"/>.
+    /// Grok/Anthropic keys cannot call Whisper — set this (and optionally <see cref="WhisperBaseUrl"/>) separately.
+    /// </summary>
+    public string WhisperApiKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the estimated Whisper price per audio minute (OpenAI default is $0.006).
+    /// Shown in the pre-start cost quote.
+    /// </summary>
+    public decimal WhisperUsdPerMinute { get; set; } = 0.006m;
+
+    /// <summary>
+    /// Gets or sets the estimated chat-translation price per 1M tokens (in+out) when the target
+    /// language is not English.
+    /// </summary>
+    public decimal TranslationUsdPerMillionTokens { get; set; } = 0.15m;
+}

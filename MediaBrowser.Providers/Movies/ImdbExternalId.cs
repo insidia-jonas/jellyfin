@@ -30,7 +30,9 @@ namespace MediaBrowser.Providers.Movies
                 return true;
             }
 
-            return item is Movie || item is MusicVideo || item is Series || item is Episode || item is Trailer;
+            // BoxSet is included because channel plugins can surface a movie (with its releases
+            // as children) as a box set carrying the movie's IMDb id.
+            return item is Movie || item is MusicVideo || item is Series || item is Episode || item is Trailer || item is BoxSet;
         }
     }
 }
