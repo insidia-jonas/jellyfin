@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.TreasureMaps.Api;
 using Jellyfin.Plugin.TreasureMaps.Configuration;
 using Jellyfin.Plugin.TreasureMaps.Languages;
+using Jellyfin.Plugin.TreasureMaps.Listing;
 using Jellyfin.Plugin.TreasureMaps.ReleaseNaming;
 using Jellyfin.Plugin.TreasureMaps.Xrel;
 using MediaBrowser.Controller.Channels;
@@ -28,7 +29,7 @@ namespace Jellyfin.Plugin.TreasureMaps.Channels;
 /// Opening a series card lists every episode (seasons first when needed); each episode then
 /// lists qualities. Grab by marking a release as a favorite (heart).
 /// </summary>
-public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSearch, IDisableMediaSourceDisplay, IRequiresMediaInfoCallback, IHasCacheKey, ISupportsDelete
+public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSearch, IDisableMediaSourceDisplay, IRequiresMediaInfoCallback, IHasCacheKey, IChannelPresentationOverlay, ISupportsDelete
 {
     private const string GenrePrefix = "genre:";
     private const string FindPrefix = "find:";
@@ -56,6 +57,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
     private readonly GrabService _grabService;
     private readonly Recommendations.AiRecommender _ai;
     private readonly Metadata.MetadataCatalog _catalog;
+    private readonly TreasureMapsListingCache _listingCache;
     private readonly MediaBrowser.Controller.Library.ILibraryManager _libraryManager;
     private readonly MediaBrowser.Controller.Library.IUserManager _userManager;
     private readonly ILogger<TreasureMapsChannel> _logger;
@@ -68,6 +70,8 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
     /// <param name="sabnzbd">The SABnzbd client (for the Downloads folder).</param>
     /// <param name="grabService">The shared grab service (play-to-download).</param>
     /// <param name="ai">The AI recommender.</param>
+    /// <param name="catalog">The IMDb/iTunes metadata catalog.</param>
+    /// <param name="listingCache">The freshness-gated indexer snapshot cache.</param>
     /// <param name="libraryManager">The library manager (for the user's history).</param>
     /// <param name="userManager">The user manager.</param>
     /// <param name="logger">The logger.</param>
@@ -78,6 +82,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         GrabService grabService,
         Recommendations.AiRecommender ai,
         Metadata.MetadataCatalog catalog,
+        TreasureMapsListingCache listingCache,
         MediaBrowser.Controller.Library.ILibraryManager libraryManager,
         MediaBrowser.Controller.Library.IUserManager userManager,
         ILogger<TreasureMapsChannel> logger)
@@ -88,6 +93,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         _grabService = grabService;
         _ai = ai;
         _catalog = catalog;
+        _listingCache = listingCache;
         _libraryManager = libraryManager;
         _userManager = userManager;
         _logger = logger;
@@ -578,7 +584,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
 
         var active = !string.Equals(entry.Status, "Completed", StringComparison.OrdinalIgnoreCase)
                      && !string.Equals(entry.Status, "Failed", StringComparison.OrdinalIgnoreCase);
-        var overview = DownloadOverview(entry, speed, quality);
+        var overview = DownloadOverlay.FormatOverview(entry, speed, quality);
         var cover = rec?.CoverUrl ?? _grabService.GetArtwork(entry.Id, entry.Name);
         if (string.IsNullOrWhiteSpace(cover))
         {
@@ -616,25 +622,6 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         }
 
         return card;
-    }
-
-    private static string DownloadOverview(SabnzbdClient.SabDownloadStatus entry, string? speed, string? quality)
-    {
-        var badge = string.IsNullOrWhiteSpace(quality) ? string.Empty : quality.Trim() + "\n\n";
-        if (string.Equals(entry.Status, "Completed", StringComparison.OrdinalIgnoreCase))
-        {
-            return badge + "Download complete. Open Movies or TV Shows once the library scan finishes.";
-        }
-
-        if (string.Equals(entry.Status, "Failed", StringComparison.OrdinalIgnoreCase))
-        {
-            return badge + "Download failed." + (string.IsNullOrWhiteSpace(entry.FailMessage) ? string.Empty : " " + entry.FailMessage);
-        }
-
-        return badge + $"Downloading \u2013 {entry.Percent:0}%"
-            + (string.IsNullOrWhiteSpace(speed) ? string.Empty : $" \u00B7 {speed}B/s")
-            + (string.IsNullOrWhiteSpace(entry.TimeLeft) ? string.Empty : $" \u00B7 {entry.TimeLeft} left")
-            + (string.IsNullOrWhiteSpace(entry.LeftMb) ? string.Empty : $" \u00B7 {entry.LeftMb}/{entry.SizeMb} MB remaining");
     }
 
     private ChannelItemResult GetDownloadDetail(string folderId)
@@ -695,11 +682,23 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
     /// <inheritdoc />
     public string? GetCacheKey(string? userId)
     {
-        // Jellyfin caches channel folder results on disk for hours; folding a 2-minute time
-        // bucket into the key keeps the Downloads view (progress in names) reasonably live.
-        // The plugin's own in-memory API caches keep this cheap for the indexer.
-        var bucket = DateTime.UtcNow.Ticks / TimeSpan.FromMinutes(2).Ticks;
-        return (userId ?? string.Empty) + "-" + DataVersion + "-" + bucket.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        // Identity + DataVersion + listing generation + browse-TTL epoch.
+        // A 2-minute time bucket used to rebuild every folder on every open. Download
+        // percent is overlaid locally; indexer rows must not stay on ChannelManager's
+        // 3-hour disk cache after the snapshot expires.
+        return TreasureMapsChannelCacheKey.Build(userId, DataVersion, _listingCache.Generation, DateTime.UtcNow);
+    }
+
+    /// <inheritdoc />
+    public void OverlayPresentation(IReadOnlyList<MediaBrowser.Controller.Entities.BaseItem> items)
+    {
+        var snapshot = _sabnzbd.LastDownloadStatus;
+        if (snapshot is null)
+        {
+            return;
+        }
+
+        DownloadOverlay.Apply(items, snapshot.Items, snapshot.Speed, _grabService.Lookup);
     }
 
     /// <inheritdoc />

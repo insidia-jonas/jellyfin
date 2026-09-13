@@ -1,4 +1,5 @@
 using Jellyfin.Plugin.TreasureMaps.Channels;
+using Jellyfin.Plugin.TreasureMaps.Listing;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Channels;
 using MediaBrowser.Controller.Plugins;
@@ -14,6 +15,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     /// <inheritdoc />
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
+        serviceCollection.AddSingleton<TreasureMapsListingCache>();
         serviceCollection.AddSingleton<TreasureMapsApiClient>();
         serviceCollection.AddSingleton<SabnzbdClient>();
         serviceCollection.AddSingleton<Recommendations.AiRecommender>();
@@ -28,6 +30,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<MediaBrowser.Controller.Subtitles.ISubtitleProvider>(sp => sp.GetRequiredService<Subtitles.OpenSubtitlesProvider>());
         serviceCollection.AddSingleton<MediaBrowser.Controller.Subtitles.ISubtitleProvider>(sp => sp.GetRequiredService<Subtitles.AiSubtitleProvider>());
         serviceCollection.AddHostedService<GrabOnFavoriteService>();
+        serviceCollection.AddHostedService<TreasureMapsListingWarmupHost>();
         serviceCollection.AddHostedService<WebScriptInjector>();
         serviceCollection.AddHostedService<PeopleImageService>();
         serviceCollection.AddSingleton<LibraryRefreshService>();

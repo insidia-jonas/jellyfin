@@ -896,6 +896,11 @@ namespace Jellyfin.LiveTv.Channels
                 liveTv.OverlayPresentation(result.Items);
             }
 
+            if (channelProvider is IChannelPresentationOverlay overlay)
+            {
+                overlay.OverlayPresentation(result.Items);
+            }
+
             return result;
         }
 
