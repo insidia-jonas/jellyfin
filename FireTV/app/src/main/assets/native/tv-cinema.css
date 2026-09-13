@@ -1,0 +1,479 @@
+/* Plex-grade TV skin for hosted jellyfin-web.
+   Do not add extra card outline rings — jellyfin-web already draws TV focus.
+   Do not rewrite image URLs. */
+html.layout-tv,
+.layout-tv body,
+.layout-tv .backgroundContainer,
+.layout-tv .backdropContainer {
+    background: #07090f !important;
+}
+
+.layout-tv,
+.layout-tv body {
+    cursor: none !important;
+}
+
+.layout-tv .skinHeader {
+    background: linear-gradient(180deg, rgba(7, 9, 15, 0.96) 0%, rgba(7, 9, 15, 0.78) 70%, transparent 100%) !important;
+    border-bottom: 0 !important;
+    box-shadow: none !important;
+}
+
+.layout-tv .headerHomeButton,
+.layout-tv .headerUserButton,
+.layout-tv .headerSearchButton {
+    opacity: 0.92;
+}
+
+.layout-tv .homeSectionsContainer,
+.layout-tv .homePage,
+.layout-tv .sections {
+    padding-top: 0.4em;
+}
+
+.layout-tv .homeSectionsContainer .verticalSection,
+.layout-tv .padded-top-page .verticalSection {
+    margin-bottom: 1.7em !important;
+}
+
+.layout-tv .sectionTitle,
+.layout-tv .sectionTitleTextButton {
+    font-size: 1.55em !important;
+    font-weight: 650 !important;
+    letter-spacing: 0.02em !important;
+    color: #f4f7fb !important;
+    margin-bottom: 0.4em !important;
+}
+
+.layout-tv .cardImageContainer,
+.layout-tv .cardImage,
+.layout-tv .coveredImage {
+    background-size: cover !important;
+    background-position: center 12% !important;
+    background-repeat: no-repeat !important;
+}
+
+.layout-tv .cardPadder-portrait,
+.layout-tv .cardPadder-overflowPortrait {
+    border-radius: 6px;
+}
+
+.layout-tv .cardBox,
+.layout-tv .cardContent {
+    border-radius: 8px;
+}
+
+.layout-tv .cardText,
+.layout-tv .cardText-first {
+    font-size: 0.92em !important;
+    font-weight: 600 !important;
+    color: #e8edf4 !important;
+}
+
+.layout-tv .cardText-secondary {
+    color: #9aa6b6 !important;
+    font-weight: 500 !important;
+}
+
+.layout-tv .focused .cardImageContainer,
+.layout-tv .focused .cardBox {
+    filter: brightness(1.07);
+}
+
+.layout-tv .itemBackdrop {
+    mask-image: linear-gradient(180deg, #000 46%, transparent 100%);
+    -webkit-mask-image: linear-gradient(180deg, #000 46%, transparent 100%);
+}
+
+.layout-tv .itemName,
+.layout-tv .nameContainer h1,
+.layout-tv .parentName {
+    font-weight: 750 !important;
+    letter-spacing: 0.01em !important;
+    text-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+}
+
+.layout-tv .itemName {
+    font-size: 2.5em !important;
+    line-height: 1.12 !important;
+}
+
+.layout-tv .itemMiscInfo,
+.layout-tv .mediaInfoItem,
+.layout-tv .starRatingContainer,
+.layout-tv .itemCommunityRating {
+    font-size: 1.12em !important;
+    font-weight: 600 !important;
+}
+
+.layout-tv .tagline {
+    font-size: 1.15em !important;
+    font-style: italic !important;
+    color: #d5dde8 !important;
+    opacity: 0.92;
+}
+
+.layout-tv .overview,
+.layout-tv .detail-clamp-text,
+.layout-tv .itemOverview {
+    font-size: 1.05em !important;
+    line-height: 1.45 !important;
+    color: #d7deea !important;
+    max-width: 52em;
+}
+
+.layout-tv .mainDetailButtons .emby-button,
+.layout-tv .detailButton {
+    min-height: 3.2em;
+    border-radius: 10px !important;
+}
+
+.layout-tv .searchfields-input,
+.layout-tv input[type="search"],
+.layout-tv .searchFields input {
+    font-size: 1.35em !important;
+    letter-spacing: 0.01em;
+}
+
+#firetv-smart-results {
+    padding: 0.4em 0 1.2em;
+}
+
+#firetv-smart-results .firetv-smart-title {
+    font-size: 1.45em;
+    font-weight: 700;
+    color: #f4f7fb;
+    margin: 0 0 0.55em;
+    letter-spacing: 0.02em;
+}
+
+#firetv-smart-results .firetv-smart-row {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 1.05em;
+    padding: 0.35em 0 0.7em;
+}
+
+#firetv-smart-results .firetv-card {
+    flex: 0 0 11.4em;
+    width: 11.4em;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    color: #fff;
+    text-align: left;
+    outline: none;
+}
+
+#firetv-smart-results .firetv-poster {
+    width: 100%;
+    padding-bottom: 150%;
+    border-radius: 8px;
+    background: #151a24 center 12% / cover no-repeat;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+#firetv-smart-results .firetv-card.focused .firetv-poster {
+    filter: brightness(1.08);
+    transform: scale(1.05);
+}
+
+#firetv-smart-results .firetv-card-title {
+    margin-top: 0.45em;
+    font-size: 0.95em;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+#firetv-smart-results .firetv-card-meta {
+    margin-top: 0.15em;
+    color: #9aa6b6;
+    font-size: 0.82em;
+    font-weight: 600;
+}
+
+.firetv-imdb {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.7em 1em;
+    margin: 0.55em 0 0.8em;
+    font-size: 1.12em;
+    font-weight: 650;
+    color: #e8edf4;
+}
+
+.firetv-imdb-star {
+    color: #f5c518;
+    letter-spacing: 0.02em;
+}
+
+.firetv-imdb-chip {
+    padding: 0.18em 0.55em;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #d7deea;
+}
+
+.firetv-imdb-plot {
+    max-width: 52em;
+    margin: 0 0 1em;
+    font-size: 1.06em;
+    line-height: 1.45;
+    color: #d7deea;
+}
+
+.layout-tv .verticalSection[data-firetv-hidden="1"],
+.layout-tv .homeSection[data-firetv-hidden="1"],
+.layout-tv [data-firetv-hidden="1"] {
+    display: none !important;
+}
+
+.layout-tv .loginPage,
+.layout-tv .manualLoginForm,
+.layout-tv .visualLoginForm {
+    background: radial-gradient(1200px 700px at 18% 12%, rgba(170, 92, 195, 0.22), transparent 55%),
+        radial-gradient(900px 600px at 88% 80%, rgba(0, 164, 220, 0.16), transparent 50%),
+        #07090f !important;
+}
+
+.layout-tv .loginDisclaimer,
+.layout-tv .padded-left.padded-right.padded-bottom-page {
+    color: #d7deea;
+}
+
+.layout-tv .emby-input,
+.layout-tv .emby-textarea {
+    background: rgba(21, 26, 36, 0.92) !important;
+    border-radius: 12px !important;
+}
+
+.layout-tv .nowPlayingBar,
+.layout-tv .nowPlayingBar-hidden {
+    background: linear-gradient(180deg, transparent, rgba(7, 9, 15, 0.94)) !important;
+}
+
+.layout-tv .programCell,
+.layout-tv .guide-channelHeaderCell,
+.layout-tv .timeslotHeader-l-tv {
+    border-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+.layout-tv .guide-programName,
+.layout-tv .programCell-title {
+    font-weight: 650 !important;
+}
+
+.layout-tv .liveTvGuidePage,
+.layout-tv .channelsContainer {
+    background: #07090f !important;
+}
+
+html.firetv-live-on .libraryPage .itemsContainer,
+body.firetv-live-on .libraryPage .itemsContainer,
+html.firetv-live-on .liveTvPage .itemsContainer,
+body.firetv-live-on .liveTvPage .itemsContainer {
+    display: none !important;
+}
+
+#firetv-live {
+    padding: 0.2em 0 2em;
+}
+
+#firetv-live .firetv-live-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.8em 1.2em;
+    margin: 0 0 0.9em;
+}
+
+#firetv-live .firetv-live-title {
+    font-size: 1.7em;
+    font-weight: 750;
+    color: #f4f7fb;
+    letter-spacing: 0.02em;
+}
+
+#firetv-live .firetv-live-count {
+    color: #9aa6b6;
+    font-weight: 600;
+}
+
+#firetv-live .firetv-live-search {
+    min-width: 18em;
+    padding: 0.45em 0.8em;
+    border: 0;
+    border-radius: 10px;
+    background: #151a24;
+    color: #f4f7fb;
+    font-size: 1.05em;
+}
+
+#firetv-live .firetv-live-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45em;
+    max-width: 74em;
+}
+
+#firetv-live .firetv-live-row {
+    display: flex;
+    align-items: center;
+    gap: 1em;
+    width: 100%;
+    min-height: 5.4em;
+    padding: 0.35em 0.7em;
+    border: 0;
+    border-radius: 10px;
+    background: #10141c;
+    color: #f4f7fb;
+    text-align: left;
+    outline: none;
+}
+
+#firetv-live .firetv-live-row.focused {
+    filter: brightness(1.12);
+    background: #1a2230;
+}
+
+#firetv-live .firetv-live-logo {
+    flex: 0 0 4.6em;
+    width: 4.6em;
+    height: 4.6em;
+    border-radius: 8px;
+    background: #151a24 center / contain no-repeat;
+}
+
+#firetv-live .firetv-live-copy {
+    min-width: 0;
+}
+
+#firetv-live .firetv-live-name {
+    font-size: 1.15em;
+    font-weight: 750;
+}
+
+#firetv-live .firetv-live-now {
+    margin-top: 0.2em;
+    color: #9aa6b6;
+    font-weight: 600;
+    font-size: 0.95em;
+}
+
+#firetv-live .firetv-live-empty {
+    color: #9aa6b6;
+    font-size: 1.1em;
+    padding: 1.2em 0;
+}
+
+.layout-tv .card[data-firetv-livetv="1"] .cardImageContainer,
+.layout-tv .card[data-firetv-livetv="1"] .cardImage,
+.layout-tv .card[data-firetv-livetv="1"] .coveredImage,
+.layout-tv .firetv-card[data-firetv-livetv="1"] .firetv-poster {
+    background-size: contain !important;
+    background-position: center !important;
+    background-color: #10141c !important;
+}
+
+.layout-tv .itemsContainer .card[data-firetv-livetv="1"],
+.layout-tv .verticalSection .card[data-firetv-livetv="1"] {
+    width: 100% !important;
+    max-width: 72em;
+    margin: 0 0 0.55em !important;
+}
+
+.layout-tv .emby-scroller .card[data-firetv-livetv="1"],
+.layout-tv .scrollX .card[data-firetv-livetv="1"] {
+    width: 22em !important;
+    max-width: 22em;
+    flex: 0 0 22em !important;
+    margin: 0 0.7em 0 0 !important;
+}
+
+.layout-tv .card[data-firetv-livetv="1"] .cardBox,
+.layout-tv .card[data-firetv-livetv="1"] .cardContent {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    width: 100%;
+    min-height: 5.4em;
+}
+
+.layout-tv .card[data-firetv-livetv="1"] .cardScalable {
+    flex: 0 0 5.6em;
+    width: 5.6em !important;
+    max-width: 5.6em;
+}
+
+.layout-tv .card[data-firetv-livetv="1"] .cardPadder,
+.layout-tv .card[data-firetv-livetv="1"] .cardPadder-portrait,
+.layout-tv .card[data-firetv-livetv="1"] .cardPadder-overflowPortrait,
+.layout-tv .card[data-firetv-livetv="1"] .cardPadder-backdrop,
+.layout-tv .card[data-firetv-livetv="1"] .cardPadder-square {
+    padding-bottom: 100% !important;
+}
+
+.layout-tv .card[data-firetv-livetv="1"] .cardFooter,
+.layout-tv .card[data-firetv-livetv="1"] .cardText {
+    text-align: left !important;
+    white-space: normal !important;
+}
+
+.layout-tv .card[data-firetv-livetv="1"] .cardText-first {
+    font-size: 1.05em !important;
+    font-weight: 700 !important;
+}
+
+.layout-tv .card[data-firetv-livetv="1"] .cardText-secondary,
+.layout-tv .card[data-firetv-livetv="1"] .firetv-livetv-next {
+    color: #9aa6b6 !important;
+    font-weight: 550 !important;
+    line-height: 1.3 !important;
+}
+
+.layout-tv .card[data-firetv-livetv="1"] .firetv-livetv-next {
+    font-size: 0.86em !important;
+    opacity: 0.92;
+}
+
+.layout-tv #firetv-smart-results .firetv-card[data-firetv-livetv="1"] {
+    flex: 0 0 16em;
+    width: 16em;
+}
+
+.layout-tv #firetv-smart-results .firetv-card[data-firetv-livetv="1"] .firetv-poster {
+    padding-bottom: 56%;
+}
+
+.layout-tv .headerTabs,
+.layout-tv .emby-tabs-slider {
+    background: transparent !important;
+}
+
+.layout-tv .detailRibbon,
+.layout-tv .itemMiscInfo-primary {
+    letter-spacing: 0.01em;
+}
+
+.layout-tv .cardOverlayInner-logo,
+.layout-tv .cardImageIcon {
+    opacity: 0.88;
+}
+
+.layout-tv .libraryPage .padded-bottom-page {
+    padding-bottom: 3.4em !important;
+}
+
+.layout-tv .dialog .emby-button,
+.layout-tv .actionSheetMenuItem {
+    min-height: 2.8em;
+    border-radius: 10px !important;
+}
+
+.layout-tv .toast {
+    background: #151a24 !important;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px !important;
+}

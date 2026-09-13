@@ -1,0 +1,106 @@
+package org.jellyfin.firetv.shell
+
+import android.webkit.JavascriptInterface
+import org.json.JSONObject
+
+class NativeInterface(
+    private val host: Host,
+) {
+    interface Host {
+        fun deviceInformation(): JSONObject
+        fun exitApp()
+        fun openServerSelection()
+        fun openClientSettings()
+        fun openUrl(url: String)
+        fun updateMediaSession(json: String)
+        fun hideMediaSession()
+        fun enableFullscreen()
+        fun disableFullscreen()
+        fun updateVolumeLevel(level: Int)
+        fun launchPlayer(payload: String)
+        fun downloadFiles(json: String)
+        fun openDownloadManager()
+        fun findServersAsync(timeoutMs: Int)
+        fun runOnHost(block: () -> Unit)
+    }
+
+    @JavascriptInterface
+    fun getDeviceInformation(): String = host.deviceInformation().toString()
+
+    @JavascriptInterface
+    fun enableFullscreen() {
+        host.enableFullscreen()
+    }
+
+    @JavascriptInterface
+    fun disableFullscreen() {
+        host.disableFullscreen()
+    }
+
+    @JavascriptInterface
+    fun openUrl(url: String?) {
+        if (!url.isNullOrBlank()) {
+            host.openUrl(url)
+        }
+    }
+
+    @JavascriptInterface
+    fun updateMediaSession(json: String?) {
+        host.updateMediaSession(json.orEmpty())
+    }
+
+    @JavascriptInterface
+    fun hideMediaSession() {
+        host.hideMediaSession()
+    }
+
+    @JavascriptInterface
+    fun updateVolumeLevel(value: Int) {
+        host.updateVolumeLevel(value)
+    }
+
+    @JavascriptInterface
+    fun openClientSettings() {
+        host.openClientSettings()
+    }
+
+    @JavascriptInterface
+    fun openServerSelection() {
+        host.openServerSelection()
+    }
+
+    @JavascriptInterface
+    fun exitApp() {
+        host.exitApp()
+    }
+
+    @JavascriptInterface
+    fun downloadFile(json: String?): Boolean {
+        downloadFiles(json)
+        return true
+    }
+
+    @JavascriptInterface
+    fun downloadFiles(json: String?): Boolean {
+        if (!json.isNullOrBlank()) {
+            host.runOnHost { host.downloadFiles(json) }
+        }
+        return true
+    }
+
+    @JavascriptInterface
+    fun openDownloadManager() {
+        host.runOnHost { host.openDownloadManager() }
+    }
+
+    @JavascriptInterface
+    fun findServersAsync(timeoutMs: Int) {
+        host.findServersAsync(timeoutMs.coerceIn(500, 8_000))
+    }
+
+    @JavascriptInterface
+    fun onLocalUserSignedIn(user: String?, token: String?) = Unit
+
+    @JavascriptInterface
+    fun onLocalUserSignedOut() = Unit
+}

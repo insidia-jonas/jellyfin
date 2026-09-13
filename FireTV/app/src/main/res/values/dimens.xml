@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="tv_overscan">44dp</dimen>
+    <dimen name="tv_gap">16dp</dimen>
+    <dimen name="tv_radius">14dp</dimen>
+    <dimen name="tv_button_min">64dp</dimen>
+    <dimen name="tv_rail_width">440dp</dimen>
+    <dimen name="tv_panel_width">520dp</dimen>
+    <dimen name="tv_title">28sp</dimen>
+    <dimen name="tv_subtitle">16sp</dimen>
+    <dimen name="tv_body">17sp</dimen>
+    <dimen name="tv_caption">14sp</dimen>
+</resources>
