@@ -72,8 +72,8 @@ class PlaybackPayloadTest {
 
     @Test
     fun `reads original title and overview for live tiles`() {
-        val json = """{"items":[{"Id":"ch-1","Name":"Das Erste  ·  Tagesschau","OriginalTitle":"Das Erste","Overview":"Jetzt: Tagesschau (20:00–20:15)","IsLiveStream":true}]}"""
-        assertEquals("Das Erste", PlaybackPayload.itemOriginalTitle(json))
+        val json = """{"items":[{"Id":"ch-1","Name":"Das Erste","OriginalTitle":"Jetzt: Tagesschau (20:00–20:15)","Overview":"Jetzt: Tagesschau (20:00–20:15)","IsLiveStream":true}]}"""
+        assertEquals("Jetzt: Tagesschau (20:00–20:15)", PlaybackPayload.itemOriginalTitle(json))
         assertTrue(PlaybackPayload.itemOverview(json)!!.contains("Jetzt:"))
         assertEquals("Das Erste", LiveTvNowNextText.channelTitle(
             PlaybackPayload.itemName(json),

@@ -61,7 +61,7 @@ internal static class LiveTvLibraryChannelItems
             items.Add(new ChannelItemInfo
             {
                 Id = EncodeGroupId(group),
-                Name = label + "  ·  " + inGroup.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                Name = label,
                 SortName = "0-" + label,
                 Type = ChannelItemType.Folder,
                 FolderType = ChannelFolderType.Container,
@@ -120,14 +120,19 @@ internal static class LiveTvLibraryChannelItems
             image = nowNext.NowImageUrl;
         }
 
+        var subtitle = LiveTvLibraryChannelPresentation.ProgramSubtitle(nowNext);
+
         return new ChannelItemInfo
         {
             Id = channel.Id,
             Name = LiveTvLibraryChannelPresentation.CardName(name, nowNext),
-            OriginalTitle = name,
+            OriginalTitle = string.IsNullOrWhiteSpace(subtitle) ? name : subtitle,
             SortName = LiveTvLibraryChannelPresentation.SortName(channel.Number, name),
             ImageUrl = image,
             Overview = LiveTvLibraryChannelPresentation.Overview(nowNext),
+            PremiereDate = nowNext?.NowStart,
+            StartDate = nowNext?.NowStart,
+            EndDate = nowNext?.NowEnd,
             Type = ChannelItemType.Media,
             MediaType = ChannelMediaType.Video,
             ContentType = ChannelMediaContentType.TvExtra,
