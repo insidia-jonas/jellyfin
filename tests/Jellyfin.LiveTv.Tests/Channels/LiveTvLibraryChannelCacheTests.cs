@@ -114,7 +114,77 @@ public sealed class LiveTvLibraryChannelCacheTests
 
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(1));
         Assert.Empty(result.Items);
+        Assert.True(result.RefreshPending);
         Assert.Equal(0, host.CompletedRefreshes);
+        Assert.True(host.IsListingRefreshInFlight);
+    }
+
+    [Fact]
+    public async Task GetChannelItems_ColdStart_EventuallyHasChannelsAfterBackgroundFetch()
+    {
+        var cachePath = Path.Combine(Path.GetTempPath(), "jf-livetv-cold-later-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(cachePath);
+        var tuner = new TunerHostInfo
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Type = "test",
+            Url = "https://cdn.example/playlist.m3u"
+        };
+        var host = CreateBlockedHost(cachePath, tuner);
+        host.BlockNextRefresh();
+
+        var manager = new Mock<ITunerHostManager>();
+        manager.Setup(m => m.TunerHosts).Returns([host]);
+        var channel = CreateChannel(manager.Object, Mock.Of<ILibraryManager>());
+
+        var first = await channel.GetChannelItems(new InternalChannelItemQuery(), CancellationToken.None);
+        Assert.Empty(first.Items);
+        Assert.True(first.RefreshPending);
+
+        host.ReleaseRefresh.TrySetResult();
+        var deadline = DateTime.UtcNow.AddSeconds(3);
+        ChannelItemResult? second = null;
+        while (DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(50, TestContext.Current.CancellationToken);
+            second = await channel.GetChannelItems(new InternalChannelItemQuery(), CancellationToken.None);
+            if (second.Items.Count > 0)
+            {
+                break;
+            }
+        }
+
+        Assert.Contains(second!.Items, item => item.Name == "New");
+        Assert.False(second.RefreshPending);
+        Assert.Equal(1, host.CompletedRefreshes);
+    }
+
+    [Fact]
+    public async Task GetChannelItems_ColdStart_FirstLoadWaitReturnsChannels()
+    {
+        var cachePath = Path.Combine(Path.GetTempPath(), "jf-livetv-firstload-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(cachePath);
+        var tuner = new TunerHostInfo
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Type = "test",
+            Url = "https://cdn.example/playlist.m3u"
+        };
+        var host = CreateBlockedHost(cachePath, tuner);
+        host.FirstLoadWait = TimeSpan.FromSeconds(2);
+
+        var manager = new Mock<ITunerHostManager>();
+        manager.Setup(m => m.TunerHosts).Returns([host]);
+        var channel = CreateChannel(manager.Object, Mock.Of<ILibraryManager>());
+
+        var clock = Stopwatch.StartNew();
+        var result = await channel.GetChannelItems(new InternalChannelItemQuery(), CancellationToken.None);
+        clock.Stop();
+
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(2));
+        Assert.Contains(result.Items, item => item.Name == "New");
+        Assert.False(result.RefreshPending);
+        Assert.Equal(1, host.CompletedRefreshes);
     }
 
     [Fact]
@@ -185,7 +255,7 @@ public sealed class LiveTvLibraryChannelCacheTests
 
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(1));
         Assert.Empty(group.Items);
-        Assert.False(group.RefreshPending);
+        Assert.True(group.RefreshPending);
         Assert.Equal(0, host.CompletedRefreshes);
         host.ReleaseRefresh.TrySetResult();
     }
@@ -270,7 +340,11 @@ public sealed class LiveTvLibraryChannelCacheTests
         var config = new Mock<IServerConfigurationManager>();
         config.Setup(c => c.ApplicationPaths).Returns(paths.Object);
         config.Setup(c => c.GetConfiguration("livetv")).Returns(new LiveTvOptions { TunerHosts = [tuner] });
-        return new HangTunerHost(config.Object);
+        var host = new HangTunerHost(config.Object)
+        {
+            FirstLoadWait = TimeSpan.Zero
+        };
+        return host;
     }
 
     private sealed class HangTunerHost : BaseTunerHost, ITunerHost

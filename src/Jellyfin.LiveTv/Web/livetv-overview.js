@@ -22,6 +22,7 @@
     var syncTimer = 0;
     var paintToken = 0;
     var emptyRetry = 0;
+    var EMPTY_RETRY_MS = [1500, 3000, 6000, 12000];
     var ROW_CHUNK = 24;
 
     var style = document.createElement('style');
@@ -637,25 +638,16 @@
             if (gen !== loadGen) {
                 return;
             }
-            loading = false;
             hideLibrarySpinner();
             items = list || [];
-            render();
-            if (!items.length && parentId && !isOfficialLiveHash() && emptyRetry < 1) {
-                emptyRetry = 1;
-                window.setTimeout(function () {
-                    if (gen !== loadGen || parentIdFromHash() !== parentId) {
-                        return;
-                    }
-                    fetchChildren(parentId).then(function (again) {
-                        if (gen !== loadGen || !again.length) {
-                            return;
-                        }
-                        items = again;
-                        render();
-                    });
-                }, 1500);
+            if (!items.length && emptyRetry < EMPTY_RETRY_MS.length) {
+                loading = true;
+                render();
+                scheduleEmptyRetry(gen, parentId, isOfficialLiveHash());
+                return;
             }
+            loading = false;
+            render();
         }).catch(function () {
             if (gen !== loadGen) {
                 return;
@@ -666,6 +658,43 @@
             items = [];
             render();
         });
+    }
+
+    function scheduleEmptyRetry(gen, parentId, official) {
+        if (emptyRetry >= EMPTY_RETRY_MS.length) {
+            loading = false;
+            render();
+            return;
+        }
+        var delay = EMPTY_RETRY_MS[emptyRetry];
+        emptyRetry += 1;
+        window.setTimeout(function () {
+            if (gen !== loadGen) {
+                return;
+            }
+            if (!official && parentId && parentIdFromHash() !== parentId) {
+                return;
+            }
+            var again = official ? fetchOfficial() : fetchChildren(parentId);
+            again.then(function (list) {
+                if (gen !== loadGen) {
+                    return;
+                }
+                hideLibrarySpinner();
+                if (list && list.length) {
+                    loading = false;
+                    items = list;
+                    render();
+                    return;
+                }
+                scheduleEmptyRetry(gen, parentId, official);
+            }).catch(function () {
+                if (gen !== loadGen) {
+                    return;
+                }
+                scheduleEmptyRetry(gen, parentId, official);
+            });
+        }, delay);
     }
 
     function hide() {

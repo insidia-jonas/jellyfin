@@ -842,7 +842,11 @@ namespace Jellyfin.LiveTv.Channels
 
             if (parentItem is null)
             {
-                return new QueryResult<BaseItem>();
+                parentItem = TryResolveUnpersistedLiveTvParent(query.ParentId, channel, channelProvider);
+                if (parentItem is null)
+                {
+                    return new QueryResult<BaseItem>();
+                }
             }
 
             var itemsResult = await GetChannelItems(
@@ -1138,6 +1142,31 @@ namespace Jellyfin.LiveTv.Channels
 
             item.Id = id;
             return item;
+        }
+
+        private BaseItem TryResolveUnpersistedLiveTvParent(Guid parentId, Channel channel, IChannel channelProvider)
+        {
+            if (parentId.IsEmpty()
+                || !ChannelManagerBrowse.IsLiveTvOverlay(channelProvider)
+                || channelProvider is not LiveTvLibraryChannel liveTv)
+            {
+                return null;
+            }
+
+            var match = ChannelManagerBrowse.FindLiveTvGroupByLibraryId(
+                parentId,
+                liveTv.PeekSnapshotItems(null),
+                externalId => _libraryManager.GetNewItemId(GetIdToHash(externalId, channelProvider.Name), typeof(Folder)));
+            if (match is null)
+            {
+                return null;
+            }
+
+            var folder = GetItemById<Folder>(match.Id, channelProvider.Name, out _);
+            folder.Name = match.Name;
+            folder.ExternalId = match.Id;
+            folder.ChannelId = channel.Id;
+            return folder;
         }
 
         private void ScheduleLiveTvFolderSync(

@@ -99,6 +99,30 @@ public sealed class BaseTunerHostListingCacheTests
         Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(1));
         Assert.Empty(served);
         Assert.Equal(0, host.CompletedRefreshes);
+        Assert.False(host.IsListingRefreshInFlight);
+    }
+
+    [Fact]
+    public async Task GetCachedChannels_ColdStart_SchedulesFetchAndEventuallyHasChannels()
+    {
+        var tuner = Tuner();
+        var host = CreateHost(tuner);
+        host.EnableBackgroundListingRefresh = true;
+        host.FirstLoadWait = TimeSpan.Zero;
+        host.BlockNextRefresh();
+
+        var started = DateTime.UtcNow;
+        var first = host.GetCachedChannels();
+        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(1));
+        Assert.Empty(first);
+        Assert.True(host.IsListingRefreshInFlight);
+
+        host.ReleaseRefresh.TrySetResult();
+        await host.CompletedRefresh.Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+
+        var second = host.GetCachedChannels();
+        Assert.Equal("new", Assert.Single(second).Id);
+        Assert.Equal(1, host.CompletedRefreshes);
     }
 
     [Fact]

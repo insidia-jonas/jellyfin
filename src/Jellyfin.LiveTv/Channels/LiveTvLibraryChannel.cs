@@ -99,17 +99,54 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCa
         return user is null || user.HasPermission(PermissionKind.EnableLiveTvAccess);
     }
 
-    /// <inheritdoc />
-    public Task<ChannelItemResult> GetChannelItems(InternalChannelItemQuery query, CancellationToken cancellationToken)
+    /// <summary>
+    /// Builds items from the last-good snapshot only. Does not wait for a playlist GET.
+    /// Used to resolve a group folder that was painted but not yet persisted.
+    /// </summary>
+    /// <param name="folderId">The folder being browsed, or <c>null</c> for the root.</param>
+    /// <returns>Snapshot items.</returns>
+    public IReadOnlyList<ChannelItemInfo> PeekSnapshotItems(string? folderId)
     {
-        _ = cancellationToken;
+        var channels = ReadCachedChannels();
+        LiveTvChannelSetIdentity.ReplaceFromChannels("library", channels);
+        return LiveTvLibraryChannelItems.Build(channels, folderId, guide: null, DateTime.UtcNow);
+    }
+
+    /// <inheritdoc />
+    public async Task<ChannelItemResult> GetChannelItems(InternalChannelItemQuery query, CancellationToken cancellationToken)
+    {
+        var isGroup = ChannelManagerBrowse.IsLiveTvGroupFolderId(query.FolderId);
+        var channels = ReadCachedChannels();
+        if (channels.Count == 0 && !isGroup)
+        {
+            // Root, empty cache: wait briefly for the first playlist GET (warmup or
+            // the refresh GetCachedChannels just scheduled). Never GET ingest/.ts.
+            channels = await WaitForFirstPlaylistAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        LiveTvChannelSetIdentity.ReplaceFromChannels("library", channels);
+
+        // Now/next is overlaid after ChannelManager reuses existing entities.
+        // Baking it into ChannelItemInfo here forced a full rewrite on every open.
+        var items = LiveTvLibraryChannelItems.Build(channels, query.FolderId, guide: null, DateTime.UtcNow);
+        return new ChannelItemResult
+        {
+            Items = items,
+            TotalRecordCount = items.Count,
+            RefreshPending = items.Count == 0 && AnyListingRefreshInFlight()
+        };
+    }
+
+    private List<ChannelInfo> ReadCachedChannels()
+    {
         var channels = new List<ChannelInfo>();
         foreach (var host in _tunerHostManager.TunerHosts)
         {
             try
             {
                 // Last-good snapshot only. Never GET the playlist on a folder open
-                // (root or group). Playlist refresh stays background/conditional.
+                // (root or group). Playlist refresh stays background/conditional
+                // except the bounded first-load wait on an empty root.
                 if (host is BaseTunerHost cached)
                 {
                     channels.AddRange(cached.GetCachedChannels());
@@ -121,17 +158,64 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCa
             }
         }
 
-        LiveTvChannelSetIdentity.ReplaceFromChannels("library", channels);
+        return channels;
+    }
 
-        // Now/next is overlaid after ChannelManager reuses existing entities.
-        // Baking it into ChannelItemInfo here forced a full rewrite on every open.
-        var items = LiveTvLibraryChannelItems.Build(channels, query.FolderId, guide: null, DateTime.UtcNow);
-        return Task.FromResult(new ChannelItemResult
+    private async Task<List<ChannelInfo>> WaitForFirstPlaylistAsync(CancellationToken cancellationToken)
+    {
+        var timeout = TimeSpan.Zero;
+        foreach (var host in _tunerHostManager.TunerHosts.OfType<BaseTunerHost>())
         {
-            Items = items,
-            TotalRecordCount = items.Count,
-            RefreshPending = false
-        });
+            if (host.FirstLoadWait > timeout)
+            {
+                timeout = host.FirstLoadWait;
+            }
+        }
+
+        if (timeout <= TimeSpan.Zero)
+        {
+            return ReadCachedChannels();
+        }
+
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var channels = ReadCachedChannels();
+            if (channels.Count > 0)
+            {
+                return channels;
+            }
+
+            if (!AnyListingRefreshInFlight())
+            {
+                return channels;
+            }
+
+            try
+            {
+                await Task.Delay(100, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return ReadCachedChannels();
+            }
+        }
+
+        return ReadCachedChannels();
+    }
+
+    private bool AnyListingRefreshInFlight()
+    {
+        foreach (var host in _tunerHostManager.TunerHosts)
+        {
+            if (host is BaseTunerHost cached && cached.IsListingRefreshInFlight)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

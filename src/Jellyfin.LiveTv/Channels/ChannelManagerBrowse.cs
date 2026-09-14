@@ -94,6 +94,44 @@ public static class ChannelManagerBrowse
            && folderId.StartsWith(LiveTvLibraryChannelItems.GroupPrefix, StringComparison.Ordinal);
 
     /// <summary>
+    /// Finds the Live TV group folder whose deterministic library id matches
+    /// <paramref name="parentId"/>. Painted group tiles can be opened before
+    /// ChannelManager persists the folder entity.
+    /// </summary>
+    /// <param name="parentId">The Items ParentId from the client.</param>
+    /// <param name="rootItems">Root snapshot items (groups).</param>
+    /// <param name="toLibraryId">Maps a channel external id to its library Guid.</param>
+    /// <returns>The matching group, or <c>null</c>.</returns>
+    public static ChannelItemInfo? FindLiveTvGroupByLibraryId(
+        Guid parentId,
+        IReadOnlyList<ChannelItemInfo>? rootItems,
+        Func<string, Guid> toLibraryId)
+    {
+        if (rootItems is null || toLibraryId is null || parentId.Equals(Guid.Empty))
+        {
+            return null;
+        }
+
+        foreach (var item in rootItems)
+        {
+            if (item is null
+                || item.Type != ChannelItemType.Folder
+                || string.IsNullOrEmpty(item.Id)
+                || !IsLiveTvGroupFolderId(item.Id))
+            {
+                continue;
+            }
+
+            if (toLibraryId(item.Id).Equals(parentId))
+            {
+                return item;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Decides whether Items may reuse rows, paint the Live TV snapshot, hide
     /// pending Treasure-Maps rows, or rewrite the folder on the request thread.
     /// </summary>
