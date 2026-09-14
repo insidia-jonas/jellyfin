@@ -840,6 +840,11 @@ namespace Jellyfin.LiveTv.Channels
                 ? channel
                 : _libraryManager.GetItemById(query.ParentId);
 
+            if (parentItem is null)
+            {
+                return new QueryResult<BaseItem>();
+            }
+
             var itemsResult = await GetChannelItems(
                 channelProvider,
                 query.User,
@@ -858,11 +863,6 @@ namespace Jellyfin.LiveTv.Channels
 
             // Not yet sure why this is causing a problem
             query.GroupByPresentationUniqueKey = false;
-
-            if (parentItem is null)
-            {
-                return new QueryResult<BaseItem>();
-            }
 
             // null if came from cache
             IReadOnlyList<BaseItem> existingChildren = Array.Empty<BaseItem>();
