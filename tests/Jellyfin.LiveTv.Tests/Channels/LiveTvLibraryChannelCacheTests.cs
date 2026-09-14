@@ -118,34 +118,105 @@ public sealed class LiveTvLibraryChannelCacheTests
     }
 
     [Fact]
-    public async Task GetChannelItems_GroupFolder_UsesSameTunerSnapshot()
+    public async Task GetChannelItems_GroupFolder_FiltersSnapshotWithoutPlaylistHttp()
     {
-        var calls = 0;
+        var cachePath = Path.Combine(Path.GetTempPath(), "jf-livetv-group-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(cachePath);
+        var tuner = new TunerHostInfo
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Type = "test",
+            Url = "https://cdn.example/playlist.m3u"
+        };
+        var host = CreateBlockedHost(cachePath, tuner);
+        host.SeedListingSnapshot(tuner.Id, new M3uListingSnapshot
+        {
+            Channels =
+            [
+                new ChannelInfo { Id = "cnn", Name = "CNN", ChannelGroup = "News" },
+                new ChannelInfo { Id = "film", Name = "Film", ChannelGroup = "Movies" }
+            ],
+            PlaylistUrl = tuner.Url,
+            FetchedUtc = DateTime.UtcNow.AddMinutes(-20)
+        });
+        host.BlockNextRefresh();
+
+        var manager = new Mock<ITunerHostManager>();
+        manager.Setup(m => m.TunerHosts).Returns([host]);
+        var channel = CreateChannel(manager.Object, Mock.Of<ILibraryManager>());
+
+        var clock = Stopwatch.StartNew();
+        var group = await channel.GetChannelItems(
+            new InternalChannelItemQuery { FolderId = LiveTvLibraryChannelItems.EncodeGroupId("News") },
+            CancellationToken.None);
+        clock.Stop();
+
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(1));
+        Assert.Equal("CNN", Assert.Single(group.Items).Name);
+        Assert.False(group.RefreshPending);
+        Assert.Equal(0, host.CompletedRefreshes);
+        Assert.True(ChannelManagerBrowse.IsLiveTvGroupFolderId(LiveTvLibraryChannelItems.EncodeGroupId("News")));
+        host.ReleaseRefresh.TrySetResult();
+    }
+
+    [Fact]
+    public async Task GetChannelItems_GroupFolder_ColdStart_CompletesEmptyWithoutPending()
+    {
+        var cachePath = Path.Combine(Path.GetTempPath(), "jf-livetv-group-cold-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(cachePath);
+        var tuner = new TunerHostInfo
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Type = "test",
+            Url = "https://cdn.example/playlist.m3u"
+        };
+        var host = CreateBlockedHost(cachePath, tuner);
+        host.BlockNextRefresh();
+
+        var manager = new Mock<ITunerHostManager>();
+        manager.Setup(m => m.TunerHosts).Returns([host]);
+        var channel = CreateChannel(manager.Object, Mock.Of<ILibraryManager>());
+
+        var clock = Stopwatch.StartNew();
+        var group = await channel.GetChannelItems(
+            new InternalChannelItemQuery { FolderId = LiveTvLibraryChannelItems.EncodeGroupId("Sports") },
+            CancellationToken.None);
+        clock.Stop();
+
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(1));
+        Assert.Empty(group.Items);
+        Assert.False(group.RefreshPending);
+        Assert.Equal(0, host.CompletedRefreshes);
+        host.ReleaseRefresh.TrySetResult();
+    }
+
+    [Fact]
+    public async Task GetChannelItems_IgnoresNonSnapshotTunerHosts()
+    {
+        var blocked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var host = new Mock<ITunerHost>();
-        host.Setup(h => h.GetChannels(true, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() =>
+        host.Setup(h => h.GetChannels(It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Returns(async () =>
             {
-                calls++;
-                return new List<ChannelInfo>
-                {
-                    new() { Id = "cnn", Name = "CNN", ChannelGroup = "News" },
-                    new() { Id = "film", Name = "Film", ChannelGroup = "Movies" }
-                };
+                await blocked.Task.WaitAsync(CancellationToken.None).ConfigureAwait(true);
+                return new List<ChannelInfo> { new() { Id = "late", Name = "Late" } };
             });
 
         var manager = new Mock<ITunerHostManager>();
         manager.Setup(m => m.TunerHosts).Returns([host.Object]);
         var channel = CreateChannel(manager.Object, Mock.Of<ILibraryManager>());
 
-        var root = await channel.GetChannelItems(new InternalChannelItemQuery(), CancellationToken.None);
-        var group = await channel.GetChannelItems(
+        var clock = Stopwatch.StartNew();
+        var result = await channel.GetChannelItems(
             new InternalChannelItemQuery { FolderId = LiveTvLibraryChannelItems.EncodeGroupId("News") },
             CancellationToken.None);
+        clock.Stop();
 
-        Assert.Equal(2, root.Items.Count);
-        Assert.Equal("CNN", Assert.Single(group.Items).Name);
-        Assert.Equal(2, calls);
-        host.Verify(h => h.GetChannels(false, It.IsAny<CancellationToken>()), Times.Never);
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(1));
+        Assert.Empty(result.Items);
+        Assert.False(result.RefreshPending);
+        host.Verify(h => h.GetChannels(It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+        blocked.TrySetResult();
     }
 
     [Fact]
