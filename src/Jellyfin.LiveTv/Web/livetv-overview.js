@@ -102,12 +102,15 @@
     }
 
     function isOfficialLiveHash() {
-        var h = hashLower();
-        return (h.indexOf('livetv') !== -1 || h.indexOf('live-tv') !== -1) && !isGuidePage();
+        if (isGuidePage() || isLiveTvGroupHash()) {
+            return false;
+        }
+        var path = hashLower().split('?')[0];
+        return path.indexOf('livetv') !== -1 || path.indexOf('live-tv') !== -1;
     }
 
     function isLiveTvGroupHash() {
-        return /[?&]livetv=1(?:&|$)/i.test(hash());
+        return /[?&]ltvgroup=1(?:&|$)/i.test(hash());
     }
 
     function parentIdFromHash() {
@@ -328,7 +331,7 @@
 
     function play(item, list) {
         if (isGroupFolder(item)) {
-            location.hash = '#/list?parentId=' + item.Id + '&livetv=1';
+            location.hash = '#/list?parentId=' + item.Id + '&ltvgroup=1';
             return;
         }
         if (window.FireTvLive && typeof window.FireTvLive.play === 'function') {

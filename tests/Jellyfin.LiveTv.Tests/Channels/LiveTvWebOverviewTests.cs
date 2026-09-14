@@ -43,7 +43,8 @@ public class LiveTvWebOverviewTests
         Assert.Contains("Live TV konnte nicht geladen werden", js, StringComparison.Ordinal);
         Assert.Contains("FireTvLive", js, StringComparison.Ordinal);
         Assert.Contains("#/list?parentId=", js, StringComparison.Ordinal);
-        Assert.Contains("&livetv=1", js, StringComparison.Ordinal);
+        Assert.Contains("&ltvgroup=1", js, StringComparison.Ordinal);
+        Assert.Contains("split('?')[0]", js, StringComparison.Ordinal);
         Assert.Contains("getUrl('LiveTv/Channels'", js, StringComparison.Ordinal);
         Assert.Contains("client.getItems", js, StringComparison.Ordinal);
         Assert.Contains("never the IPTV playlist", js, StringComparison.Ordinal);
