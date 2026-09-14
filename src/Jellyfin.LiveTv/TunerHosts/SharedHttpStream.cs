@@ -80,7 +80,23 @@ namespace Jellyfin.LiveTv.TunerHosts
         public override Stream GetStream()
         {
             EnsureProviderConnected();
+            EnsureTempFile();
             return base.GetStream();
+        }
+
+        private void EnsureTempFile()
+        {
+            var path = TempFilePath;
+            var dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            if (!File.Exists(path))
+            {
+                using var created = new FileStream(path, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite);
+            }
         }
 
         private void EnsureProviderConnected()
@@ -117,7 +133,7 @@ namespace Jellyfin.LiveTv.TunerHosts
 
                         var fileStream = new FileStream(
                             TempFilePath,
-                            FileMode.Create,
+                            FileMode.OpenOrCreate,
                             FileAccess.Write,
                             FileShare.Read,
                             IODefaults.FileStreamBufferSize,
