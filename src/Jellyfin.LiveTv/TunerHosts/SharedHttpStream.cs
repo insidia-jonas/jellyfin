@@ -26,6 +26,7 @@ namespace Jellyfin.LiveTv.TunerHosts
         private readonly IServerApplicationHost _appHost;
         private readonly TunerHostInfo _tunerHostInfo;
         private readonly IConfigurationManager _configurationManager;
+        private readonly string? _ingestUrl;
         private int _providerStarted;
 
         public SharedHttpStream(
@@ -45,6 +46,9 @@ namespace Jellyfin.LiveTv.TunerHosts
             _tunerHostInfo = tunerHostInfo;
             _configurationManager = configurationManager;
             OriginalStreamId = originalStreamId;
+            // Open() rewrites MediaSource.Path (same object as OriginalMediaSource)
+            // to the published LiveStreamFiles URL. Capture the IPTV URL first.
+            _ingestUrl = SharedHttpStreamIngest.Capture(mediaSource.Path);
         }
 
         /// <inheritdoc />
@@ -64,7 +68,11 @@ namespace Jellyfin.LiveTv.TunerHosts
             MediaSource.Protocol = MediaProtocol.Http;
             DateOpened = DateTime.UtcNow;
 
-            Logger.LogInformation("Prepared {StreamType} live stream {Id} (provider connect deferred until first read)", GetType().Name, UniqueId);
+            Logger.LogInformation(
+                "Prepared {StreamType} live stream {Id} (provider connect deferred until first read of {IngestUrl})",
+                GetType().Name,
+                UniqueId,
+                _ingestUrl);
             return Task.CompletedTask;
         }
 
@@ -83,9 +91,16 @@ namespace Jellyfin.LiveTv.TunerHosts
             }
 
             var mediaSource = OriginalMediaSource;
-            Logger.LogInformation("Opening {StreamType} Live stream from {Url}", GetType().Name, mediaSource.Path);
+            var ingestUrl = SharedHttpStreamIngest.ForFirstRead(_ingestUrl, mediaSource?.Path);
+            if (mediaSource is null || string.IsNullOrEmpty(ingestUrl))
+            {
+                Logger.LogError("SharedHttpStream {Id} has no IPTV ingest URL; refusing to GET LiveStreamFiles", UniqueId);
+                return;
+            }
+
+            Logger.LogInformation("Opening {StreamType} Live stream from {Url}", GetType().Name, ingestUrl);
             _ = StartStreaming(
-                mediaSource.Path,
+                ingestUrl,
                 mediaSource,
                 new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
                 LiveStreamCancellationTokenSource.Token);
