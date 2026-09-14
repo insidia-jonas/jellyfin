@@ -414,7 +414,9 @@ namespace Jellyfin.LiveTv.Channels
 
         private async Task<IEnumerable<MediaSourceInfo>> GetChannelItemMediaSourcesInternal(IRequiresMediaInfoCallback channel, string id, CancellationToken cancellationToken)
         {
-            if (_memoryCache.TryGetValue(id, out List<MediaSourceInfo> cachedInfo))
+            if (!string.IsNullOrWhiteSpace(id)
+                && _memoryCache.TryGetValue(id, out List<MediaSourceInfo> cachedInfo)
+                && LiveTvLibraryChannelPlayback.ShouldCacheChannelItemMediaSources(id, cachedInfo))
             {
                 return cachedInfo;
             }
@@ -422,7 +424,10 @@ namespace Jellyfin.LiveTv.Channels
             var mediaInfo = await channel.GetChannelItemMediaInfo(id, cancellationToken)
                    .ConfigureAwait(false);
             var list = mediaInfo.ToList();
-            _memoryCache.Set(id, list, DateTimeOffset.UtcNow.AddMinutes(5));
+            if (LiveTvLibraryChannelPlayback.ShouldCacheChannelItemMediaSources(id, list))
+            {
+                _memoryCache.Set(id, list, DateTimeOffset.UtcNow.AddMinutes(5));
+            }
 
             return list;
         }

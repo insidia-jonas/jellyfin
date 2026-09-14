@@ -131,6 +131,18 @@ public class LiveTvLibraryChannelPlaybackTests
     }
 
     [Fact]
+    public void ShouldCacheChannelItemMediaSources_SkipsEmptyAndBlankIds()
+    {
+        Assert.False(LiveTvLibraryChannelPlayback.ShouldCacheChannelItemMediaSources(null, [new MediaSourceInfo()]));
+        Assert.False(LiveTvLibraryChannelPlayback.ShouldCacheChannelItemMediaSources(string.Empty, [new MediaSourceInfo()]));
+        Assert.False(LiveTvLibraryChannelPlayback.ShouldCacheChannelItemMediaSources("m3u_channel1", []));
+        Assert.False(LiveTvLibraryChannelPlayback.ShouldCacheChannelItemMediaSources("m3u_channel1", null));
+        Assert.True(LiveTvLibraryChannelPlayback.ShouldCacheChannelItemMediaSources(
+            "m3u_channel1",
+            [new MediaSourceInfo { OpenToken = "m3u_channel1" }]));
+    }
+
+    [Fact]
     public async Task OpenAsync_MissingTuner_ThrowsResourceNotFound()
     {
         var host = new Mock<ITunerHost>();
