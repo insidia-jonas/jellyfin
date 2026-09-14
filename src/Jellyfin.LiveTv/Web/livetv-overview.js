@@ -613,6 +613,26 @@
         };
     }
 
+    /* ApiClient rejects with the raw Response, which reads as "[object Response]" in
+       the error banner and tells the user nothing. Name the status instead; the one
+       they will actually hit is the tuner being busy. */
+    function describeRequestFailure(path, reason) {
+        var de = german();
+        var status = reason && typeof reason.status === 'number' ? reason.status : 0;
+        if (status === 409 || status === 500) {
+            return de
+                ? 'Der Server konnte den Sender nicht öffnen (' + status + '). Läuft noch ein anderer Stream auf diesem Tuner?'
+                : 'The server could not open this channel (' + status + '). Is another stream still using the tuner?';
+        }
+        if (status) {
+            return (de ? 'Serverfehler ' : 'Server error ') + status + ' (' + path + ').';
+        }
+        if (reason && reason.message) {
+            return reason.message;
+        }
+        return (de ? 'Der Server antwortete nicht: ' : 'No response from the server: ') + path;
+    }
+
     function apiPost(path, query, body) {
         var client = api();
         if (!client || typeof client.getUrl !== 'function') {
@@ -626,6 +646,8 @@
                 data: body == null ? null : JSON.stringify(body),
                 contentType: 'application/json',
                 dataType: body == null ? undefined : 'json'
+            })['catch'](function (reason) {
+                throw new Error(describeRequestFailure(path, reason));
             });
         }
         return fetch(url, {
@@ -871,22 +893,48 @@
        .videoPlayerContainer on screen showing the channel logo while the manager has
        already dropped the player: isPlaying() is false and getCurrentPlayer() is
        undefined, so stop() has nothing to act on and no amount of retrying clears it.
-       That orphan is the blurred placeholder the list gets blamed for. Removing a node
-       jellyfin-web no longer tracks cannot desync anything it still owns. */
-    function dropOrphanPlayerView() {
+       That orphan is the blurred placeholder the list gets blamed for.
+
+       Stopping the media element is the part that matters: its request is what still
+       holds the tuner, and an M3U host with one tuner refuses the next channel until it
+       is released. Hide the container rather than remove it — deleting the node takes
+       jellyfin-web's <video> with it, and the player it builds next reuses that detached
+       element and never paints again for the rest of the session. The next handoff puts
+       the container back. */
+    function hideOrphanPlayerView() {
         if (!managerIdle(window.playbackManager)) {
             return false;
         }
         var nodes = document.querySelectorAll('.videoPlayerContainer');
-        var removed = false;
+        var hidden = false;
+        var i;
+        var j;
+        for (i = 0; i < nodes.length; i++) {
+            if (!onScreen(nodes[i])) {
+                continue;
+            }
+            var media = nodes[i].querySelectorAll('video, audio');
+            for (j = 0; j < media.length; j++) {
+                try {
+                    media[j].pause();
+                    media[j].removeAttribute('src');
+                    media[j].load();
+                } catch (e) { /* the element is being parked anyway */ }
+            }
+            nodes[i].setAttribute('data-jf-livetv-hidden', '1');
+            nodes[i].style.display = 'none';
+            hidden = true;
+        }
+        return hidden;
+    }
+
+    function restoreHiddenPlayerViews() {
+        var nodes = document.querySelectorAll('.videoPlayerContainer[data-jf-livetv-hidden]');
         var i;
         for (i = 0; i < nodes.length; i++) {
-            if (onScreen(nodes[i]) && nodes[i].parentNode) {
-                nodes[i].parentNode.removeChild(nodes[i]);
-                removed = true;
-            }
+            nodes[i].style.display = '';
+            nodes[i].removeAttribute('data-jf-livetv-hidden');
         }
-        return removed;
     }
 
     /* Abandoning a handoff is a race: stop() cannot cancel a load that has not built
@@ -902,7 +950,7 @@
             if (!managerPlayerOnScreen()) {
                 return Promise.resolve();
             }
-            if (dropOrphanPlayerView() || Date.now() >= deadline) {
+            if (hideOrphanPlayerView() || Date.now() >= deadline) {
                 return Promise.resolve();
             }
             return delay(600).then(attempt);
@@ -976,6 +1024,7 @@
         if (!manager) {
             return openBuiltinPlayer(item, queue, gen);
         }
+        restoreHiddenPlayerViews();
         try {
             manager.play({ items: [playableItem(item)], fullscreen: true });
         } catch (e) {

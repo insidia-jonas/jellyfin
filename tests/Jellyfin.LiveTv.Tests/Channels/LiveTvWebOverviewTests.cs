@@ -132,7 +132,7 @@ public class LiveTvWebOverviewTests
         var js = File.ReadAllText(ScriptPath());
         Assert.Contains("onScreen", js, StringComparison.Ordinal);
         Assert.Contains("getBoundingClientRect", js, StringComparison.Ordinal);
-        Assert.Contains("dropOrphanPlayerView", js, StringComparison.Ordinal);
+        Assert.Contains("hideOrphanPlayerView", js, StringComparison.Ordinal);
         Assert.Contains("managerIdle", js, StringComparison.Ordinal);
         Assert.Contains("leavePlayerView", js, StringComparison.Ordinal);
         Assert.Contains("popstate", js, StringComparison.Ordinal);
