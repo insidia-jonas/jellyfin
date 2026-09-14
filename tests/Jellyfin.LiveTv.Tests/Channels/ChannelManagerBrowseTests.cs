@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Jellyfin.LiveTv.Channels;
 using MediaBrowser.Controller.Channels;
@@ -125,6 +126,28 @@ public class ChannelManagerBrowseTests
         Assert.True(ChannelManagerBrowse.IsLiveTvGroupFolderId(LiveTvLibraryChannelItems.EncodeGroupId("News")));
         Assert.False(ChannelManagerBrowse.IsLiveTvGroupFolderId("movies|abc"));
         Assert.False(ChannelManagerBrowse.IsLiveTvGroupFolderId(null));
+    }
+
+    [Fact]
+    public void FindLiveTvGroupByLibraryId_MatchesPaintedFolderBeforePersist()
+    {
+        var newsId = LiveTvLibraryChannelItems.EncodeGroupId("News");
+        var sportsId = LiveTvLibraryChannelItems.EncodeGroupId("Sports");
+        var newsGuid = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        var root = new List<ChannelItemInfo>
+        {
+            new() { Id = newsId, Name = "News", Type = ChannelItemType.Folder },
+            new() { Id = sportsId, Name = "Sports", Type = ChannelItemType.Folder }
+        };
+
+        var match = ChannelManagerBrowse.FindLiveTvGroupByLibraryId(
+            newsGuid,
+            root,
+            id => id == newsId ? newsGuid : Guid.NewGuid());
+
+        Assert.Equal("News", match!.Name);
+        Assert.Null(ChannelManagerBrowse.FindLiveTvGroupByLibraryId(Guid.NewGuid(), root, _ => Guid.NewGuid()));
+        Assert.Null(ChannelManagerBrowse.FindLiveTvGroupByLibraryId(newsGuid, [], _ => newsGuid));
     }
 
     private static LiveTvLibraryChannel CreateLiveTv()

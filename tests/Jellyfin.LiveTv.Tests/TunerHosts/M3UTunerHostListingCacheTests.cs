@@ -10,6 +10,7 @@ using Jellyfin.LiveTv.Tests;
 using Jellyfin.LiveTv.TunerHosts;
 using MediaBrowser.Common.Net;
 using MediaBrowser.Controller;
+using MediaBrowser.Controller.Channels;
 using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.LiveTv;
@@ -62,6 +63,59 @@ public sealed class M3UTunerHostListingCacheTests
         Assert.Equal("CNN", grouped[0].Name);
         Assert.Single(requests);
         Assert.Equal(playlistUrl, requests[0].AbsoluteUri);
+        Assert.All(requests, uri =>
+        {
+            Assert.DoesNotContain("ingest.example", uri.AbsoluteUri, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(".ts", uri.AbsoluteUri, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    [Fact]
+    public async Task GetChannelItems_ColdRootFetchesPlaylistOnce_GroupDoesNot()
+    {
+        var playlistUrl = "https://cdn.example/playlist.m3u";
+        var requests = new List<Uri>();
+        var tuner = new TunerHostInfo
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Type = "m3u",
+            Url = playlistUrl
+        };
+        var host = CreateHost(tuner, requests, """
+            #EXTM3U
+            #EXTINF:-1 tvg-id="cnn.us" group-title="News",CNN
+            http://ingest.example/cnn.ts
+            #EXTINF:-1 tvg-id="film.de" group-title="Movies",Film
+            http://ingest.example/film.ts
+            """);
+        host.EnableBackgroundListingRefresh = true;
+        host.FirstLoadWait = TimeSpan.FromSeconds(2);
+
+        var manager = new Mock<ITunerHostManager>();
+        manager.Setup(m => m.TunerHosts).Returns([host]);
+        var channel = new LiveTvLibraryChannel(
+            manager.Object,
+            Mock.Of<ILibraryManager>(),
+            Mock.Of<IUserManager>(),
+            NullLogger<LiveTvLibraryChannel>.Instance);
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var root = await channel.GetChannelItems(new InternalChannelItemQuery(), CancellationToken.None);
+        clock.Stop();
+
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(2));
+        Assert.Contains(root.Items, item => item.Name == "News");
+        Assert.Contains(root.Items, item => item.Name == "Movies");
+        Assert.False(root.RefreshPending);
+        Assert.Equal(playlistUrl, Assert.Single(requests).AbsoluteUri);
+
+        var group = await channel.GetChannelItems(
+            new InternalChannelItemQuery { FolderId = LiveTvLibraryChannelItems.EncodeGroupId("News") },
+            CancellationToken.None);
+
+        Assert.Equal("CNN", Assert.Single(group.Items).Name);
+        Assert.False(group.RefreshPending);
+        Assert.Single(requests);
         Assert.All(requests, uri =>
         {
             Assert.DoesNotContain("ingest.example", uri.AbsoluteUri, StringComparison.OrdinalIgnoreCase);

@@ -1,6 +1,7 @@
 #nullable disable
 
 #pragma warning disable CS1591
+#pragma warning disable CA1002
 
 using System;
 using System.Collections.Concurrent;
@@ -27,6 +28,7 @@ namespace Jellyfin.LiveTv.TunerHosts
         private readonly ConcurrentDictionary<string, M3uListingSnapshot> _listingSnapshots;
         private readonly ConcurrentDictionary<string, SemaphoreSlim> _refreshGates;
         private readonly ConcurrentDictionary<string, byte> _backgroundRefresh;
+        private int _refreshInFlight;
 
         protected BaseTunerHost(IServerConfigurationManager config, ILogger<BaseTunerHost> logger, IFileSystem fileSystem)
         {
@@ -56,6 +58,19 @@ namespace Jellyfin.LiveTv.TunerHosts
         /// Tests disable this so listing HTTP can be asserted.
         /// </summary>
         internal bool EnableBackgroundListingRefresh { get; set; }
+
+        /// <summary>
+        /// Gets or sets how long a cold Live TV root open may wait for the first playlist GET.
+        /// Group folders never wait. Tests set this to <see cref="TimeSpan.Zero"/> so a blocked
+        /// refresh cannot hang Items.
+        /// </summary>
+        internal TimeSpan FirstLoadWait { get; set; } = TimeSpan.FromSeconds(12);
+
+        /// <summary>
+        /// Gets a value indicating whether a listing refresh is running or queued.
+        /// </summary>
+        internal bool IsListingRefreshInFlight =>
+            Volatile.Read(ref _refreshInFlight) > 0 || !_backgroundRefresh.IsEmpty;
 
         /// <summary>
         /// Clears the in-memory channel list cache, optionally for one tuner.
@@ -271,21 +286,29 @@ namespace Jellyfin.LiveTv.TunerHosts
         {
             var key = SnapshotKey(tuner);
             var gate = _refreshGates.GetOrAdd(key, static _ => new SemaphoreSlim(1, 1));
-            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            Interlocked.Increment(ref _refreshInFlight);
             try
             {
-                var snapshot = GetOrLoadSnapshot(tuner);
-                if (enableCache && HasChannels(snapshot))
+                await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
                 {
-                    ScheduleBackgroundRefreshIfNeeded(tuner, snapshot);
-                    return snapshot.Channels;
-                }
+                    var snapshot = GetOrLoadSnapshot(tuner);
+                    if (enableCache && HasChannels(snapshot))
+                    {
+                        ScheduleBackgroundRefreshIfNeeded(tuner, snapshot);
+                        return snapshot.Channels;
+                    }
 
-                return await RefreshTunerCoreAsync(tuner, snapshot, cancellationToken).ConfigureAwait(false);
+                    return await RefreshTunerCoreAsync(tuner, snapshot, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    gate.Release();
+                }
             }
             finally
             {
-                gate.Release();
+                Interlocked.Decrement(ref _refreshInFlight);
             }
         }
 

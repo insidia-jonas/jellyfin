@@ -141,7 +141,9 @@ namespace Jellyfin.LiveTv
 
         public Task<IEnumerable<ChannelInfo>> GetChannelsAsync(CancellationToken cancellationToken)
         {
-            return GetChannelsAsync(false, cancellationToken);
+            // Last-good snapshot + bounded first-load playlist GET. Never force a
+            // blocking playlist re-download on every official Live TV / guide open.
+            return GetChannelsAsync(true, cancellationToken);
         }
 
         public Task CancelSeriesTimerAsync(string timerId, CancellationToken cancellationToken)
