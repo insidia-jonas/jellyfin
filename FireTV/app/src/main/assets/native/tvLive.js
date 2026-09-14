@@ -402,10 +402,29 @@
         return row;
     }
 
+    function hideLibrarySpinner() {
+        var nodes = document.querySelectorAll(
+            ".loading, .docspinner, .busyIndicator, paper-spinner-lite, .mdl-spinner, .progressring, .emby-progress, .busy"
+        );
+        var i;
+        for (i = 0; i < nodes.length; i++) {
+            nodes[i].classList.add("hide");
+            nodes[i].style.display = "none";
+        }
+        if (window.loading && typeof window.loading.hide === "function") {
+            try {
+                window.loading.hide();
+            } catch (e) { /* ignore */ }
+        }
+    }
+
     function show(on) {
         document.documentElement.classList.toggle("firetv-live-on", on);
         if (document.body) {
             document.body.classList.toggle("firetv-live-on", on);
+        }
+        if (on) {
+            hideLibrarySpinner();
         }
         var box = document.getElementById("firetv-live");
         if (!on && box) {
@@ -421,17 +440,21 @@
             return;
         }
         var key = hash() + "|" + pageTitle();
-        if (loading) {
+        if (loading && lastKey === key) {
+            show(true);
+            hideLibrarySpinner();
             return;
         }
         if (channels.length && lastKey === key) {
             show(true);
+            hideLibrarySpinner();
             render();
             return;
         }
         lastKey = key;
         loading = true;
         show(true);
+        hideLibrarySpinner();
         render();
         fetchChannels().then(function (items) {
             if (injectedOwns() || document.getElementById("jf-livetv-overview")) {
@@ -440,6 +463,7 @@
                 return;
             }
             loading = false;
+            hideLibrarySpinner();
             channels = items;
             render();
         });

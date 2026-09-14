@@ -277,6 +277,18 @@ body.firetv-live-on .liveTvPage .itemsContainer {
     display: none !important;
 }
 
+html.firetv-live-on .loading,
+html.firetv-live-on .docspinner,
+html.firetv-live-on paper-spinner-lite,
+html.firetv-live-on .busy,
+html.jf-livetv-list-on .loading,
+html.jf-livetv-list-on .docspinner,
+html.jf-livetv-list-on paper-spinner-lite,
+html.jf-livetv-list-on .busy {
+    display: none !important;
+    visibility: hidden !important;
+}
+
 #firetv-live {
     padding: 0.2em 0 2em;
 }

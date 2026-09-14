@@ -100,21 +100,19 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCa
     }
 
     /// <inheritdoc />
-    public async Task<ChannelItemResult> GetChannelItems(InternalChannelItemQuery query, CancellationToken cancellationToken)
+    public Task<ChannelItemResult> GetChannelItems(InternalChannelItemQuery query, CancellationToken cancellationToken)
     {
+        _ = cancellationToken;
         var channels = new List<ChannelInfo>();
         foreach (var host in _tunerHostManager.TunerHosts)
         {
             try
             {
+                // Last-good snapshot only. Never GET the playlist on a folder open
+                // (root or group). Playlist refresh stays background/conditional.
                 if (host is BaseTunerHost cached)
                 {
                     channels.AddRange(cached.GetCachedChannels());
-                }
-                else
-                {
-                    var hostChannels = await host.GetChannels(true, cancellationToken).ConfigureAwait(false);
-                    channels.AddRange(hostChannels);
                 }
             }
             catch (Exception ex)
@@ -128,11 +126,12 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCa
         // Now/next is overlaid after ChannelManager reuses existing entities.
         // Baking it into ChannelItemInfo here forced a full rewrite on every open.
         var items = LiveTvLibraryChannelItems.Build(channels, query.FolderId, guide: null, DateTime.UtcNow);
-        return new ChannelItemResult
+        return Task.FromResult(new ChannelItemResult
         {
             Items = items,
-            TotalRecordCount = items.Count
-        };
+            TotalRecordCount = items.Count,
+            RefreshPending = false
+        });
     }
 
     /// <summary>
