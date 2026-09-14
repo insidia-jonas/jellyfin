@@ -75,6 +75,84 @@ public class LiveTvWebOverviewTests
     }
 
     [Fact]
+    public void Script_NeverNavigatesToTheDetailsPage()
+    {
+        // Clicking a sender used to end on #/details whenever playback could not be
+        // reached, which renders as the gray poster placeholder a Live TV item has
+        // instead of artwork. Failures belong in the list, not on a dead-end page.
+        foreach (var line in File.ReadAllLines(ScriptPath()))
+        {
+            var code = line.Trim();
+            if (code.StartsWith("/*", StringComparison.Ordinal)
+                || code.StartsWith('*')
+                || code.StartsWith("//", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            Assert.DoesNotContain("#/details", code, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("itemdetails", code, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public void Script_ForcesADecodableTranscodeForLiveSources()
+    {
+        // The progressive URL the server hands out carries no codec, so for a live
+        // source it has not probed it falls back to a stream copy. An mpeg2video mux
+        // copied into mp4 gives a <video> element whose videoWidth stays 0 forever.
+        var js = File.ReadAllText(ScriptPath());
+        Assert.Contains("forceProgressiveTranscode", js, StringComparison.Ordinal);
+        Assert.Contains("videocodec: 'h264'", js, StringComparison.Ordinal);
+        Assert.Contains("audiocodec: 'aac'", js, StringComparison.Ordinal);
+        Assert.Contains("FORCED_STREAM_PARAMS", js, StringComparison.Ordinal);
+        Assert.Contains("path += '.mp4'", js, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Script_TreatsPicturelessPlaybackAsFailure()
+    {
+        // Reporting success on readyState alone is how a run claimed "play works"
+        // with videoWidth 0: an mpeg2 stream copy decodes audio and never paints.
+        var js = File.ReadAllText(ScriptPath());
+        Assert.Contains("elementState", js, StringComparison.Ordinal);
+        Assert.Contains("element.videoWidth > 0 && element.readyState >= 2", js, StringComparison.Ordinal);
+        Assert.Contains("if (how === 'video')", js, StringComparison.Ordinal);
+        Assert.Contains("hasVideoStream", js, StringComparison.Ordinal);
+        Assert.Contains("showError", js, StringComparison.Ordinal);
+        Assert.Contains("produced no video", js, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Script_RecoversTheListAfterPlaybackEnds()
+    {
+        // jellyfin-web keeps .videoOsdBottom mounted with display:none once anything
+        // has played, and leaves .videoPlayerContainer on screen when a load never
+        // produced a frame. Both used to leave the senders hidden behind a blank page.
+        var js = File.ReadAllText(ScriptPath());
+        Assert.Contains("onScreen", js, StringComparison.Ordinal);
+        Assert.Contains("getBoundingClientRect", js, StringComparison.Ordinal);
+        Assert.Contains("dropOrphanPlayerView", js, StringComparison.Ordinal);
+        Assert.Contains("managerIdle", js, StringComparison.Ordinal);
+        Assert.Contains("leavePlayerView", js, StringComparison.Ordinal);
+        Assert.Contains("popstate", js, StringComparison.Ordinal);
+        Assert.Contains("modeTimer = window.setInterval(applyListMode", js, StringComparison.Ordinal);
+        Assert.Contains("paintError", js, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Script_ReleasesTheTunerBeforeSwitchingSenders()
+    {
+        // An M3U host with TunerCount 1 - the normal IPTV subscription - rejects the
+        // next channel while the previous live stream is still open.
+        var js = File.ReadAllText(ScriptPath());
+        Assert.Contains("releaseTuner", js, StringComparison.Ordinal);
+        Assert.Contains("LiveStreams/Close", js, StringComparison.Ordinal);
+        Assert.Contains("Videos/ActiveEncodings", js, StringComparison.Ordinal);
+        Assert.Contains("return releaseTuner().then(", js, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ApplyScriptTag_InsertsThenUpgradesVersion()
     {
         var html = "<html><body>hi</body></html>";
