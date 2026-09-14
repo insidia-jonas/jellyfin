@@ -42,6 +42,12 @@ public class LiveTvWebOverviewTests
         Assert.Contains("Keine Sender", js, StringComparison.Ordinal);
         Assert.Contains("Live TV konnte nicht geladen werden", js, StringComparison.Ordinal);
         Assert.Contains("FireTvLive", js, StringComparison.Ordinal);
+        Assert.Contains("resolvePlaybackManager", js, StringComparison.Ordinal);
+        Assert.Contains("playableItem", js, StringComparison.Ordinal);
+        Assert.Contains("webpackChunk", js, StringComparison.Ordinal);
+        Assert.Contains("playbackmanager.js", js, StringComparison.Ordinal);
+        Assert.Contains("Type = 'TvChannel'", js, StringComparison.Ordinal);
+        Assert.Contains("NativePlayer.loadPlayer", js, StringComparison.Ordinal);
         Assert.Contains("#/list?parentId=", js, StringComparison.Ordinal);
         Assert.Contains("&ltvgroup=1", js, StringComparison.Ordinal);
         Assert.Contains("split('?')[0]", js, StringComparison.Ordinal);

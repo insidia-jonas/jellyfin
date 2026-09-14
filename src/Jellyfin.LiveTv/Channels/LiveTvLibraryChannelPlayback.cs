@@ -133,4 +133,20 @@ internal static class LiveTvLibraryChannelPlayback
             source.LiveStreamId = string.IsNullOrEmpty(source.Id) ? channelId : source.Id;
         }
     }
+
+    /// <summary>
+    /// Whether ChannelManager may cache IChannel media sources.
+    /// Empty results must not be cached: the sender list can already be painted
+    /// from persisted items while the listing snapshot is still cold, and a cached
+    /// [] leaves PlaybackInfo empty (gray bar, no LiveStreamId) for minutes.
+    /// </summary>
+    /// <param name="channelId">Tuner channel id / ExternalId.</param>
+    /// <param name="sources">Resolved media sources.</param>
+    /// <returns><c>true</c> when a non-empty source list can be reused.</returns>
+    public static bool ShouldCacheChannelItemMediaSources(
+        string? channelId,
+        IReadOnlyCollection<MediaSourceInfo>? sources)
+    {
+        return !string.IsNullOrWhiteSpace(channelId) && sources is { Count: > 0 };
+    }
 }

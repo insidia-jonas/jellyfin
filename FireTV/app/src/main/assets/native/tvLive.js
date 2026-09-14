@@ -235,6 +235,47 @@
         });
     }
 
+    function resolvePlaybackManager() {
+        if (window.playbackManager && typeof window.playbackManager.play === "function") {
+            return window.playbackManager;
+        }
+        if (window.JellyfinLiveTvOverview && typeof window.JellyfinLiveTvOverview.resolvePlaybackManager === "function") {
+            return window.JellyfinLiveTvOverview.resolvePlaybackManager();
+        }
+        try {
+            var req;
+            var chunks = window.webpackChunk || (typeof self !== "undefined" && self.webpackChunk);
+            if (chunks && typeof chunks.push === "function") {
+                chunks.push([["jf-livetv-pm"], {}, function (r) { req = r; }]);
+            }
+            if (typeof req === "function") {
+                var exp = req("./components/playback/playbackmanager.js");
+                if (exp && exp.playbackManager && typeof exp.playbackManager.play === "function") {
+                    window.playbackManager = exp.playbackManager;
+                    return exp.playbackManager;
+                }
+            }
+        } catch (e) { /* web host without webpack */ }
+        return null;
+    }
+
+    function playableItem(item) {
+        var copy = {};
+        var key;
+        for (key in item) {
+            if (Object.prototype.hasOwnProperty.call(item, key)) {
+                copy[key] = item[key];
+            }
+        }
+        copy.Type = "TvChannel";
+        copy.MediaType = "Video";
+        copy.IsLiveStream = true;
+        if (!copy.ChannelId) {
+            copy.ChannelId = item.Id;
+        }
+        return copy;
+    }
+
     function play(item, list) {
         var creds = auth();
         var queue = (list && list.length ? list : channels).slice();
@@ -270,8 +311,9 @@
             window.NativePlayer.loadPlayer(JSON.stringify(payload));
             return;
         }
-        if (window.Emby && window.Emby.Page && typeof window.playbackManager !== "undefined") {
-            window.playbackManager.play({ items: [item], fullscreen: true });
+        var manager = resolvePlaybackManager();
+        if (manager) {
+            manager.play({ items: [playableItem(item)], fullscreen: true });
         }
     }
 

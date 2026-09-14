@@ -382,17 +382,87 @@
         return box;
     }
 
+    function resolvePlaybackManager() {
+        if (window.playbackManager && typeof window.playbackManager.play === 'function') {
+            return window.playbackManager;
+        }
+        try {
+            var req;
+            var chunks = window.webpackChunk || (typeof self !== 'undefined' && self.webpackChunk);
+            if (chunks && typeof chunks.push === 'function') {
+                chunks.push([['jf-livetv-pm'], {}, function (r) { req = r; }]);
+            }
+            if (typeof req !== 'function') {
+                return null;
+            }
+            var ids = ['./components/playback/playbackmanager.js'];
+            var i;
+            for (i = 0; i < ids.length; i++) {
+                try {
+                    var exp = req(ids[i]);
+                    if (exp && exp.playbackManager && typeof exp.playbackManager.play === 'function') {
+                        window.playbackManager = exp.playbackManager;
+                        return exp.playbackManager;
+                    }
+                } catch (ignoreId) { /* next */ }
+            }
+            if (req.m) {
+                var key;
+                for (key in req.m) {
+                    if (!Object.prototype.hasOwnProperty.call(req.m, key) || key.indexOf('playbackmanager') === -1) {
+                        continue;
+                    }
+                    try {
+                        var mod = req(key);
+                        if (mod && mod.playbackManager && typeof mod.playbackManager.play === 'function') {
+                            window.playbackManager = mod.playbackManager;
+                            return mod.playbackManager;
+                        }
+                    } catch (ignoreKey) { /* next */ }
+                }
+            }
+        } catch (e) { /* ignore */ }
+        return null;
+    }
+
+    function playableItem(item) {
+        var copy = {};
+        var key;
+        for (key in item) {
+            if (Object.prototype.hasOwnProperty.call(item, key)) {
+                copy[key] = item[key];
+            }
+        }
+        copy.Type = 'TvChannel';
+        copy.MediaType = 'Video';
+        copy.IsLiveStream = true;
+        if (!copy.ChannelId) {
+            copy.ChannelId = item.Id;
+        }
+        var client = api();
+        if (!copy.ServerId && client && typeof client.serverId === 'function') {
+            copy.ServerId = client.serverId();
+        }
+        return copy;
+    }
+
     function play(item, list) {
         if (isGroupFolder(item)) {
             location.hash = '#/list?parentId=' + item.Id + '&ltvgroup=1';
             return;
         }
-        if (window.FireTvLive && typeof window.FireTvLive.play === 'function') {
+        var nativeOwns = window.NativePlayer && typeof window.NativePlayer.loadPlayer === 'function';
+        if (nativeOwns && window.FireTvLive && typeof window.FireTvLive.play === 'function') {
             window.FireTvLive.play(item, list || items);
             return;
         }
-        if (window.playbackManager && typeof window.playbackManager.play === 'function') {
-            window.playbackManager.play({ items: [item], fullscreen: true });
+        var manager = resolvePlaybackManager();
+        if (manager) {
+            manager.play({ items: [playableItem(item)], fullscreen: true });
+            return;
+        }
+        if (window.FireTvLive && typeof window.FireTvLive.play === 'function') {
+            window.FireTvLive.play(item, list || items);
             return;
         }
         if (item && item.Id) {
@@ -840,7 +910,9 @@
         progressOf: progressOf,
         guideOf: guideOf,
         isLiveTvItem: isLiveTvItem,
-        play: play
+        play: play,
+        resolvePlaybackManager: resolvePlaybackManager,
+        playableItem: playableItem
     };
 
     if (document.readyState === 'loading') {
