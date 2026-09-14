@@ -1,7 +1,12 @@
 /* Live TV overview for jellyfin-web (and the in-repo Fire TV web host).
    Replaces the poster wall with a Kodi-PVR-style list: logo, sender, Jetzt +
    times, progress of the current show, optional Danach. Group folders stay
-   folders; opening one uses this same list. Treasure-Maps pages are ignored. */
+   folders; opening one uses this same list. Treasure-Maps pages are ignored.
+
+   Clicking a sender always starts playback. It must never fall back to the
+   item details page: a Live TV item has no artwork, no cast and no plot, so
+   details is a dead end that looks like a gray poster placeholder. When no
+   player can be started the list shows an inline error instead. */
 (function () {
     'use strict';
 
@@ -20,10 +25,23 @@
     var tickTimer = 0;
     var refreshTimer = 0;
     var syncTimer = 0;
+    var modeTimer = 0;
+    var wasPlaying = false;
+    var listHash = '';
     var paintToken = 0;
     var emptyRetry = 0;
     var EMPTY_RETRY_MS = [1500, 3000, 6000, 12000];
     var ROW_CHUNK = 24;
+    /* A live transcode needs roughly ten seconds to produce a first frame here and
+       longer on a Raspberry Pi, so give a working handoff room before calling it
+       dead — cutting it short only trades a slow start for a fallback. */
+    var NATIVE_HANDOFF_MS = 8000;
+    var HANDOFF_TIMEOUT_MS = 20000;
+    var BUILTIN_TIMEOUT_MS = 28000;
+    var TEARDOWN_TIMEOUT_MS = 8000;
+    var playGen = 0;
+    var playState = null;
+    var playError = null;
 
     var style = document.createElement('style');
     style.setAttribute('data-livetv-overview', '1');
@@ -39,6 +57,7 @@
         'html.jf-livetv-list-on .progressring,' +
         'html.jf-livetv-list-on .emby-progress,' +
         'html.jf-livetv-list-on .busy{display:none!important;visibility:hidden!important}' +
+        'html.jf-livetv-playing #jf-livetv-overview{display:none!important}' +
         '#jf-livetv-overview{margin:.6em 1.2em 2em;max-width:76rem;box-sizing:border-box;position:relative;z-index:2}' +
         '#jf-livetv-overview .jf-livetv-head{display:flex;flex-wrap:wrap;align-items:center;gap:.7em 1.1em;margin:0 0 .85em}' +
         '#jf-livetv-overview .jf-livetv-title{font-size:1.55em;font-weight:750;letter-spacing:.02em}' +
@@ -62,6 +81,20 @@
         '#jf-livetv-overview .jf-livetv-bar>span{display:block;height:100%;width:0;background:#0a84ff;border-radius:99px}' +
         '#jf-livetv-overview .jf-livetv-next{opacity:.78;font-size:.95em;line-height:1.35;overflow-wrap:anywhere}' +
         '#jf-livetv-overview .jf-livetv-empty{opacity:.75;font-size:1.05em;padding:1.1em .2em}' +
+        '#jf-livetv-overview .jf-livetv-error{display:flex;flex-wrap:wrap;align-items:center;gap:.6em 1em;margin:0 0 .85em;' +
+        'padding:.8em 1em;border:1px solid rgba(255,89,89,.55);border-radius:12px;background:rgba(255,89,89,.14);line-height:1.35}' +
+        '#jf-livetv-overview .jf-livetv-error-text{flex:1 1 18em;min-width:0;overflow-wrap:anywhere}' +
+        '#jf-livetv-overview .jf-livetv-error button{padding:.45em 1em;border:0;border-radius:8px;background:#0a84ff;color:#fff;font:inherit;cursor:pointer}' +
+        '#jf-livetv-overview .jf-livetv-row[data-busy="1"]{background:rgba(10,132,255,.22);border-color:rgba(10,132,255,.7)}' +
+        '#jf-livetv-player{position:fixed;inset:0;z-index:2147483000;background:#000;display:flex;flex-direction:column}' +
+        '#jf-livetv-player video{flex:1 1 auto;width:100%;height:100%;background:#000;object-fit:contain}' +
+        '#jf-livetv-player .jf-livetv-player-bar{position:absolute;left:0;right:0;top:0;display:flex;align-items:center;' +
+        'gap:.9em;padding:.9em 1.2em;background:linear-gradient(rgba(0,0,0,.75),rgba(0,0,0,0));color:#fff}' +
+        '#jf-livetv-player .jf-livetv-player-title{font-size:1.25em;font-weight:750}' +
+        '#jf-livetv-player .jf-livetv-player-status{opacity:.8;font-size:.95em;flex:1 1 auto;overflow-wrap:anywhere}' +
+        '#jf-livetv-player button{padding:.45em .95em;border:0;border-radius:8px;background:rgba(255,255,255,.18);' +
+        'color:#fff;font:inherit;cursor:pointer}' +
+        '#jf-livetv-player button:focus{outline:2px solid #0a84ff}' +
         '@media (min-width:900px){#jf-livetv-overview .jf-livetv-cols{display:grid}}' +
         '.layout-tv #jf-livetv-overview .jf-livetv-row{min-height:6.8em;padding:.7em 1em}' +
         '.layout-tv #jf-livetv-overview .jf-livetv-sender{font-size:1.28em}' +
@@ -353,11 +386,59 @@
         return !!(box && host && host.contains(box));
     }
 
+    /* jellyfin-web keeps .videoOsdBottom mounted with display:none once a video has
+       ever played, so testing for the node alone left the list hidden behind a blank
+       page for the rest of the session. Only a node that actually occupies the screen
+       counts as playback. */
+    function onScreen(element) {
+        if (!element) {
+            return false;
+        }
+        var rect = element.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) {
+            return false;
+        }
+        var style = window.getComputedStyle(element);
+        return style.display !== 'none' && style.visibility !== 'hidden';
+    }
+
+    /* The library page stays mounted underneath a running player, so the sender
+       list would paint on top of the picture. */
+    function playbackVisible() {
+        if (document.getElementById('jf-livetv-player')) {
+            return true;
+        }
+        if (/#\/?video(\?|$)/i.test(hashLower())) {
+            return true;
+        }
+        var nodes = document.querySelectorAll('.videoPlayerContainer, .videoOsdBottom');
+        var i;
+        for (i = 0; i < nodes.length; i++) {
+            if (onScreen(nodes[i])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /* Leaving the player is not a DOM mutation the list can rely on: jellyfin-web
+       navigates with the History API and an idle page stops mutating, so a stuck
+       jf-livetv-playing used to leave the senders hidden behind a blank page until
+       the two-minute refresh. Repaint as soon as the picture goes away. */
     function applyListMode() {
-        document.documentElement.classList.toggle('jf-livetv-list-on', owned && overlayOnVisiblePage());
-        if (owned) {
+        var playing = playbackVisible();
+        document.documentElement.classList.toggle('jf-livetv-playing', playing);
+        document.documentElement.classList.toggle('jf-livetv-list-on', owned && !playing && overlayOnVisiblePage());
+        if (owned && !playing) {
             hideLibrarySpinner();
         }
+        if (wasPlaying && !playing) {
+            lastKey = '';
+            window.clearTimeout(syncTimer);
+            syncTimer = window.setTimeout(sync, 0);
+        }
+        wasPlaying = playing;
+        return playing;
     }
 
     function ensure() {
@@ -382,47 +463,84 @@
         return box;
     }
 
+    /* jellyfin-web exposes playbackManager as a webpack module, and the module id
+       differs between builds (source path, hashed id, or a re-export). Try every
+       shape rather than a single id: a miss here used to end on the details page. */
+    function webpackRequire() {
+        var req = null;
+        try {
+            var chunks = window.webpackChunk || (typeof self !== 'undefined' && self.webpackChunk);
+            if (chunks && typeof chunks.push === 'function') {
+                chunks.push([['jf-livetv-pm-' + Date.now()], {}, function (r) { req = r; }]);
+            }
+        } catch (e) { /* not a webpack build */ }
+        return typeof req === 'function' ? req : null;
+    }
+
+    function unwrapPlaybackManager(mod) {
+        if (!mod) {
+            return null;
+        }
+        var candidates = [mod, mod.playbackManager, mod.default, mod.PlaybackManager];
+        var i;
+        for (i = 0; i < candidates.length; i++) {
+            var value = candidates[i];
+            if (value && typeof value.play === 'function' && typeof value.stop === 'function') {
+                return value;
+            }
+        }
+        return null;
+    }
+
     function resolvePlaybackManager() {
         if (window.playbackManager && typeof window.playbackManager.play === 'function') {
             return window.playbackManager;
         }
-        try {
-            var req;
-            var chunks = window.webpackChunk || (typeof self !== 'undefined' && self.webpackChunk);
-            if (chunks && typeof chunks.push === 'function') {
-                chunks.push([['jf-livetv-pm'], {}, function (r) { req = r; }]);
-            }
-            if (typeof req !== 'function') {
-                return null;
-            }
-            var ids = ['./components/playback/playbackmanager.js'];
-            var i;
-            for (i = 0; i < ids.length; i++) {
+        var found = null;
+        var req = webpackRequire();
+        var ids = [
+            './components/playback/playbackmanager.js',
+            './src/components/playback/playbackmanager.js',
+            'components/playback/playbackmanager',
+            './components/playback/playbackmanager'
+        ];
+        var i;
+        if (req) {
+            for (i = 0; i < ids.length && !found; i++) {
                 try {
-                    var exp = req(ids[i]);
-                    if (exp && exp.playbackManager && typeof exp.playbackManager.play === 'function') {
-                        window.playbackManager = exp.playbackManager;
-                        return exp.playbackManager;
-                    }
-                } catch (ignoreId) { /* next */ }
+                    found = unwrapPlaybackManager(req(ids[i]));
+                } catch (ignoreId) { /* try the next shape */ }
             }
-            if (req.m) {
+            if (!found && req.m) {
                 var key;
                 for (key in req.m) {
-                    if (!Object.prototype.hasOwnProperty.call(req.m, key) || key.indexOf('playbackmanager') === -1) {
+                    if (!Object.prototype.hasOwnProperty.call(req.m, key)
+                        || String(key).toLowerCase().indexOf('playbackmanager') === -1) {
                         continue;
                     }
                     try {
-                        var mod = req(key);
-                        if (mod && mod.playbackManager && typeof mod.playbackManager.play === 'function') {
-                            window.playbackManager = mod.playbackManager;
-                            return mod.playbackManager;
+                        found = unwrapPlaybackManager(req(key));
+                        if (found) {
+                            break;
                         }
-                    } catch (ignoreKey) { /* next */ }
+                    } catch (ignoreKey) { /* try the next module */ }
                 }
             }
-        } catch (e) { /* ignore */ }
-        return null;
+        }
+        if (!found && window.Emby) {
+            var importer = window.Emby.importModule || window.Emby['import'];
+            if (typeof importer === 'function') {
+                for (i = 0; i < ids.length && !found; i++) {
+                    try {
+                        found = unwrapPlaybackManager(importer.call(window.Emby, ids[i]));
+                    } catch (ignoreEmby) { /* try the next shape */ }
+                }
+            }
+        }
+        if (found) {
+            window.playbackManager = found;
+        }
+        return found;
     }
 
     function playableItem(item) {
@@ -436,8 +554,14 @@
         copy.Type = 'TvChannel';
         copy.MediaType = 'Video';
         copy.IsLiveStream = true;
+        copy.IsFolder = false;
         if (!copy.ChannelId) {
             copy.ChannelId = item.Id;
+        }
+        // An empty MediaSources array makes the player treat the item as
+        // unplayable and re-fetch it. Leave it undefined so PlaybackInfo decides.
+        if (copy.MediaSources && !copy.MediaSources.length) {
+            delete copy.MediaSources;
         }
         var client = api();
         if (!copy.ServerId && client && typeof client.serverId === 'function') {
@@ -446,28 +570,768 @@
         return copy;
     }
 
+    function serverUrl(path) {
+        var value = String(path || '');
+        if (/^https?:\/\//i.test(value)) {
+            return value;
+        }
+        var client = api();
+        var base = client && typeof client.serverAddress === 'function' ? String(client.serverAddress() || '') : '';
+        base = base.replace(/\/+$/, '');
+        return base + (value.charAt(0) === '/' ? value : '/' + value);
+    }
+
+    /* Only transcoding profiles: an IPTV mux is usually mpeg2video + mp2, which no
+       browser decodes. Forcing h264/aac in progressive fragmented mp4 keeps this
+       player free of hls.js and gives the <video> element frames it can show. */
+    function browserPlaybackProfile() {
+        return {
+            Name: 'Jellyfin Live TV list',
+            MaxStreamingBitrate: 20000000,
+            MaxStaticBitrate: 20000000,
+            MusicStreamingTranscodingBitrate: 384000,
+            DirectPlayProfiles: [],
+            TranscodingProfiles: [{
+                Container: 'mp4',
+                Type: 'Video',
+                VideoCodec: 'h264',
+                AudioCodec: 'aac',
+                Protocol: 'http',
+                Context: 'Streaming',
+                MaxAudioChannels: '2'
+            }],
+            ContainerProfiles: [],
+            CodecProfiles: [{
+                Type: 'Video',
+                Codec: 'h264',
+                Conditions: [
+                    { Condition: 'EqualsAny', Property: 'VideoProfile', Value: 'high|main|baseline|constrained baseline', IsRequired: false },
+                    { Condition: 'LessThanEqual', Property: 'VideoLevel', Value: '51', IsRequired: false }
+                ]
+            }],
+            SubtitleProfiles: []
+        };
+    }
+
+    /* ApiClient rejects with the raw Response, which reads as "[object Response]" in
+       the error banner and tells the user nothing. Name the status instead; the one
+       they will actually hit is the tuner being busy. */
+    function describeRequestFailure(path, reason) {
+        var de = german();
+        var status = reason && typeof reason.status === 'number' ? reason.status : 0;
+        if (status === 409 || status === 500) {
+            return de
+                ? 'Der Server konnte den Sender nicht öffnen (' + status + '). Läuft noch ein anderer Stream auf diesem Tuner?'
+                : 'The server could not open this channel (' + status + '). Is another stream still using the tuner?';
+        }
+        if (status) {
+            return (de ? 'Serverfehler ' : 'Server error ') + status + ' (' + path + ').';
+        }
+        if (reason && reason.message) {
+            return reason.message;
+        }
+        return (de ? 'Der Server antwortete nicht: ' : 'No response from the server: ') + path;
+    }
+
+    function apiPost(path, query, body) {
+        var client = api();
+        if (!client || typeof client.getUrl !== 'function') {
+            return Promise.reject(new Error('no ApiClient'));
+        }
+        var url = client.getUrl(path, query || {});
+        if (typeof client.ajax === 'function') {
+            return client.ajax({
+                type: 'POST',
+                url: url,
+                data: body == null ? null : JSON.stringify(body),
+                contentType: 'application/json',
+                dataType: body == null ? undefined : 'json'
+            })['catch'](function (reason) {
+                throw new Error(describeRequestFailure(path, reason));
+            });
+        }
+        return fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: body == null ? null : JSON.stringify(body)
+        }).then(function (res) {
+            if (!res.ok) {
+                throw new Error('POST ' + path + ' ' + res.status);
+            }
+            return body == null ? null : res.json();
+        });
+    }
+
+    function requestPlaybackInfo(item) {
+        var client = api();
+        return apiPost('Items/' + item.Id + '/PlaybackInfo', { userId: client.getCurrentUserId() }, {
+            UserId: client.getCurrentUserId(),
+            MaxStreamingBitrate: 20000000,
+            StartTimeTicks: 0,
+            AutoOpenLiveStream: true,
+            EnableDirectPlay: false,
+            EnableDirectStream: false,
+            EnableTranscoding: true,
+            DeviceProfile: browserPlaybackProfile()
+        });
+    }
+
+    /* The progressive transcoding url the server hands out carries no codec, so for a
+       live source whose codecs it has not probed it falls back to a stream copy — an
+       mpeg2video IPTV mux copied into mp4 gives a <video> element that reports
+       videoWidth 0 forever. Pin h264/aac and name the container so ffmpeg encodes
+       something the browser can actually decode. */
+    var FORCED_STREAM_PARAMS = {
+        videocodec: 'h264',
+        audiocodec: 'aac',
+        videobitrate: '8000000',
+        audiobitrate: '192000',
+        maxaudiochannels: '2',
+        'static': 'false'
+    };
+
+    function forceProgressiveTranscode(url) {
+        var value = String(url || '');
+        var cut = value.indexOf('?');
+        var path = cut < 0 ? value : value.slice(0, cut);
+        var query = cut < 0 ? '' : value.slice(cut + 1);
+        if (/\/stream$/i.test(path)) {
+            path += '.mp4';
+        }
+        var kept = [];
+        var parts = query ? query.split('&') : [];
+        var i;
+        for (i = 0; i < parts.length; i++) {
+            var name = parts[i].split('=')[0];
+            if (name && !Object.prototype.hasOwnProperty.call(FORCED_STREAM_PARAMS, name.toLowerCase())) {
+                kept.push(parts[i]);
+            }
+        }
+        var key;
+        for (key in FORCED_STREAM_PARAMS) {
+            if (Object.prototype.hasOwnProperty.call(FORCED_STREAM_PARAMS, key)) {
+                kept.push(key + '=' + encodeURIComponent(FORCED_STREAM_PARAMS[key]));
+            }
+        }
+        return path + '?' + kept.join('&');
+    }
+
+    function buildStreamUrl(item, playbackInfo) {
+        var source = ((playbackInfo && playbackInfo.MediaSources) || [])[0];
+        if (!source) {
+            return null;
+        }
+        var subProtocol = String(source.TranscodingSubProtocol || 'http').toLowerCase();
+        if (source.TranscodingUrl && subProtocol === 'http') {
+            return serverUrl(forceProgressiveTranscode(source.TranscodingUrl));
+        }
+        var client = api();
+        var params = {
+            MediaSourceId: source.Id,
+            PlaySessionId: playbackInfo.PlaySessionId,
+            AudioStreamIndex: -1
+        };
+        if (source.LiveStreamId) {
+            params.LiveStreamId = source.LiveStreamId;
+        }
+        return serverUrl(forceProgressiveTranscode(client.getUrl('Videos/' + item.Id + '/stream.mp4', params)));
+    }
+
+    /* Radio channels legitimately decode to audio only; everything else reporting
+       no frames is the bug, not the content. */
+    function hasVideoStream(source) {
+        var streams = (source && source.MediaStreams) || [];
+        if (!streams.length) {
+            return true;
+        }
+        var i;
+        for (i = 0; i < streams.length; i++) {
+            if (streams[i] && String(streams[i].Type).toLowerCase() === 'video') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function mediaElement() {
+        var nodes = document.querySelectorAll('video, audio');
+        var i;
+        for (i = 0; i < nodes.length; i++) {
+            var node = nodes[i];
+            if (node.currentSrc || node.src || node.srcObject) {
+                return node;
+            }
+        }
+        return null;
+    }
+
+    /* Chrome refuses unmuted autoplay without a sticky gesture, and Live TV starts
+       a good few seconds after the click. Retry muted rather than leave a frozen
+       first frame that looks exactly like the bug being fixed. */
+    function nudge(element) {
+        if (!element || !element.paused || typeof element.play !== 'function') {
+            return;
+        }
+        var started = element.play();
+        if (started && typeof started.catch === 'function') {
+            started['catch'](function () {
+                element.muted = true;
+                var retried = element.play();
+                if (retried && typeof retried.catch === 'function') {
+                    retried['catch'](function () { /* reported by the watchdog */ });
+                }
+            });
+        }
+    }
+
+    /* "Started" has to mean visible frames. A stream copy of an mpeg2 IPTV mux
+       decodes as audio with videoWidth stuck at 0, which is exactly the failure this
+       list must not report as success. */
+    function elementState(element) {
+        if (!element) {
+            return 'none';
+        }
+        nudge(element);
+        if (element.videoWidth > 0 && element.readyState >= 2) {
+            return 'video';
+        }
+        if (element.readyState >= 2 && element.currentTime > 0.2 && !element.paused) {
+            return 'audio';
+        }
+        return 'none';
+    }
+
+    function waitForPlayback(gen, timeoutMs) {
+        return new Promise(function (resolve) {
+            var deadline = Date.now() + timeoutMs;
+            var best = 'none';
+            function poll() {
+                if (gen !== playGen) {
+                    resolve('stale');
+                    return;
+                }
+                var state = elementState(mediaElement());
+                if (state === 'video') {
+                    resolve('video');
+                    return;
+                }
+                if (state === 'audio') {
+                    best = 'audio';
+                }
+                if (Date.now() >= deadline) {
+                    resolve(best);
+                    return;
+                }
+                window.setTimeout(poll, 300);
+            }
+            poll();
+        });
+    }
+
+    function delay(ms) {
+        return new Promise(function (resolve) { window.setTimeout(resolve, ms); });
+    }
+
+    function hasNativeLive() {
+        return !!(window.FireTvLive && typeof window.FireTvLive.play === 'function');
+    }
+
+    function nativeOwnsPlayback() {
+        return !!(window.NativePlayer && typeof window.NativePlayer.loadPlayer === 'function');
+    }
+
+    function stopManager() {
+        var manager = window.playbackManager;
+        if (manager && typeof manager.stop === 'function') {
+            try {
+                manager.stop();
+            } catch (e) { /* already stopped */ }
+        }
+    }
+
+    function isVideoHash(value) {
+        return /#\/?video(\?|$)/i.test(String(value || '').toLowerCase());
+    }
+
+    function rememberListHash() {
+        var current = location.hash || '';
+        if (!isVideoHash(current)) {
+            listHash = current;
+        }
+        return listHash;
+    }
+
+    function managerPlayerOnScreen() {
+        var nodes = document.querySelectorAll('.videoPlayerContainer, .videoOsdBottom');
+        var i;
+        for (i = 0; i < nodes.length; i++) {
+            if (onScreen(nodes[i])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function managerIdle(manager) {
+        if (!manager) {
+            return true;
+        }
+        try {
+            if (typeof manager.isPlaying === 'function' && manager.isPlaying()) {
+                return false;
+            }
+        } catch (e) { /* an unusable manager is an idle one */ }
+        try {
+            if (typeof manager.getCurrentPlayer === 'function' && manager.getCurrentPlayer()) {
+                return false;
+            }
+        } catch (e) { /* same */ }
+        return true;
+    }
+
+    /* A live source that never delivers a first frame leaves jellyfin-web's
+       .videoPlayerContainer on screen showing the channel logo while the manager has
+       already dropped the player: isPlaying() is false and getCurrentPlayer() is
+       undefined, so stop() has nothing to act on and no amount of retrying clears it.
+       That orphan is the blurred placeholder the list gets blamed for.
+
+       Stopping the media element is the part that matters: its request is what still
+       holds the tuner, and an M3U host with one tuner refuses the next channel until it
+       is released. Hide the container rather than remove it — deleting the node takes
+       jellyfin-web's <video> with it, and the player it builds next reuses that detached
+       element and never paints again for the rest of the session. The next handoff puts
+       the container back. */
+    function hideOrphanPlayerView() {
+        if (!managerIdle(window.playbackManager)) {
+            return false;
+        }
+        var nodes = document.querySelectorAll('.videoPlayerContainer');
+        var hidden = false;
+        var i;
+        var j;
+        for (i = 0; i < nodes.length; i++) {
+            if (!onScreen(nodes[i])) {
+                continue;
+            }
+            var media = nodes[i].querySelectorAll('video, audio');
+            for (j = 0; j < media.length; j++) {
+                try {
+                    media[j].pause();
+                    media[j].removeAttribute('src');
+                    media[j].load();
+                } catch (e) { /* the element is being parked anyway */ }
+            }
+            nodes[i].setAttribute('data-jf-livetv-hidden', '1');
+            nodes[i].style.display = 'none';
+            hidden = true;
+        }
+        return hidden;
+    }
+
+    function restoreHiddenPlayerViews() {
+        var nodes = document.querySelectorAll('.videoPlayerContainer[data-jf-livetv-hidden]');
+        var i;
+        for (i = 0; i < nodes.length; i++) {
+            nodes[i].style.display = '';
+            nodes[i].removeAttribute('data-jf-livetv-hidden');
+        }
+    }
+
+    /* Abandoning a handoff is a race: stop() cannot cancel a load that has not built
+       its player yet. Keep stopping until the player view is really gone, and walk
+       back to the list so the in-list error is the thing on screen. */
+    function leavePlayerView() {
+        var deadline = Date.now() + TEARDOWN_TIMEOUT_MS;
+        function attempt() {
+            stopManager();
+            if (isVideoHash(location.hash) && listHash) {
+                location.hash = listHash;
+            }
+            if (!managerPlayerOnScreen()) {
+                return Promise.resolve();
+            }
+            if (hideOrphanPlayerView() || Date.now() >= deadline) {
+                return Promise.resolve();
+            }
+            return delay(600).then(attempt);
+        }
+        return attempt();
+    }
+
+    /* Hand the single tuner back before asking for the next channel, and clear any
+       player a previous attempt left behind. */
+    function releaseTuner() {
+        return Promise.all([leavePlayerView(), closeBuiltinPlayer()]);
+    }
+
     function play(item, list) {
         if (isGroupFolder(item)) {
             location.hash = '#/list?parentId=' + item.Id + '&ltvgroup=1';
-            return;
+            return Promise.resolve('folder');
         }
-        var nativeOwns = window.NativePlayer && typeof window.NativePlayer.loadPlayer === 'function';
-        if (nativeOwns && window.FireTvLive && typeof window.FireTvLive.play === 'function') {
-            window.FireTvLive.play(item, list || items);
-            return;
+        var queue = (list && list.length ? list : items).slice();
+        var gen = ++playGen;
+        clearError();
+        rememberListHash();
+        markBusy(item, true);
+        return releaseTuner().then(function () {
+            return gen === playGen ? startPlayback(item, queue, gen) : 'stale';
+        }).then(function (how) {
+            if (gen === playGen) {
+                markBusy(item, false);
+            }
+            return how;
+        }, function (error) {
+            if (gen !== playGen) {
+                return 'error';
+            }
+            markBusy(item, false);
+            return leavePlayerView().then(function () {
+                showError(item, error);
+                return 'error';
+            });
+        });
+    }
+
+    function startPlayback(item, queue, gen) {
+        if (hasNativeLive()) {
+            try {
+                window.FireTvLive.play(item, queue);
+            } catch (e) { /* fall through to the web players */ }
+            if (nativeOwnsPlayback()) {
+                return Promise.resolve('native');
+            }
+            return waitForPlayback(gen, NATIVE_HANDOFF_MS).then(function (how) {
+                if (how === 'video') {
+                    return 'native';
+                }
+                if (gen !== playGen) {
+                    return 'stale';
+                }
+                return leavePlayerView().then(function () {
+                    return gen === playGen ? viaManager(item, queue, gen) : 'stale';
+                });
+            });
+        }
+        return viaManager(item, queue, gen);
+    }
+
+    function viaManager(item, queue, gen) {
+        if (gen !== playGen) {
+            return Promise.resolve('stale');
         }
         var manager = resolvePlaybackManager();
-        if (manager) {
+        if (!manager) {
+            return openBuiltinPlayer(item, queue, gen);
+        }
+        restoreHiddenPlayerViews();
+        try {
             manager.play({ items: [playableItem(item)], fullscreen: true });
+        } catch (e) {
+            return openBuiltinPlayer(item, queue, gen);
+        }
+        /* Audio without frames means jellyfin-web settled on a stream copy of the
+           provider's mpeg2 mux, so keep going: the built-in player pins h264. */
+        return waitForPlayback(gen, HANDOFF_TIMEOUT_MS).then(function (how) {
+            if (how === 'video') {
+                return 'playbackManager';
+            }
+            if (gen !== playGen) {
+                return 'stale';
+            }
+            /* jellyfin-web's own live stream still holds the tuner; give its close
+               a moment or the built-in player just trades one conflict for another. */
+            return leavePlayerView().then(function () {
+                return delay(1500);
+            }).then(function () {
+                return gen === playGen ? openBuiltinPlayer(item, queue, gen) : 'stale';
+            });
+        });
+    }
+
+    /* Resolves once the server has actually let go of the tuner. An M3U host with
+       TunerCount 1 — the normal IPTV subscription — rejects the next channel with
+       "simultaneous stream limit reached" while the previous stream is still open,
+       so switching senders has to wait for this, not fire and forget. */
+    function closeBuiltinPlayer() {
+        var state = playState;
+        playState = null;
+        if (!state) {
+            return Promise.resolve();
+        }
+        if (state.keyHandler) {
+            document.removeEventListener('keydown', state.keyHandler, true);
+        }
+        if (state.video) {
+            try {
+                state.video.pause();
+                state.video.removeAttribute('src');
+                state.video.load();
+            } catch (e) { /* the element is going away anyway */ }
+        }
+        if (state.box && state.box.parentNode) {
+            state.box.parentNode.removeChild(state.box);
+        }
+        var client = api();
+        var pending = [];
+        if (client && typeof client.getUrl === 'function' && state.playSessionId) {
+            try {
+                pending.push(client.ajax({
+                    type: 'DELETE',
+                    url: client.getUrl('Videos/ActiveEncodings', {
+                        deviceId: typeof client.deviceId === 'function' ? client.deviceId() : '',
+                        playSessionId: state.playSessionId
+                    })
+                })['catch'](function () { /* the transcode may already be gone */ }));
+            } catch (e) { /* best effort */ }
+        }
+        if (state.liveStreamId) {
+            pending.push(apiPost('LiveStreams/Close', { liveStreamId: state.liveStreamId }, null)['catch'](
+                function () { /* the server closes idle streams anyway */ }));
+        }
+        if (client && typeof client.reportPlaybackStopped === 'function' && state.playSessionId) {
+            try {
+                client.reportPlaybackStopped({
+                    ItemId: state.itemId,
+                    PlaySessionId: state.playSessionId,
+                    MediaSourceId: state.mediaSourceId,
+                    PositionTicks: 0
+                });
+            } catch (e) { /* reporting is optional */ }
+        }
+        return Promise.all(pending).then(function () { /* value is irrelevant */ });
+    }
+
+    function zap(step) {
+        var state = playState;
+        if (!state || !state.queue || state.queue.length < 2) {
             return;
         }
-        if (window.FireTvLive && typeof window.FireTvLive.play === 'function') {
-            window.FireTvLive.play(item, list || items);
+        var index = -1;
+        var i;
+        for (i = 0; i < state.queue.length; i++) {
+            if (state.queue[i] && state.queue[i].Id === state.itemId) {
+                index = i;
+                break;
+            }
+        }
+        if (index < 0) {
             return;
         }
-        if (item && item.Id) {
-            location.hash = '#/details?id=' + item.Id;
+        var next = state.queue[(index + step + state.queue.length) % state.queue.length];
+        play(next, state.queue);
+    }
+
+    function buildPlayerShell(item) {
+        var box = document.createElement('div');
+        box.id = 'jf-livetv-player';
+        var video = document.createElement('video');
+        video.setAttribute('playsinline', '');
+        video.autoplay = true;
+        video.controls = false;
+        var bar = document.createElement('div');
+        bar.className = 'jf-livetv-player-bar';
+        var close = document.createElement('button');
+        close.type = 'button';
+        close.textContent = '✕';
+        close.setAttribute('aria-label', german() ? 'Schließen' : 'Close');
+        close.addEventListener('click', function () { closeBuiltinPlayer(); });
+        var title = document.createElement('div');
+        title.className = 'jf-livetv-player-title';
+        title.textContent = item.Name || '';
+        var status = document.createElement('div');
+        status.className = 'jf-livetv-player-status';
+        status.textContent = german() ? 'Sender wird geöffnet…' : 'Opening channel…';
+        var sound = document.createElement('button');
+        sound.type = 'button';
+        sound.style.display = 'none';
+        sound.textContent = german() ? 'Ton an' : 'Unmute';
+        sound.addEventListener('click', function () {
+            video.muted = false;
+            sound.style.display = 'none';
+            nudge(video);
+        });
+        bar.appendChild(close);
+        bar.appendChild(title);
+        bar.appendChild(status);
+        bar.appendChild(sound);
+        box.appendChild(video);
+        box.appendChild(bar);
+        document.body.appendChild(box);
+        return { box: box, video: video, status: status, sound: sound, close: close };
+    }
+
+    /* Guaranteed player: PlaybackInfo over REST plus a plain <video>. It needs no
+       jellyfin-web internals and no hls.js, so it still works on a web build whose
+       module graph this script cannot reach. */
+    function openBuiltinPlayer(item, queue, gen) {
+        var client = api();
+        if (!client || !item || !item.Id) {
+            return Promise.reject(new Error(german() ? 'Kein Server verfügbar.' : 'No server connection.'));
         }
+        var shell = buildPlayerShell(item);
+        playState = {
+            box: shell.box,
+            video: shell.video,
+            itemId: item.Id,
+            queue: queue,
+            keyHandler: null
+        };
+        var state = playState;
+        state.keyHandler = function (event) {
+            if (playState !== state) {
+                return;
+            }
+            if (event.key === 'Escape' || event.key === 'Backspace' || event.keyCode === 27 || event.keyCode === 8) {
+                event.preventDefault();
+                event.stopPropagation();
+                closeBuiltinPlayer();
+            } else if (event.key === 'ArrowUp' || event.keyCode === 38) {
+                event.preventDefault();
+                zap(-1);
+            } else if (event.key === 'ArrowDown' || event.keyCode === 40) {
+                event.preventDefault();
+                zap(1);
+            }
+        };
+        document.addEventListener('keydown', state.keyHandler, true);
+        shell.close.focus();
+
+        return requestPlaybackInfo(item).then(function (info) {
+            if (gen !== playGen || playState !== state) {
+                return 'stale';
+            }
+            var source = ((info && info.MediaSources) || [])[0];
+            if (!source) {
+                throw new Error(german()
+                    ? 'Der Server liefert keine Medienquelle für diesen Sender.'
+                    : 'The server returned no media source for this channel.');
+            }
+            state.playSessionId = info.PlaySessionId;
+            state.mediaSourceId = source.Id;
+            state.liveStreamId = source.LiveStreamId;
+            var url = buildStreamUrl(item, info);
+            if (!url) {
+                throw new Error(german() ? 'Kein abspielbarer Stream.' : 'No playable stream.');
+            }
+            state.url = url;
+            shell.status.textContent = german() ? 'Stream wird geladen…' : 'Loading stream…';
+            shell.video.src = url;
+            nudge(shell.video);
+            shell.video.addEventListener('playing', function () {
+                if (playState !== state) {
+                    return;
+                }
+                shell.status.textContent = '';
+                shell.video.controls = true;
+                if (shell.video.muted) {
+                    shell.sound.style.display = '';
+                }
+            });
+            if (client && typeof client.reportPlaybackStart === 'function') {
+                try {
+                    client.reportPlaybackStart({
+                        ItemId: item.Id,
+                        PlaySessionId: info.PlaySessionId,
+                        MediaSourceId: source.Id,
+                        CanSeek: false,
+                        IsPaused: false
+                    });
+                } catch (e) { /* reporting is optional */ }
+            }
+            return waitForPlayback(gen, BUILTIN_TIMEOUT_MS).then(function (how) {
+                if (gen !== playGen || playState !== state) {
+                    return 'stale';
+                }
+                if (how === 'video') {
+                    return 'builtin';
+                }
+                if (how === 'audio' && !hasVideoStream(source)) {
+                    return 'builtin-audio';
+                }
+                closeBuiltinPlayer();
+                throw new Error(german()
+                    ? 'Der Stream lieferte keine Bilder. Sender oder Transcoder prüfen.'
+                    : 'The stream produced no video. Check the channel or the transcoder.');
+            });
+        }, function (error) {
+            if (playState === state) {
+                closeBuiltinPlayer();
+            }
+            throw error;
+        });
+    }
+
+    function markBusy(item, busy) {
+        var box = document.getElementById('jf-livetv-overview');
+        if (!box || !item || !item.Id) {
+            return;
+        }
+        var rows = box.querySelectorAll('.jf-livetv-row');
+        var i;
+        for (i = 0; i < rows.length; i++) {
+            if (rows[i].getAttribute('data-id') === item.Id) {
+                if (busy) {
+                    rows[i].setAttribute('data-busy', '1');
+                } else {
+                    rows[i].removeAttribute('data-busy');
+                }
+            }
+        }
+    }
+
+    function clearError() {
+        playError = null;
+        var node = document.querySelector('#jf-livetv-overview .jf-livetv-error');
+        if (node && node.parentNode) {
+            node.parentNode.removeChild(node);
+        }
+    }
+
+    /* The banner has to be repainted with the list: leaving a failed sender repaints
+       the rows, and a one-shot node would vanish with the only explanation of why
+       nothing played. */
+    function paintError() {
+        var box = document.getElementById('jf-livetv-overview');
+        if (!box || !playError) {
+            return;
+        }
+        var existing = box.querySelector('.jf-livetv-error');
+        if (existing && existing.parentNode) {
+            existing.parentNode.removeChild(existing);
+        }
+        var item = playError.item;
+        var de = german();
+        var banner = document.createElement('div');
+        banner.className = 'jf-livetv-error';
+        banner.setAttribute('role', 'alert');
+        var text = document.createElement('div');
+        text.className = 'jf-livetv-error-text';
+        text.textContent = (de ? 'Wiedergabe fehlgeschlagen: ' : 'Playback failed: ')
+            + (item && item.Name ? item.Name + ' — ' : '')
+            + (playError.reason || (de ? 'Unbekannter Fehler.' : 'Unknown error.'));
+        var retry = document.createElement('button');
+        retry.type = 'button';
+        retry.textContent = de ? 'Erneut versuchen' : 'Try again';
+        retry.addEventListener('click', function () {
+            clearError();
+            play(item, items);
+        });
+        banner.appendChild(text);
+        banner.appendChild(retry);
+        if (box.firstChild) {
+            box.insertBefore(banner, box.firstChild);
+        } else {
+            box.appendChild(banner);
+        }
+    }
+
+    function showError(item, error) {
+        playError = {
+            item: item,
+            reason: (error && error.message) || String(error || '')
+        };
+        paintError();
     }
 
     function applyGuide(row, item, de) {
@@ -629,6 +1493,7 @@
         box.appendChild(head);
         box.appendChild(cols);
         box.appendChild(list);
+        paintError();
         if (!shown.length) {
             var empty = document.createElement('div');
             empty.className = 'jf-livetv-empty';
@@ -842,6 +1707,10 @@
     }
 
     function sync() {
+        if (playbackVisible()) {
+            applyListMode();
+            return;
+        }
         if (isGuidePage()) {
             hide();
             return;
@@ -871,8 +1740,16 @@
             lastKey = '';
             sync();
         });
+        window.addEventListener('popstate', function () {
+            lastKey = '';
+            sync();
+        });
         var observer = new MutationObserver(function () {
             if (owned) {
+                if (playbackVisible()) {
+                    applyListMode();
+                    return;
+                }
                 var host = visibleHost();
                 var box = document.getElementById('jf-livetv-overview');
                 if (host && (!box || !host.contains(box))) {
@@ -892,6 +1769,8 @@
         if (document.documentElement) {
             observer.observe(document.documentElement, { childList: true, subtree: true });
         }
+        window.clearInterval(modeTimer);
+        modeTimer = window.setInterval(applyListMode, 1000);
         window.clearInterval(refreshTimer);
         refreshTimer = window.setInterval(function () {
             if (owned) {
@@ -912,7 +1791,14 @@
         isLiveTvItem: isLiveTvItem,
         play: play,
         resolvePlaybackManager: resolvePlaybackManager,
-        playableItem: playableItem
+        playableItem: playableItem,
+        buildStreamUrl: buildStreamUrl,
+        openBuiltinPlayer: function (item, list) {
+            var queue = (list && list.length ? list : items).slice();
+            return openBuiltinPlayer(item, queue, ++playGen);
+        },
+        closePlayer: closeBuiltinPlayer,
+        playerState: function () { return playState; }
     };
 
     if (document.readyState === 'loading') {

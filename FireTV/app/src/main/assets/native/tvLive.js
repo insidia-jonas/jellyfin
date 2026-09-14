@@ -309,12 +309,21 @@
         }
         if (window.NativePlayer && window.NativePlayer.loadPlayer) {
             window.NativePlayer.loadPlayer(JSON.stringify(payload));
-            return;
+            return true;
         }
         var manager = resolvePlaybackManager();
         if (manager) {
             manager.play({ items: [playableItem(item)], fullscreen: true });
+            return true;
         }
+        // Web host without the native bridge: hand back to the injected Live TV
+        // list, which owns a REST-only <video> player. Never leave a click dead.
+        var overview = window.JellyfinLiveTvOverview;
+        if (overview && typeof overview.openBuiltinPlayer === "function") {
+            overview.openBuiltinPlayer(item, queue);
+            return true;
+        }
+        return false;
     }
 
     function render() {

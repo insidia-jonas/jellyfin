@@ -235,7 +235,7 @@
             {
                 Container: "mp4,m4v,mov,mkv,webm,ts,mpegts,avi",
                 Type: "Video",
-                VideoCodec: "h264,hevc,vp8,vp9,av1,mpeg2video,mpeg4",
+                VideoCodec: "h264,hevc,vp8,vp9,av1",
                 AudioCodec: "aac,mp3,ac3,eac3,flac,opus,pcm,dts"
             },
             {

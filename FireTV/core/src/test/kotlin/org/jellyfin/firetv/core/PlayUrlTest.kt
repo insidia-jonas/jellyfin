@@ -63,6 +63,40 @@ class PlayUrlTest {
     }
 
     @Test
+    fun `prefers the transcode when the server refuses direct streaming`() {
+        // The LiveStreamFiles proxy is a byte copy of the provider mux, so German IPTV
+        // hands ExoPlayer mpeg2video + mp2 that Fire TV hardware cannot decode: a black
+        // picture with no video size. When the server says no direct stream, the
+        // transcoded URL is the only one that produces frames.
+        val url = PlayUrl.resolveLive(
+            "http://192.168.188.10:8096",
+            MediaSourceUrls(
+                transcodingUrl = "/videos/abc/master.m3u8?VideoCodec=h264&AudioCodec=aac",
+                path = "http://127.0.0.1:8096/LiveTv/LiveStreamFiles/abc/stream.ts",
+                supportsDirectPlay = false,
+                supportsDirectStream = false,
+            ),
+        )
+        assertEquals(
+            "http://192.168.188.10:8096/videos/abc/master.m3u8?VideoCodec=h264&AudioCodec=aac",
+            url,
+        )
+    }
+
+    @Test
+    fun `keeps the live proxy when direct streaming is allowed`() {
+        val url = PlayUrl.resolveLive(
+            "http://192.168.188.10:8096",
+            MediaSourceUrls(
+                transcodingUrl = "/videos/abc/master.m3u8",
+                path = "http://127.0.0.1:8096/LiveTv/LiveStreamFiles/abc/stream.ts",
+                supportsDirectStream = true,
+            ),
+        )
+        assertEquals("http://192.168.188.10:8096/LiveTv/LiveStreamFiles/abc/stream.ts", url)
+    }
+
+    @Test
     fun `rejects raw iptv ingest hosts for live playback`() {
         val url = PlayUrl.resolveLive(
             "http://192.168.188.10:8096",
