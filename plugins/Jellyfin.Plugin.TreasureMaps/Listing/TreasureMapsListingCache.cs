@@ -185,6 +185,60 @@ public sealed class TreasureMapsListingCache
     }
 
     /// <summary>
+    /// Returns a still-fresh snapshot immediately. When the snapshot is missing or expired,
+    /// starts/coalesces a background fetch and returns false — the caller must not present
+    /// expired rows as current and must not wait for indexer HTTP.
+    /// </summary>
+    /// <typeparam name="T">The payload type.</typeparam>
+    /// <param name="key">The query key.</param>
+    /// <param name="freshTtl">How long a new snapshot stays fresh.</param>
+    /// <param name="fetch">The indexer fetch (runs in the background on a miss).</param>
+    /// <param name="value">The fresh payload, if any.</param>
+    /// <returns>True when <paramref name="value"/> may be shown as current.</returns>
+    public bool TryGetFreshOrSchedule<T>(
+        string key,
+        TimeSpan freshTtl,
+        Func<string?, CancellationToken, Task<ListingFetch<T>>> fetch,
+        out T? value)
+        where T : class
+    {
+        if (TryGetFresh<T>(key, out value, out var shouldRefresh))
+        {
+            if (shouldRefresh)
+            {
+                ScheduleRefresh(key, freshTtl, fetch);
+            }
+
+            return true;
+        }
+
+        ScheduleRefresh(key, freshTtl, fetch);
+        value = default;
+        return false;
+    }
+
+    /// <summary>
+    /// Starts a coalesced background refresh for <paramref name="key"/>.
+    /// </summary>
+    /// <typeparam name="T">The payload type.</typeparam>
+    /// <param name="key">The query key.</param>
+    /// <param name="freshTtl">How long a new snapshot stays fresh.</param>
+    /// <param name="fetch">The indexer fetch.</param>
+    public void ScheduleRefresh<T>(
+        string key,
+        TimeSpan freshTtl,
+        Func<string?, CancellationToken, Task<ListingFetch<T>>> fetch)
+        where T : class
+    {
+        if (string.IsNullOrEmpty(key))
+        {
+            return;
+        }
+
+        ScheduleRefreshCore(key, freshTtl, fetch);
+    }
+
+    /// <summary>
     /// Returns a fresh snapshot when one is valid; otherwise fetches, coalescing in-flight
     /// requests for the same key. Expired snapshots are not returned unless a fetch
     /// validates them (304 / same hash) or a refresh is already in flight inside the grace window.
@@ -258,7 +312,19 @@ public sealed class TreasureMapsListingCache
     /// <param name="value">The payload.</param>
     /// <returns>True when the payload is an empty release list.</returns>
     public static bool IsEmptyListing(object? value)
-        => value is ReleaseListResponse list && (list.Items is null || list.Items.Count == 0);
+    {
+        if (value is ReleaseListResponse list)
+        {
+            return list.Items is null || list.Items.Count == 0;
+        }
+
+        if (value is MediaBrowser.Controller.Channels.ChannelItemResult folder)
+        {
+            return folder.RefreshPending || folder.Items is null || folder.Items.Count == 0;
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Stable hash of a listing payload (guids / serialized body).
@@ -294,6 +360,22 @@ public sealed class TreasureMapsListingCache
             return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString())));
         }
 
+        if (value is MediaBrowser.Controller.Channels.ChannelItemResult folder)
+        {
+            var sb = new StringBuilder((folder.Items?.Count ?? 0) * 24);
+            foreach (var item in folder.Items ?? Array.Empty<MediaBrowser.Controller.Channels.ChannelItemInfo>())
+            {
+                if (item is null)
+                {
+                    continue;
+                }
+
+                sb.Append(item.Id).Append('\n').Append(item.Name).Append('|');
+            }
+
+            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString())));
+        }
+
         try
         {
             return Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(value)));
@@ -304,7 +386,7 @@ public sealed class TreasureMapsListingCache
         }
     }
 
-    private void ScheduleRefresh<T>(
+    private void ScheduleRefreshCore<T>(
         string key,
         TimeSpan freshTtl,
         Func<string?, CancellationToken, Task<ListingFetch<T>>> fetch)

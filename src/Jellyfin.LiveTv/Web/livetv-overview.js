@@ -19,6 +19,8 @@
     var tickTimer = 0;
     var refreshTimer = 0;
     var syncTimer = 0;
+    var paintToken = 0;
+    var ROW_CHUNK = 24;
 
     var style = document.createElement('style');
     style.setAttribute('data-livetv-overview', '1');
@@ -304,11 +306,121 @@
         }
     }
 
-    function render() {
+    function applyGuide(row, item, de) {
+        var guide = guideOf(item);
+        var show = row.querySelector('.jf-livetv-show');
+        var times = row.querySelector('.jf-livetv-times');
+        var fill = row.querySelector('.jf-livetv-bar > span');
+        var bar = row.querySelector('.jf-livetv-bar');
+        var next = row.querySelector('.jf-livetv-next');
+        if (guide.folder) {
+            if (show) {
+                show.textContent = guide.folderLine || (de ? 'Ordner' : 'Folder');
+            }
+            if (times) {
+                times.textContent = '';
+            }
+            if (next) {
+                next.textContent = '';
+            }
+            return;
+        }
+        if (show) {
+            show.textContent = guide.nowTitle
+                ? ((de ? 'Jetzt: ' : 'Now: ') + guide.nowTitle)
+                : (de ? 'Keine EPG-Daten' : 'No guide data');
+        }
+        if (times) {
+            times.textContent = guide.nowRange;
+        }
+        if (guide.percent != null && fill && bar) {
+            fill.style.width = guide.percent + '%';
+            bar.setAttribute('aria-valuenow', String(Math.round(guide.percent)));
+        }
+        if (next) {
+            next.textContent = guide.nextTitle
+                ? ((de ? 'Danach: ' : 'Next: ') + guide.nextTitle + (guide.nextRange ? ' · ' + guide.nextRange : ''))
+                : '';
+        }
+    }
+
+    function buildRow(item, index, de, shown, search) {
+        var guide = guideOf(item);
+        var row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'jf-livetv-row';
+        row.setAttribute('role', 'listitem');
+        row.setAttribute('data-id', item.Id || '');
+        row.setAttribute('data-type', item.Type || (guide.folder ? 'Folder' : 'TvChannel'));
+        row.tabIndex = 0;
+        var logo = document.createElement('div');
+        logo.className = 'jf-livetv-logo';
+        var url = posterUrl(item);
+        if (url) {
+            logo.style.backgroundImage = "url('" + String(url).replace(/'/g, '%27') + "')";
+        }
+        var sender = document.createElement('div');
+        sender.className = 'jf-livetv-sender';
+        var number = item.Number || item.ChannelNumber || '';
+        sender.textContent = number ? number + '  ' + guide.channelName : guide.channelName;
+        var now = document.createElement('div');
+        now.className = 'jf-livetv-now';
+        now.appendChild(document.createElement('div')).className = 'jf-livetv-show';
+        now.appendChild(document.createElement('div')).className = 'jf-livetv-times';
+        var bar = document.createElement('div');
+        bar.className = 'jf-livetv-bar';
+        bar.setAttribute('role', 'progressbar');
+        bar.setAttribute('aria-valuemin', '0');
+        bar.setAttribute('aria-valuemax', '100');
+        bar.appendChild(document.createElement('span'));
+        now.appendChild(bar);
+        var next = document.createElement('div');
+        next.className = 'jf-livetv-next';
+        row.appendChild(logo);
+        row.appendChild(sender);
+        row.appendChild(now);
+        row.appendChild(next);
+        applyGuide(row, item, de);
+        row.addEventListener('click', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            play(item, shown);
+        });
+        if (index === 0 && document.activeElement !== search) {
+            window.setTimeout(function () { row.focus(); }, 40);
+        }
+        return row;
+    }
+
+    function updateProgress(box, shown) {
+        var de = german();
+        var byId = {};
+        shown.forEach(function (item) {
+            if (item && item.Id) {
+                byId[item.Id] = item;
+            }
+        });
+        var rows = box.querySelectorAll('.jf-livetv-row');
+        var i;
+        for (i = 0; i < rows.length; i++) {
+            var item = byId[rows[i].getAttribute('data-id')];
+            if (item) {
+                applyGuide(rows[i], item, de);
+            }
+        }
+    }
+
+    function render(mode) {
         var box = ensure();
-        box.innerHTML = '';
         var de = german();
         var shown = visibleItems();
+        if (mode === 'progress' && box.querySelector('.jf-livetv-list')) {
+            updateProgress(box, shown);
+            return;
+        }
+        paintToken += 1;
+        var token = paintToken;
+        box.innerHTML = '';
         var head = document.createElement('div');
         head.className = 'jf-livetv-head';
         var title = document.createElement('div');
@@ -347,6 +459,9 @@
         var list = document.createElement('div');
         list.className = 'jf-livetv-list';
         list.setAttribute('role', 'list');
+        box.appendChild(head);
+        box.appendChild(cols);
+        box.appendChild(list);
         if (!shown.length) {
             var empty = document.createElement('div');
             empty.className = 'jf-livetv-empty';
@@ -362,80 +477,26 @@
                     : 'No channels. Check the tuner and guide on the server.';
             }
             list.appendChild(empty);
+            return;
         }
-        shown.forEach(function (item, index) {
-            var guide = guideOf(item);
-            var row = document.createElement('button');
-            row.type = 'button';
-            row.className = 'jf-livetv-row';
-            row.setAttribute('role', 'listitem');
-            row.setAttribute('data-id', item.Id || '');
-            row.setAttribute('data-type', item.Type || (guide.folder ? 'Folder' : 'TvChannel'));
-            row.tabIndex = 0;
-            var logo = document.createElement('div');
-            logo.className = 'jf-livetv-logo';
-            var url = posterUrl(item);
-            if (url) {
-                logo.style.backgroundImage = "url('" + String(url).replace(/'/g, '%27') + "')";
+        var offset = 0;
+        function paintChunk() {
+            if (token !== paintToken) {
+                return;
             }
-            var sender = document.createElement('div');
-            sender.className = 'jf-livetv-sender';
-            var number = item.Number || item.ChannelNumber || '';
-            sender.textContent = number ? number + '  ' + guide.channelName : guide.channelName;
-            var now = document.createElement('div');
-            now.className = 'jf-livetv-now';
-            var show = document.createElement('div');
-            show.className = 'jf-livetv-show';
-            var times = document.createElement('div');
-            times.className = 'jf-livetv-times';
-            var bar = document.createElement('div');
-            bar.className = 'jf-livetv-bar';
-            var fill = document.createElement('span');
-            if (guide.folder) {
-                show.textContent = guide.folderLine || (de ? 'Ordner' : 'Folder');
-                times.textContent = '';
-            } else {
-                show.textContent = guide.nowTitle
-                    ? ((de ? 'Jetzt: ' : 'Now: ') + guide.nowTitle)
-                    : (de ? 'Keine EPG-Daten' : 'No guide data');
-                times.textContent = guide.nowRange;
-                if (guide.percent != null) {
-                    fill.style.width = guide.percent + '%';
-                    bar.setAttribute('aria-valuenow', String(Math.round(guide.percent)));
-                    bar.setAttribute('role', 'progressbar');
-                    bar.setAttribute('aria-valuemin', '0');
-                    bar.setAttribute('aria-valuemax', '100');
-                    bar.appendChild(fill);
-                }
+            var end = Math.min(offset + ROW_CHUNK, shown.length);
+            var i;
+            for (i = offset; i < end; i++) {
+                list.appendChild(buildRow(shown[i], i, de, shown, search));
             }
-            now.appendChild(show);
-            now.appendChild(times);
-            if (fill.parentNode) {
-                now.appendChild(bar);
+            offset = end;
+            if (offset < shown.length && typeof window.requestAnimationFrame === 'function') {
+                window.requestAnimationFrame(paintChunk);
+            } else if (offset < shown.length) {
+                window.setTimeout(paintChunk, 0);
             }
-            var next = document.createElement('div');
-            next.className = 'jf-livetv-next';
-            if (!guide.folder && guide.nextTitle) {
-                next.textContent = (de ? 'Danach: ' : 'Next: ') + guide.nextTitle +
-                    (guide.nextRange ? ' · ' + guide.nextRange : '');
-            }
-            row.appendChild(logo);
-            row.appendChild(sender);
-            row.appendChild(now);
-            row.appendChild(next);
-            row.addEventListener('click', function (event) {
-                event.preventDefault();
-                event.stopPropagation();
-                play(item, shown);
-            });
-            list.appendChild(row);
-            if (index === 0 && document.activeElement !== search) {
-                window.setTimeout(function () { row.focus(); }, 40);
-            }
-        });
-        box.appendChild(head);
-        box.appendChild(cols);
-        box.appendChild(list);
+        }
+        paintChunk();
     }
 
     function show(on) {
@@ -456,7 +517,7 @@
         if (on && !tickTimer) {
             tickTimer = window.setInterval(function () {
                 if (owned && items.length) {
-                    render();
+                    render('progress');
                 }
             }, 15000);
         }

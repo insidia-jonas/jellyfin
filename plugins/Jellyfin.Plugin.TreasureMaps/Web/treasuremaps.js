@@ -141,9 +141,28 @@
                 if (item.Type === 'Channel' || item.ChannelId) {
                     var page = visiblePage();
                     if (page) { page.classList.add('tmChannelPage'); }
+                    retryEmptyChannelFolder(item);
                 }
             }).catch(function () { });
         }
+    }
+
+    function retryEmptyChannelFolder(item) {
+        if (!item || !item.Id || isDownloadsFolder(item) || isDownloadItem(item)) {
+            return;
+        }
+        api().getItems(api().getCurrentUserId(), { ParentId: item.Id, Limit: 40 }).then(function (result) {
+            if (result && result.Items && result.Items.length) {
+                return;
+            }
+            window.setTimeout(function () {
+                api().getItems(api().getCurrentUserId(), { ParentId: item.Id, Limit: 40 }).then(function (again) {
+                    if (again && again.Items && again.Items.length && /list\?parentId=/i.test(location.hash || '')) {
+                        location.reload();
+                    }
+                }).catch(function () { });
+            }, 2500);
+        }).catch(function () { });
     }
 
     function visiblePage() {
@@ -449,17 +468,23 @@
             return;
         }
 
-        api().getItems(api().getCurrentUserId(), { ParentId: item.Id, Fields: 'ProviderIds,Overview' }).then(function (result) {
-            var releases = pickReleases(result.Items || []);
-            if (!releases.length) {
-                if (isDownloadItem(item)) { enhanceDownloadDetail(item); }
-                return;
-            }
+        function loadReleases(attempt) {
+            api().getItems(api().getCurrentUserId(), { ParentId: item.Id, Fields: 'ProviderIds,Overview' }).then(function (result) {
+                var releases = pickReleases(result.Items || []);
+                if (!releases.length) {
+                    if (isDownloadItem(item)) { enhanceDownloadDetail(item); return; }
+                    if ((attempt || 0) < 1) {
+                        window.setTimeout(function () { loadReleases(1); }, 2500);
+                    }
+                    return;
+                }
 
-            whenReady(childrenSelectors(), 28, function (page) {
-                renderReleaseList(page, item, releases);
-            });
-        }).catch(function () { });
+                whenReady(childrenSelectors(), 28, function (page) {
+                    renderReleaseList(page, item, releases);
+                });
+            }).catch(function () { });
+        }
+        loadReleases(0);
     }
 
     function pickReleases(items) {
@@ -750,9 +775,26 @@
             return;
         }
 
-        rows.forEach(function (row) {
-            host.appendChild(buildDownloadRow(row.child, row.entry, status && status.speed));
-        });
+        var offset = 0;
+        var token = (host.getAttribute('data-tm-paint') || '0') * 1 + 1;
+        host.setAttribute('data-tm-paint', String(token));
+        function paintChunk() {
+            if (String(token) !== host.getAttribute('data-tm-paint')) {
+                return;
+            }
+            var end = Math.min(offset + 16, rows.length);
+            var i;
+            for (i = offset; i < end; i++) {
+                host.appendChild(buildDownloadRow(rows[i].child, rows[i].entry, status && status.speed));
+            }
+            offset = end;
+            if (offset < rows.length && typeof window.requestAnimationFrame === 'function') {
+                window.requestAnimationFrame(paintChunk);
+            } else if (offset < rows.length) {
+                window.setTimeout(paintChunk, 0);
+            }
+        }
+        paintChunk();
     }
 
     function matchChild(children, entry) {

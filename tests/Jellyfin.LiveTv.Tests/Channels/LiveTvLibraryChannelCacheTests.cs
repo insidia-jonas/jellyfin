@@ -1,13 +1,21 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.LiveTv.Channels;
 using Jellyfin.LiveTv.Tests;
+using Jellyfin.LiveTv.TunerHosts;
+using MediaBrowser.Controller;
 using MediaBrowser.Controller.Channels;
+using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.LiveTv;
+using MediaBrowser.Model.Dto;
+using MediaBrowser.Model.IO;
+using MediaBrowser.Model.LiveTv;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -46,6 +54,67 @@ public sealed class LiveTvLibraryChannelCacheTests
         var after = channel.GetCacheKey(null);
 
         Assert.NotEqual(before, after);
+    }
+
+    [Fact]
+    public async Task GetChannelItems_Snapshot_DoesNotAwaitPlaylistHttp()
+    {
+        var cachePath = Path.Combine(Path.GetTempPath(), "jf-livetv-hang-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(cachePath);
+        var tuner = new TunerHostInfo
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Type = "test",
+            Url = "https://cdn.example/playlist.m3u"
+        };
+        var host = CreateBlockedHost(cachePath, tuner);
+        host.SeedListingSnapshot(tuner.Id, new M3uListingSnapshot
+        {
+            Channels = [new ChannelInfo { Id = "old", Name = "Old", ChannelGroup = "News" }],
+            PlaylistUrl = tuner.Url,
+            FetchedUtc = DateTime.UtcNow.AddMinutes(-90)
+        });
+        host.BlockNextRefresh();
+
+        var manager = new Mock<ITunerHostManager>();
+        manager.Setup(m => m.TunerHosts).Returns([host]);
+        var channel = CreateChannel(manager.Object, Mock.Of<ILibraryManager>());
+
+        var clock = Stopwatch.StartNew();
+        var result = await channel.GetChannelItems(new InternalChannelItemQuery(), CancellationToken.None);
+        clock.Stop();
+
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(1));
+        Assert.Contains(result.Items, item => item.Name == "News" || item.Id.Contains("News", StringComparison.Ordinal));
+        Assert.Equal(0, host.CompletedRefreshes);
+        host.ReleaseRefresh.TrySetResult();
+    }
+
+    [Fact]
+    public async Task GetChannelItems_ColdStart_DoesNotAwaitPlaylistHttp()
+    {
+        var cachePath = Path.Combine(Path.GetTempPath(), "jf-livetv-cold-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(cachePath);
+        var tuner = new TunerHostInfo
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Type = "test",
+            Url = "https://cdn.example/playlist.m3u"
+        };
+        var host = CreateBlockedHost(cachePath, tuner);
+        host.BlockNextRefresh();
+
+        var manager = new Mock<ITunerHostManager>();
+        manager.Setup(m => m.TunerHosts).Returns([host]);
+        var channel = CreateChannel(manager.Object, Mock.Of<ILibraryManager>());
+
+        var clock = Stopwatch.StartNew();
+        var result = await channel.GetChannelItems(new InternalChannelItemQuery(), CancellationToken.None);
+        clock.Stop();
+
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(1));
+        Assert.Empty(result.Items);
+        Assert.Equal(0, host.CompletedRefreshes);
     }
 
     [Fact]
@@ -122,4 +191,68 @@ public sealed class LiveTvLibraryChannelCacheTests
 
     private static LiveTvLibraryChannel CreateChannel(ITunerHostManager tuners, ILibraryManager library)
         => new(tuners, library, Mock.Of<IUserManager>(), NullLogger<LiveTvLibraryChannel>.Instance);
+
+    private static HangTunerHost CreateBlockedHost(string cachePath, TunerHostInfo tuner)
+    {
+        var paths = new Mock<IServerApplicationPaths>();
+        paths.Setup(p => p.CachePath).Returns(cachePath);
+        var config = new Mock<IServerConfigurationManager>();
+        config.Setup(c => c.ApplicationPaths).Returns(paths.Object);
+        config.Setup(c => c.GetConfiguration("livetv")).Returns(new LiveTvOptions { TunerHosts = [tuner] });
+        return new HangTunerHost(config.Object);
+    }
+
+    private sealed class HangTunerHost : BaseTunerHost, ITunerHost
+    {
+        public HangTunerHost(IServerConfigurationManager config)
+            : base(config, NullLogger<BaseTunerHost>.Instance, Mock.Of<IFileSystem>())
+        {
+        }
+
+        public string Name => "test";
+
+        public override string Type => "test";
+
+        public int CompletedRefreshes { get; private set; }
+
+        public TaskCompletionSource ReleaseRefresh { get; private set; } = CompletedSource();
+
+        public Task<List<TunerHostInfo>> DiscoverDevices(int discoveryDurationMs, CancellationToken cancellationToken)
+            => Task.FromResult(new List<TunerHostInfo>());
+
+        public void BlockNextRefresh()
+        {
+            ReleaseRefresh = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        private static TaskCompletionSource CompletedSource()
+        {
+            var source = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            source.TrySetResult();
+            return source;
+        }
+
+        protected override Task<List<ChannelInfo>> GetChannelsInternal(TunerHostInfo tuner, CancellationToken cancellationToken)
+            => Task.FromResult(new List<ChannelInfo>());
+
+        internal override async Task<M3uListingRefreshResult> RefreshListingAsync(
+            TunerHostInfo tuner,
+            M3uListingSnapshot previous,
+            CancellationToken cancellationToken)
+        {
+            await ReleaseRefresh.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            CompletedRefreshes++;
+            return new M3uListingRefreshResult
+            {
+                Channels = [new ChannelInfo { Id = "new", Name = "New" }],
+                PlaylistUrl = tuner.Url
+            };
+        }
+
+        protected override Task<List<MediaSourceInfo>> GetChannelStreamMediaSources(TunerHostInfo tuner, ChannelInfo channel, CancellationToken cancellationToken)
+            => Task.FromResult(new List<MediaSourceInfo>());
+
+        protected override Task<ILiveStream> GetChannelStream(TunerHostInfo tunerHost, ChannelInfo channel, string streamId, IList<ILiveStream> currentLiveStreams, CancellationToken cancellationToken)
+            => throw new NotSupportedException();
+    }
 }

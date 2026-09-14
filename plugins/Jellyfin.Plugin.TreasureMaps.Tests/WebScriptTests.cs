@@ -49,6 +49,8 @@ public class WebScriptTests
         Assert.Contains("andere inhalte", js, StringComparison.Ordinal);
         Assert.Contains("hideNativeChildren", js, StringComparison.Ordinal);
         Assert.Contains("pickReleases", js, StringComparison.Ordinal);
+        Assert.Contains("retryEmptyChannelFolder", js, StringComparison.Ordinal);
+        Assert.Contains("requestAnimationFrame", js, StringComparison.Ordinal);
         Assert.Contains("looksEpisodeOrSeason", js, StringComparison.Ordinal);
         Assert.Contains("item.Type === 'BoxSet' || item.Type === 'Season' || looksEpisodeOrSeason(item)", js, StringComparison.Ordinal);
         Assert.Contains("buildEpisodeRow", js, StringComparison.Ordinal);
@@ -83,12 +85,12 @@ public class WebScriptTests
         var html = "<html><body>hi</body></html>";
         var first = WebScriptInjector.ApplyScriptTag(html);
         Assert.NotNull(first);
-        Assert.Contains("TreasureMaps/ClientScript?v=9", first, StringComparison.Ordinal);
+        Assert.Contains("TreasureMaps/ClientScript?v=10", first, StringComparison.Ordinal);
 
-        var stale = first!.Replace("ClientScript?v=9", "ClientScript?v=3", StringComparison.Ordinal);
+        var stale = first!.Replace("ClientScript?v=10", "ClientScript?v=3", StringComparison.Ordinal);
         var upgraded = WebScriptInjector.ApplyScriptTag(stale);
         Assert.NotNull(upgraded);
-        Assert.Contains("ClientScript?v=9", upgraded, StringComparison.Ordinal);
+        Assert.Contains("ClientScript?v=10", upgraded, StringComparison.Ordinal);
         Assert.Equal(1, CountOccurrences(upgraded!, "plugin=\"TreasureMaps\""));
     }
 

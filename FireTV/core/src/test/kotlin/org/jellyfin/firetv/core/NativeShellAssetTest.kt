@@ -63,6 +63,8 @@ class NativeShellAssetTest {
         assertTrue(live.contains("progressOf"))
         assertTrue(live.contains("NextProgram"))
         assertTrue(live.contains("jf-livetv-overview"))
+        assertTrue(live.contains("requestAnimationFrame"))
+        assertTrue(live.contains("injectedOwns()"))
         assertTrue(live.contains("firetv-live-bar"))
         assertFalse(live.contains("rewriteArtwork"))
         assertFalse(live.contains("getScaledImageUrl"))
