@@ -25,6 +25,8 @@
     var tickTimer = 0;
     var refreshTimer = 0;
     var syncTimer = 0;
+    var modeTimer = 0;
+    var wasPlaying = false;
     var paintToken = 0;
     var emptyRetry = 0;
     var EMPTY_RETRY_MS = [1500, 3000, 6000, 12000];
@@ -376,6 +378,22 @@
         return !!(box && host && host.contains(box));
     }
 
+    /* jellyfin-web keeps .videoOsdBottom mounted with display:none once a video has
+       ever played, so testing for the node alone left the list hidden behind a blank
+       page for the rest of the session. Only a node that actually occupies the screen
+       counts as playback. */
+    function onScreen(element) {
+        if (!element) {
+            return false;
+        }
+        var rect = element.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) {
+            return false;
+        }
+        var style = window.getComputedStyle(element);
+        return style.display !== 'none' && style.visibility !== 'hidden';
+    }
+
     /* The library page stays mounted underneath a running player, so the sender
        list would paint on top of the picture. */
     function playbackVisible() {
@@ -385,9 +403,20 @@
         if (/#\/?video(\?|$)/i.test(hashLower())) {
             return true;
         }
-        return !!document.querySelector('.videoPlayerContainer, .videoOsdBottom');
+        var nodes = document.querySelectorAll('.videoPlayerContainer, .videoOsdBottom');
+        var i;
+        for (i = 0; i < nodes.length; i++) {
+            if (onScreen(nodes[i])) {
+                return true;
+            }
+        }
+        return false;
     }
 
+    /* Leaving the player is not a DOM mutation the list can rely on: jellyfin-web
+       navigates with the History API and an idle page stops mutating, so a stuck
+       jf-livetv-playing used to leave the senders hidden behind a blank page until
+       the two-minute refresh. Repaint as soon as the picture goes away. */
     function applyListMode() {
         var playing = playbackVisible();
         document.documentElement.classList.toggle('jf-livetv-playing', playing);
@@ -395,6 +424,13 @@
         if (owned && !playing) {
             hideLibrarySpinner();
         }
+        if (wasPlaying && !playing) {
+            lastKey = '';
+            window.clearTimeout(syncTimer);
+            syncTimer = window.setTimeout(sync, 0);
+        }
+        wasPlaying = playing;
+        return playing;
     }
 
     function ensure() {
@@ -1542,6 +1578,10 @@
             lastKey = '';
             sync();
         });
+        window.addEventListener('popstate', function () {
+            lastKey = '';
+            sync();
+        });
         var observer = new MutationObserver(function () {
             if (owned) {
                 if (playbackVisible()) {
@@ -1567,6 +1607,8 @@
         if (document.documentElement) {
             observer.observe(document.documentElement, { childList: true, subtree: true });
         }
+        window.clearInterval(modeTimer);
+        modeTimer = window.setInterval(applyListMode, 1000);
         window.clearInterval(refreshTimer);
         refreshTimer = window.setInterval(function () {
             if (owned) {
