@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -9,6 +10,7 @@ using System.Threading.Tasks;
 using System.Web;
 using Jellyfin.Plugin.TreasureMaps.Api;
 using Jellyfin.Plugin.TreasureMaps.Configuration;
+using Jellyfin.Plugin.TreasureMaps.Listing;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.TreasureMaps;
@@ -19,16 +21,6 @@ namespace Jellyfin.Plugin.TreasureMaps;
 public class TreasureMapsApiClient
 {
     private static readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
-
-    // Short-lived in-memory response cache keyed by request URL. Channel navigation re-fetches the
-    // same lists constantly (root -> category -> back), and the indexer is slow (~2-5s per search
-    // page) and rate-limits rapid calls, so caching makes browsing feel instant instead of static.
-    // Entries are kept beyond their freshness window: when the indexer errors (it 503s whole
-    // periods when rate-limited), the last known good response is served instead of a blank view.
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTimeOffset FreshUntil, object Value)> _cache = new();
-    private static readonly TimeSpan SearchCacheTtl = TimeSpan.FromMinutes(5);
-    private static readonly TimeSpan LiveSearchCacheTtl = TimeSpan.FromSeconds(20);
-    private static readonly TimeSpan CapsCacheTtl = TimeSpan.FromHours(1);
 
     /// <summary>
     /// Browse lists (<c>q=*</c> / empty / one letter) stay cached for minutes. Typed queries
@@ -42,10 +34,10 @@ public class TreasureMapsApiClient
             || string.Equals(query, "*", StringComparison.Ordinal)
             || query.Trim().Length < 2)
         {
-            return SearchCacheTtl;
+            return TreasureMapsListingCache.BrowseFreshTtl;
         }
 
-        return LiveSearchCacheTtl;
+        return TreasureMapsListingCache.LiveSearchFreshTtl;
     }
 
     // Treasure-Maps category ids (movies/TV incl. language variants). Without a category the
@@ -61,16 +53,22 @@ public class TreasureMapsApiClient
     public const string GermanTvCategories = "5100";
 
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly TreasureMapsListingCache _listingCache;
     private readonly ILogger<TreasureMapsApiClient> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TreasureMapsApiClient"/> class.
     /// </summary>
     /// <param name="httpClientFactory">The HTTP client factory.</param>
+    /// <param name="listingCache">The freshness-gated snapshot cache.</param>
     /// <param name="logger">The logger.</param>
-    public TreasureMapsApiClient(IHttpClientFactory httpClientFactory, ILogger<TreasureMapsApiClient> logger)
+    public TreasureMapsApiClient(
+        IHttpClientFactory httpClientFactory,
+        TreasureMapsListingCache listingCache,
+        ILogger<TreasureMapsApiClient> logger)
     {
         _httpClientFactory = httpClientFactory;
+        _listingCache = listingCache;
         _logger = logger;
     }
 
@@ -175,7 +173,7 @@ public class TreasureMapsApiClient
             ["type"] = type,
             ["limit"] = limit.ToString(CultureInfo.InvariantCulture)
         };
-        return GetJsonAsync<ReleaseListResponse>("trending", parameters, SearchCacheTtl, cancellationToken);
+        return GetJsonAsync<ReleaseListResponse>("trending", parameters, TreasureMapsListingCache.BrowseFreshTtl, cancellationToken);
     }
 
     /// <summary>
@@ -196,7 +194,7 @@ public class TreasureMapsApiClient
             ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
             ["extended"] = "1"
         };
-        return GetJsonAsync<ReleaseListResponse>("spotlight", parameters, TimeSpan.FromMinutes(30), cancellationToken);
+        return GetJsonAsync<ReleaseListResponse>("spotlight", parameters, TreasureMapsListingCache.SpotlightFreshTtl, cancellationToken);
     }
 
     /// <summary>
@@ -205,7 +203,7 @@ public class TreasureMapsApiClient
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The capabilities response.</returns>
     public Task<CapsResponse?> GetCapsAsync(CancellationToken cancellationToken)
-        => GetJsonAsync<CapsResponse>("caps", null, CapsCacheTtl, cancellationToken);
+        => GetJsonAsync<CapsResponse>("caps", null, TreasureMapsListingCache.CapsFreshTtl, cancellationToken);
 
     /// <summary>
     /// Gets information about the current user (used to validate the configuration).
@@ -242,39 +240,57 @@ public class TreasureMapsApiClient
         }
 
         var url = BuildUrl(path, parameters);
-        (DateTimeOffset FreshUntil, object Value) cached = default;
-        var hasCached = cacheTtl > TimeSpan.Zero && _cache.TryGetValue(url, out cached);
-        if (hasCached && cached.FreshUntil > DateTimeOffset.UtcNow && cached.Value is T hit)
+        if (cacheTtl <= TimeSpan.Zero)
         {
-            return hit;
+            var (value, _, notModified) = await SendJsonAsync<T>(url, null, cancellationToken).ConfigureAwait(false);
+            return notModified ? null : value;
         }
 
-        try
-        {
-            using var client = CreateClient();
-            _logger.LogDebug("Treasure-Maps request: {Url}", url);
-
-            using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
-            var result = await response.Content.ReadFromJsonAsync<T>(_jsonOptions, cancellationToken).ConfigureAwait(false);
-
-            if (cacheTtl > TimeSpan.Zero && result is not null)
+        return await _listingCache.GetOrFetchAsync<T>(
+            url,
+            cacheTtl,
+            async (validator, token) =>
             {
-                if (_cache.Count > 500)
+                var (value, etag, notModified) = await SendJsonAsync<T>(url, validator, token).ConfigureAwait(false);
+                if (notModified)
                 {
-                    _cache.Clear();
+                    return ListingFetch<T>.Validated(etag);
                 }
 
-                _cache[url] = (DateTimeOffset.UtcNow.Add(cacheTtl), result);
-            }
+                if (value is null || TreasureMapsListingCache.IsEmptyListing(value))
+                {
+                    return ListingFetch<T>.DoNotStore(value);
+                }
 
-            return result;
-        }
-        catch (Exception ex) when (hasCached && cached.Value is T stale)
+                return ListingFetch<T>.Store(value, etag, TreasureMapsListingCache.HashPayload(value));
+            },
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<(T? Value, string? ETag, bool NotModified)> SendJsonAsync<T>(
+        string url,
+        string? validator,
+        CancellationToken cancellationToken)
+        where T : class
+    {
+        using var client = CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        if (!string.IsNullOrEmpty(validator))
         {
-            _logger.LogWarning(ex, "Treasure-Maps request failed; serving the last known response for {Url}", url);
-            return stale;
+            request.Headers.TryAddWithoutValidation("If-None-Match", validator);
         }
+
+        _logger.LogDebug("Treasure-Maps request: {Url}", url);
+        using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.NotModified)
+        {
+            return (null, validator, true);
+        }
+
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<T>(_jsonOptions, cancellationToken).ConfigureAwait(false);
+        var etag = response.Headers.ETag?.Tag;
+        return (result, etag, false);
     }
 
     private HttpClient CreateClient()

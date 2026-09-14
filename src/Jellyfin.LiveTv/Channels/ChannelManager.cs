@@ -1,6 +1,7 @@
 #nullable disable
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -51,7 +52,13 @@ namespace Jellyfin.LiveTv.Channels
         private readonly IFileSystem _fileSystem;
         private readonly IProviderManager _providerManager;
         private readonly IMemoryCache _memoryCache;
-        private readonly AsyncNonKeyedLocker _resourcePool = new(1);
+        private readonly AsyncKeyedLocker<string> _folderLocks = new(o =>
+        {
+            o.PoolSize = 20;
+            o.PoolInitialFill = 1;
+        });
+
+        private readonly ConcurrentDictionary<string, byte> _liveTvFolderSyncs = new(StringComparer.Ordinal);
         private readonly JsonSerializerOptions _jsonOptions = JsonDefaults.Options;
         private bool _disposed = false;
 
@@ -407,7 +414,9 @@ namespace Jellyfin.LiveTv.Channels
 
         private async Task<IEnumerable<MediaSourceInfo>> GetChannelItemMediaSourcesInternal(IRequiresMediaInfoCallback channel, string id, CancellationToken cancellationToken)
         {
-            if (_memoryCache.TryGetValue(id, out List<MediaSourceInfo> cachedInfo))
+            if (!string.IsNullOrWhiteSpace(id)
+                && _memoryCache.TryGetValue(id, out List<MediaSourceInfo> cachedInfo)
+                && LiveTvLibraryChannelPlayback.ShouldCacheChannelItemMediaSources(id, cachedInfo))
             {
                 return cachedInfo;
             }
@@ -415,7 +424,10 @@ namespace Jellyfin.LiveTv.Channels
             var mediaInfo = await channel.GetChannelItemMediaInfo(id, cancellationToken)
                    .ConfigureAwait(false);
             var list = mediaInfo.ToList();
-            _memoryCache.Set(id, list, DateTimeOffset.UtcNow.AddMinutes(5));
+            if (LiveTvLibraryChannelPlayback.ShouldCacheChannelItemMediaSources(id, list))
+            {
+                _memoryCache.Set(id, list, DateTimeOffset.UtcNow.AddMinutes(5));
+            }
 
             return list;
         }
@@ -833,6 +845,15 @@ namespace Jellyfin.LiveTv.Channels
                 ? channel
                 : _libraryManager.GetItemById(query.ParentId);
 
+            if (parentItem is null)
+            {
+                parentItem = TryResolveUnpersistedLiveTvParent(query.ParentId, channel, channelProvider);
+                if (parentItem is null)
+                {
+                    return new QueryResult<BaseItem>();
+                }
+            }
+
             var itemsResult = await GetChannelItems(
                 channelProvider,
                 query.User,
@@ -853,44 +874,79 @@ namespace Jellyfin.LiveTv.Channels
             query.GroupByPresentationUniqueKey = false;
 
             // null if came from cache
+            IReadOnlyList<BaseItem> existingChildren = Array.Empty<BaseItem>();
             if (itemsResult is not null)
             {
-                var items = itemsResult.Items;
-                var itemsLen = items.Count;
-                var internalItems = new Guid[itemsLen];
-                for (int i = 0; i < itemsLen; i++)
+                try
                 {
-                    internalItems[i] = (await GetChannelItemEntityAsync(
-                        items[i],
+                    existingChildren = _libraryManager.GetItemList(new InternalItemsQuery
+                    {
+                        Parent = parentItem,
+                        Recursive = false,
+                        EnableTotalRecordCount = false
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Could not list existing channel folder items");
+                }
+
+                var existingMatch = ChannelManagerBrowse.ExistingItemsMatch(
+                    ChannelManagerBrowse.ExternalIds(existingChildren),
+                    itemsResult.Items);
+                var paint = ChannelManagerBrowse.DecidePaint(
+                    channelProvider,
+                    itemsResult,
+                    existingChildren.Count > 0,
+                    existingMatch);
+
+                if (paint == ChannelFolderPaint.PendingEmpty)
+                {
+                    return new QueryResult<BaseItem>();
+                }
+
+                if (paint == ChannelFolderPaint.PaintIncoming)
+                {
+                    ScheduleLiveTvFolderSync(channelProvider, channel.Id, parentItem, itemsResult.Items);
+                    var painted = PaintLiveTvSnapshot(itemsResult.Items, channelProvider, channel.Id, parentItem, query);
+                    if (channelProvider is IChannelPresentationOverlay snapshotOverlay)
+                    {
+                        snapshotOverlay.OverlayPresentation(painted.Items);
+                    }
+
+                    return painted;
+                }
+
+                if (paint == ChannelFolderPaint.ReuseExisting)
+                {
+                    if (ChannelManagerBrowse.IsLiveTvOverlay(channelProvider)
+                        && ChannelManagerBrowse.HasIncomingItems(itemsResult)
+                        && !existingMatch)
+                    {
+                        ScheduleLiveTvFolderSync(channelProvider, channel.Id, parentItem, itemsResult.Items);
+                    }
+
+                    _logger.LogDebug("Reusing {Count} channel items without rewrite for {Channel}", existingChildren.Count, channelProvider.Name);
+                }
+                else
+                {
+                    await RewriteChannelFolderAsync(
+                        itemsResult.Items,
                         channelProvider,
                         channel.Id,
                         parentItem,
-                        cancellationToken).ConfigureAwait(false)).Id;
-                }
-
-                var existingIds = _libraryManager.GetItemIds(query);
-                var deadIds = existingIds.Except(internalItems)
-                    .ToArray();
-
-                foreach (var deadId in deadIds)
-                {
-                    var deadItem = _libraryManager.GetItemById(deadId);
-                    if (deadItem is not null)
-                    {
-                        _libraryManager.DeleteItem(
-                            deadItem,
-                            new DeleteOptions
-                            {
-                                DeleteFileLocation = false,
-                                DeleteFromExternalProvider = false
-                            },
-                            parentItem,
-                            false);
-                    }
+                        query,
+                        cancellationToken).ConfigureAwait(false);
                 }
             }
 
-            return _libraryManager.GetItemsResult(query);
+            var result = _libraryManager.GetItemsResult(query);
+            if (channelProvider is IChannelPresentationOverlay overlay)
+            {
+                overlay.OverlayPresentation(result.Items);
+            }
+
+            return result;
         }
 
         /// <inheritdoc />
@@ -920,55 +976,26 @@ namespace Jellyfin.LiveTv.Channels
 
             var cacheLength = CacheLength;
             var cachePath = GetChannelDataCachePath(channel, userId, externalFolderId, sortField, sortDescending);
+            var bypassDiskCache = ChannelManagerBrowse.BypassDiskCache(channel);
 
-            try
+            if (!bypassDiskCache)
             {
-                if (_fileSystem.GetLastWriteTimeUtc(cachePath).Add(cacheLength) > DateTime.UtcNow)
+                var cached = await TryReadChannelDiskCache(cachePath, cacheLength, cancellationToken).ConfigureAwait(false);
+                if (cached)
                 {
-                    var jsonStream = AsyncFile.OpenRead(cachePath);
-                    await using (jsonStream.ConfigureAwait(false))
-                    {
-                        var cachedResult = await JsonSerializer
-                            .DeserializeAsync<ChannelItemResult>(jsonStream, _jsonOptions, cancellationToken)
-                            .ConfigureAwait(false);
-                        if (cachedResult is not null)
-                        {
-                            return null;
-                        }
-                    }
+                    return null;
                 }
-            }
-            catch (FileNotFoundException)
-            {
-            }
-            catch (IOException)
-            {
             }
 
-            using (await _resourcePool.LockAsync(cancellationToken).ConfigureAwait(false))
+            using (await _folderLocks.LockAsync(cachePath, cancellationToken).ConfigureAwait(false))
             {
-                try
+                if (!bypassDiskCache)
                 {
-                    if (_fileSystem.GetLastWriteTimeUtc(cachePath).Add(cacheLength) > DateTime.UtcNow)
+                    var cached = await TryReadChannelDiskCache(cachePath, cacheLength, cancellationToken).ConfigureAwait(false);
+                    if (cached)
                     {
-                        var jsonStream = AsyncFile.OpenRead(cachePath);
-                        await using (jsonStream.ConfigureAwait(false))
-                        {
-                            var cachedResult = await JsonSerializer
-                                .DeserializeAsync<ChannelItemResult>(jsonStream, _jsonOptions, cancellationToken)
-                                .ConfigureAwait(false);
-                            if (cachedResult is not null)
-                            {
-                                return null;
-                            }
-                        }
+                        return null;
                     }
-                }
-                catch (FileNotFoundException)
-                {
-                }
-                catch (IOException)
-                {
                 }
 
                 var query = new InternalChannelItemQuery
@@ -988,10 +1015,42 @@ namespace Jellyfin.LiveTv.Channels
                     throw new InvalidOperationException("Channel returned a null result from GetChannelItems");
                 }
 
-                await CacheResponse(result, cachePath).ConfigureAwait(false);
+                if (!ChannelManagerBrowse.IsRefreshPending(result) && !bypassDiskCache)
+                {
+                    await CacheResponse(result, cachePath).ConfigureAwait(false);
+                }
 
                 return result;
             }
+        }
+
+        private async Task<bool> TryReadChannelDiskCache(string cachePath, TimeSpan cacheLength, CancellationToken cancellationToken)
+        {
+            try
+            {
+                if (_fileSystem.GetLastWriteTimeUtc(cachePath).Add(cacheLength) > DateTime.UtcNow)
+                {
+                    var jsonStream = AsyncFile.OpenRead(cachePath);
+                    await using (jsonStream.ConfigureAwait(false))
+                    {
+                        var cachedResult = await JsonSerializer
+                            .DeserializeAsync<ChannelItemResult>(jsonStream, _jsonOptions, cancellationToken)
+                            .ConfigureAwait(false);
+                        if (cachedResult is not null && !cachedResult.RefreshPending)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            catch (FileNotFoundException)
+            {
+            }
+            catch (IOException)
+            {
+            }
+
+            return false;
         }
 
         private async Task CacheResponse(ChannelItemResult result, string path)
@@ -1088,6 +1147,178 @@ namespace Jellyfin.LiveTv.Channels
 
             item.Id = id;
             return item;
+        }
+
+        private BaseItem TryResolveUnpersistedLiveTvParent(Guid parentId, Channel channel, IChannel channelProvider)
+        {
+            if (parentId.IsEmpty()
+                || !ChannelManagerBrowse.IsLiveTvOverlay(channelProvider)
+                || channelProvider is not LiveTvLibraryChannel liveTv)
+            {
+                return null;
+            }
+
+            var match = ChannelManagerBrowse.FindLiveTvGroupByLibraryId(
+                parentId,
+                liveTv.PeekSnapshotItems(null),
+                externalId => _libraryManager.GetNewItemId(GetIdToHash(externalId, channelProvider.Name), typeof(Folder)));
+            if (match is null)
+            {
+                return null;
+            }
+
+            var folder = GetItemById<Folder>(match.Id, channelProvider.Name, out _);
+            folder.Name = match.Name;
+            folder.ExternalId = match.Id;
+            folder.ChannelId = channel.Id;
+            return folder;
+        }
+
+        private void ScheduleLiveTvFolderSync(
+            IChannel channelProvider,
+            Guid channelId,
+            BaseItem parentItem,
+            IReadOnlyList<ChannelItemInfo> incoming)
+        {
+            if (incoming is null || incoming.Count == 0 || parentItem is null)
+            {
+                return;
+            }
+
+            var key = channelId.ToString("N", CultureInfo.InvariantCulture) + ":" + parentItem.Id.ToString("N", CultureInfo.InvariantCulture);
+            if (!_liveTvFolderSyncs.TryAdd(key, 0))
+            {
+                return;
+            }
+
+            var parentId = parentItem.Id;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var parent = _libraryManager.GetItemById(parentId) ?? parentItem;
+                    using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+                    await RewriteChannelFolderAsync(
+                        incoming,
+                        channelProvider,
+                        channelId,
+                        parent,
+                        new InternalItemsQuery { Parent = parent },
+                        cts.Token).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Background Live TV folder sync failed for {Channel}", channelProvider.Name);
+                }
+                finally
+                {
+                    _liveTvFolderSyncs.TryRemove(key, out _);
+                }
+            });
+        }
+
+        private QueryResult<BaseItem> PaintLiveTvSnapshot(
+            IReadOnlyList<ChannelItemInfo> incoming,
+            IChannel channelProvider,
+            Guid channelId,
+            BaseItem parentItem,
+            InternalItemsQuery query)
+        {
+            var painted = new List<BaseItem>(incoming.Count);
+            foreach (var info in incoming)
+            {
+                if (info is null || string.IsNullOrEmpty(info.Id))
+                {
+                    continue;
+                }
+
+                BaseItem item = info.Type == ChannelItemType.Folder
+                    ? GetItemById<Folder>(info.Id, channelProvider.Name, out _)
+                    : GetItemById<Video>(info.Id, channelProvider.Name, out _);
+                item.Name = info.Name;
+                item.ForcedSortName = info.SortName;
+                item.OriginalTitle = info.OriginalTitle;
+                item.Overview = info.Overview;
+                item.ExternalId = info.Id;
+                item.ChannelId = channelId;
+                item.ParentId = parentItem.Id;
+                item.PremiereDate = info.PremiereDate ?? info.StartDate;
+                item.EndDate = info.EndDate;
+                item.RunTimeTicks = info.IsLiveStream ? null : info.RunTimeTicks;
+                item.Tags = info.Tags is { Count: > 0 } ? info.Tags.ToArray() : ["livestream"];
+                if (info.ProviderIds is not null)
+                {
+                    foreach (var pair in info.ProviderIds)
+                    {
+                        if (!string.IsNullOrEmpty(pair.Key) && !string.IsNullOrEmpty(pair.Value))
+                        {
+                            item.SetProviderId(pair.Key, pair.Value);
+                        }
+                    }
+                }
+
+                painted.Add(item);
+            }
+
+            IReadOnlyList<BaseItem> page = painted;
+            var start = query.StartIndex.GetValueOrDefault();
+            if (start > 0 && start < painted.Count)
+            {
+                page = painted.Skip(start).ToArray();
+            }
+            else if (start >= painted.Count)
+            {
+                page = Array.Empty<BaseItem>();
+            }
+
+            if (query.Limit is > 0 && query.Limit.Value < page.Count)
+            {
+                page = page.Take(query.Limit.Value).ToArray();
+            }
+
+            return new QueryResult<BaseItem>(query.StartIndex, painted.Count, page);
+        }
+
+        private async Task RewriteChannelFolderAsync(
+            IReadOnlyList<ChannelItemInfo> items,
+            IChannel channelProvider,
+            Guid channelId,
+            BaseItem parentItem,
+            InternalItemsQuery query,
+            CancellationToken cancellationToken)
+        {
+            var itemsLen = items.Count;
+            var internalItems = new Guid[itemsLen];
+            for (int i = 0; i < itemsLen; i++)
+            {
+                internalItems[i] = (await GetChannelItemEntityAsync(
+                    items[i],
+                    channelProvider,
+                    channelId,
+                    parentItem,
+                    cancellationToken).ConfigureAwait(false)).Id;
+            }
+
+            var existingIds = _libraryManager.GetItemIds(query);
+            var deadIds = existingIds.Except(internalItems)
+                .ToArray();
+
+            foreach (var deadId in deadIds)
+            {
+                var deadItem = _libraryManager.GetItemById(deadId);
+                if (deadItem is not null)
+                {
+                    _libraryManager.DeleteItem(
+                        deadItem,
+                        new DeleteOptions
+                        {
+                            DeleteFileLocation = false,
+                            DeleteFromExternalProvider = false
+                        },
+                        parentItem,
+                        false);
+                }
+            }
         }
 
         private async Task<BaseItem> GetChannelItemEntityAsync(ChannelItemInfo info, IChannel channelProvider, Guid internalChannelId, BaseItem parentFolder, CancellationToken cancellationToken)
@@ -1307,7 +1538,8 @@ namespace Jellyfin.LiveTv.Channels
             // scraper refresh for them or the TMDB box-set provider matches them by name and
             // overwrites the title/metadata with a "... Collection" entry.
             if ((isNew || forceUpdate || item.DateLastRefreshed == DateTime.MinValue)
-                && item is not MediaBrowser.Controller.Entities.Movies.BoxSet)
+                && item is not MediaBrowser.Controller.Entities.Movies.BoxSet
+                && !info.IsLiveStream)
             {
                 _providerManager.QueueRefresh(item.Id, new MetadataRefreshOptions(new DirectoryService(_fileSystem)), RefreshPriority.Normal);
             }
@@ -1455,7 +1687,7 @@ namespace Jellyfin.LiveTv.Channels
 
             if (disposing)
             {
-                _resourcePool?.Dispose();
+                _folderLocks?.Dispose();
             }
 
             _disposed = true;

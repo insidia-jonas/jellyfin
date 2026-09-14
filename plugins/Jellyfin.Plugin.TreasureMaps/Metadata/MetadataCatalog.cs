@@ -52,6 +52,11 @@ public sealed class MetadataCatalog
 {
     private static readonly ConcurrentDictionary<string, CatalogHit?> Cache = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Drops cached IMDb/iTunes hits (language / image settings changed).
+    /// </summary>
+    public static void Clear() => Cache.Clear();
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<MetadataCatalog> _logger;
 
@@ -146,7 +151,7 @@ public sealed class MetadataCatalog
                 return;
             }
 
-            var key = group.Kind + "|" + (group.Imdb ?? string.Empty) + "|" + group.Title + "|" + (group.Year?.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
+            var key = CatalogKey(group);
             if (!Cache.TryGetValue(key, out var hit))
             {
                 hit = await LookupAsync(group, cancellationToken).ConfigureAwait(false);
@@ -194,6 +199,33 @@ public sealed class MetadataCatalog
         }
 
         group.Cover = "https://picbit.io/movies_" + numeric + "-cover.webp";
+    }
+
+    /// <summary>
+    /// Cache key for immutable card identity: IMDb id when present, otherwise title/year.
+    /// Language / OMDb settings are part of the key so a config change revalidates artwork.
+    /// </summary>
+    /// <param name="group">The title group.</param>
+    /// <returns>The catalog cache key.</returns>
+    public static string CatalogKey(ReleaseGroup group)
+    {
+        var settings = MetadataSettingsKey();
+        var imdb = ReleaseMapper.NormalizeImdbId(group.Imdb ?? string.Empty);
+        if (!string.IsNullOrWhiteSpace(imdb) && !string.Equals(imdb, "tt", StringComparison.Ordinal))
+        {
+            return settings + "|imdb:" + imdb;
+        }
+
+        return settings + "|title:" + group.Kind + "|" + group.Title + "|"
+               + (group.Year?.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
+    }
+
+    private static string MetadataSettingsKey()
+    {
+        var c = Plugin.Instance?.Configuration;
+        var lang = c?.PrimaryLanguage ?? string.Empty;
+        var omdb = string.IsNullOrWhiteSpace(c?.OmdbApiKey) ? "0" : "1";
+        return lang + "|" + omdb;
     }
 
     private async Task<CatalogHit?> LookupAsync(ReleaseGroup group, CancellationToken cancellationToken)

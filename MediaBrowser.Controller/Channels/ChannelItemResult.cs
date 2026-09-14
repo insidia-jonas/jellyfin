@@ -25,5 +25,24 @@ namespace MediaBrowser.Controller.Channels
         /// Gets or sets the total record count.
         /// </summary>
         public int? TotalRecordCount { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether this result is a non-current placeholder
+        /// while a background listing refresh runs. ChannelManager must not persist this
+        /// as a 3-hour disk hit or delete existing library rows.
+        /// </summary>
+        public bool RefreshPending { get; set; }
+
+        /// <summary>
+        /// Creates a refresh-pending result that must not be shown as current titles.
+        /// </summary>
+        /// <returns>An empty pending result.</returns>
+        public static ChannelItemResult Pending()
+        {
+            return new ChannelItemResult
+            {
+                RefreshPending = true
+            };
+        }
     }
 }

@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Jellyfin.Data;
 using Jellyfin.Data.Enums;
 using Jellyfin.Database.Implementations.Enums;
+using Jellyfin.LiveTv.TunerHosts;
 using MediaBrowser.Controller.Channels;
 using MediaBrowser.Controller.Dto;
 using MediaBrowser.Controller.Entities;
@@ -23,10 +24,9 @@ namespace Jellyfin.LiveTv.Channels;
 /// <summary>
 /// A My Media library tile for Live TV, shown next to Movies, TV Shows, and other channels.
 /// </summary>
-public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCacheKey
+public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCacheKey, IChannelPresentationOverlay
 {
     private readonly ITunerHostManager _tunerHostManager;
-    private readonly IListingsManager _listingsManager;
     private readonly ILibraryManager _libraryManager;
     private readonly IUserManager _userManager;
     private readonly ILogger<LiveTvLibraryChannel> _logger;
@@ -35,19 +35,16 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCa
     /// Initializes a new instance of the <see cref="LiveTvLibraryChannel"/> class.
     /// </summary>
     /// <param name="tunerHostManager">The tuner host manager.</param>
-    /// <param name="listingsManager">The listings manager (logos from XMLTV).</param>
     /// <param name="libraryManager">The library manager (imported guide).</param>
     /// <param name="userManager">The user manager.</param>
     /// <param name="logger">The logger.</param>
     public LiveTvLibraryChannel(
         ITunerHostManager tunerHostManager,
-        IListingsManager listingsManager,
         ILibraryManager libraryManager,
         IUserManager userManager,
         ILogger<LiveTvLibraryChannel> logger)
     {
         _tunerHostManager = tunerHostManager;
-        _listingsManager = listingsManager;
         _libraryManager = libraryManager;
         _userManager = userManager;
         _logger = logger;
@@ -60,7 +57,7 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCa
     public string Description => "Live television and IPTV channels.";
 
     /// <inheritdoc />
-    public string DataVersion => "7";
+    public string DataVersion => "8";
 
     /// <inheritdoc />
     public string HomePageUrl => string.Empty;
@@ -71,10 +68,11 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCa
     /// <inheritdoc />
     public string? GetCacheKey(string? userId)
     {
-        // Titles refresh every two minutes; the web list also ticks the progress bar from Start/End.
-        var now = DateTime.UtcNow;
-        return now.ToString("yyyyMMddHH", System.Globalization.CultureInfo.InvariantCulture)
-               + (now.Minute / 2).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        // Channel identities only. Now/next is overlaid from the local guide without
+        // bumping this key (which would make ChannelManager rebuild every folder).
+        _ = userId;
+        var identity = LiveTvChannelSetIdentity.Current;
+        return string.IsNullOrEmpty(identity) ? "channels" : identity;
     }
 
     /// <inheritdoc />
@@ -101,16 +99,58 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCa
         return user is null || user.HasPermission(PermissionKind.EnableLiveTvAccess);
     }
 
+    /// <summary>
+    /// Builds items from the last-good snapshot only. Does not wait for a playlist GET.
+    /// Used to resolve a group folder that was painted but not yet persisted.
+    /// </summary>
+    /// <param name="folderId">The folder being browsed, or <c>null</c> for the root.</param>
+    /// <returns>Snapshot items.</returns>
+    public IReadOnlyList<ChannelItemInfo> PeekSnapshotItems(string? folderId)
+    {
+        var channels = ReadCachedChannels();
+        LiveTvChannelSetIdentity.ReplaceFromChannels("library", channels);
+        return LiveTvLibraryChannelItems.Build(channels, folderId, guide: null, DateTime.UtcNow);
+    }
+
     /// <inheritdoc />
     public async Task<ChannelItemResult> GetChannelItems(InternalChannelItemQuery query, CancellationToken cancellationToken)
+    {
+        var isGroup = ChannelManagerBrowse.IsLiveTvGroupFolderId(query.FolderId);
+        var channels = ReadCachedChannels();
+        if (channels.Count == 0 && !isGroup)
+        {
+            // Root, empty cache: wait briefly for the first playlist GET (warmup or
+            // the refresh GetCachedChannels just scheduled). Never GET ingest/.ts.
+            channels = await WaitForFirstPlaylistAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        LiveTvChannelSetIdentity.ReplaceFromChannels("library", channels);
+
+        // Now/next is overlaid after ChannelManager reuses existing entities.
+        // Baking it into ChannelItemInfo here forced a full rewrite on every open.
+        var items = LiveTvLibraryChannelItems.Build(channels, query.FolderId, guide: null, DateTime.UtcNow);
+        return new ChannelItemResult
+        {
+            Items = items,
+            TotalRecordCount = items.Count,
+            RefreshPending = items.Count == 0 && AnyListingRefreshInFlight()
+        };
+    }
+
+    private List<ChannelInfo> ReadCachedChannels()
     {
         var channels = new List<ChannelInfo>();
         foreach (var host in _tunerHostManager.TunerHosts)
         {
             try
             {
-                var hostChannels = await host.GetChannels(true, cancellationToken).ConfigureAwait(false);
-                channels.AddRange(hostChannels);
+                // Last-good snapshot only. Never GET the playlist on a folder open
+                // (root or group). Playlist refresh stays background/conditional
+                // except the bounded first-load wait on an empty root.
+                if (host is BaseTunerHost cached)
+                {
+                    channels.AddRange(cached.GetCachedChannels());
+                }
             }
             catch (Exception ex)
             {
@@ -118,25 +158,102 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCa
             }
         }
 
-        if (channels.Count > 0)
+        return channels;
+    }
+
+    private async Task<List<ChannelInfo>> WaitForFirstPlaylistAsync(CancellationToken cancellationToken)
+    {
+        var timeout = TimeSpan.Zero;
+        foreach (var host in _tunerHostManager.TunerHosts.OfType<BaseTunerHost>())
         {
-            try
+            if (host.FirstLoadWait > timeout)
             {
-                await _listingsManager.AddProviderMetadata(channels, true, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Could not attach XMLTV logos to Live TV channel tiles");
+                timeout = host.FirstLoadWait;
             }
         }
 
-        var guide = LoadNowNext();
-        var items = LiveTvLibraryChannelItems.Build(channels, query.FolderId, guide, DateTime.UtcNow);
-        return new ChannelItemResult
+        if (timeout <= TimeSpan.Zero)
         {
-            Items = items,
-            TotalRecordCount = items.Count
-        };
+            return ReadCachedChannels();
+        }
+
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var channels = ReadCachedChannels();
+            if (channels.Count > 0)
+            {
+                return channels;
+            }
+
+            if (!AnyListingRefreshInFlight())
+            {
+                return channels;
+            }
+
+            try
+            {
+                await Task.Delay(100, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return ReadCachedChannels();
+            }
+        }
+
+        return ReadCachedChannels();
+    }
+
+    private bool AnyListingRefreshInFlight()
+    {
+        foreach (var host in _tunerHostManager.TunerHosts)
+        {
+            if (host is BaseTunerHost cached && cached.IsListingRefreshInFlight)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Writes now/next from the already-imported guide onto existing folder items
+    /// without deleting or recreating them.
+    /// </summary>
+    /// <param name="items">Library items for the current Live TV folder.</param>
+    public void OverlayPresentation(IReadOnlyList<BaseItem> items)
+    {
+        if (items is null || items.Count == 0)
+        {
+            return;
+        }
+
+        var guide = LoadNowNext();
+        foreach (var item in items)
+        {
+            if (item is null || item.IsFolder || string.IsNullOrWhiteSpace(item.ExternalId))
+            {
+                continue;
+            }
+
+            guide.TryGetValue(item.ExternalId, out var nowNext);
+            var subtitle = LiveTvLibraryChannelPresentation.ProgramSubtitle(nowNext);
+            item.OriginalTitle = string.IsNullOrWhiteSpace(subtitle) ? item.Name : subtitle;
+            item.Overview = LiveTvLibraryChannelPresentation.Overview(nowNext);
+            item.PremiereDate = nowNext?.NowStart;
+            item.EndDate = nowNext?.NowEnd;
+            if (!string.IsNullOrWhiteSpace(nowNext?.NowTitle))
+            {
+                item.SetProviderId(LiveTvLibraryChannelItems.ProviderNowKey, nowNext.NowTitle.Trim());
+            }
+
+            if (!string.IsNullOrWhiteSpace(nowNext?.NextTitle))
+            {
+                item.SetProviderId(LiveTvLibraryChannelItems.ProviderNextKey, nowNext.NextTitle.Trim());
+            }
+        }
     }
 
     private IReadOnlyDictionary<string, LiveTvNowNext> LoadNowNext()

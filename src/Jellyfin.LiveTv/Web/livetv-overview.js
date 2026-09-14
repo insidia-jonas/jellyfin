@@ -15,10 +15,15 @@
     var loading = false;
     var loadError = '';
     var lastKey = '';
+    var loadGen = 0;
     var owned = false;
     var tickTimer = 0;
     var refreshTimer = 0;
     var syncTimer = 0;
+    var paintToken = 0;
+    var emptyRetry = 0;
+    var EMPTY_RETRY_MS = [1500, 3000, 6000, 12000];
+    var ROW_CHUNK = 24;
 
     var style = document.createElement('style');
     style.setAttribute('data-livetv-overview', '1');
@@ -26,7 +31,15 @@
         'html.jf-livetv-list-on .libraryPage .itemsContainer,' +
         'html.jf-livetv-list-on .liveTvPage .itemsContainer,' +
         'html.jf-livetv-list-on .alphaPicker{display:none!important}' +
-        '#jf-livetv-overview{margin:.2em 0 2em;max-width:76rem;box-sizing:border-box}' +
+        'html.jf-livetv-list-on .loading,' +
+        'html.jf-livetv-list-on .docspinner,' +
+        'html.jf-livetv-list-on .busyIndicator,' +
+        'html.jf-livetv-list-on paper-spinner-lite,' +
+        'html.jf-livetv-list-on .mdl-spinner,' +
+        'html.jf-livetv-list-on .progressring,' +
+        'html.jf-livetv-list-on .emby-progress,' +
+        'html.jf-livetv-list-on .busy{display:none!important;visibility:hidden!important}' +
+        '#jf-livetv-overview{margin:.6em 1.2em 2em;max-width:76rem;box-sizing:border-box;position:relative;z-index:2}' +
         '#jf-livetv-overview .jf-livetv-head{display:flex;flex-wrap:wrap;align-items:center;gap:.7em 1.1em;margin:0 0 .85em}' +
         '#jf-livetv-overview .jf-livetv-title{font-size:1.55em;font-weight:750;letter-spacing:.02em}' +
         '#jf-livetv-overview .jf-livetv-count{opacity:.72;font-weight:600}' +
@@ -90,13 +103,36 @@
     }
 
     function isOfficialLiveHash() {
-        var h = hashLower();
-        return (h.indexOf('livetv') !== -1 || h.indexOf('live-tv') !== -1) && !isGuidePage();
+        if (isGuidePage() || isLiveTvGroupHash()) {
+            return false;
+        }
+        var path = hashLower().split('?')[0];
+        return path.indexOf('livetv') !== -1 || path.indexOf('live-tv') !== -1;
+    }
+
+    function isLiveTvGroupHash() {
+        return /[?&]ltvgroup=1(?:&|$)/i.test(hash());
     }
 
     function parentIdFromHash() {
         var match = hash().match(/[?&]parentId=([a-f0-9]{32})/i);
         return match ? match[1] : '';
+    }
+
+    function hideLibrarySpinner() {
+        var nodes = document.querySelectorAll(
+            '.loading, .docspinner, .busyIndicator, paper-spinner-lite, .mdl-spinner, .progressring, .emby-progress, .busy'
+        );
+        var i;
+        for (i = 0; i < nodes.length; i++) {
+            nodes[i].classList.add('hide');
+            nodes[i].style.display = 'none';
+        }
+        if (window.loading && typeof window.loading.hide === 'function') {
+            try {
+                window.loading.hide();
+            } catch (e) { /* ignore */ }
+        }
     }
 
     function looksTreasureMaps(item) {
@@ -111,13 +147,21 @@
     }
 
     function isGroupFolder(item) {
-        if (!item) {
+        if (!item || looksTreasureMaps(item)) {
             return false;
         }
-        if (item.IsFolder || item.Type === 'Folder' || item.Type === 'ChannelFolderItem') {
-            return /\d+\s+Sender/i.test(String(item.Overview || ''));
+        var ext = String(item.ExternalId || item.SourceId || '');
+        if (ext.indexOf('g:') === 0) {
+            return true;
         }
-        return false;
+        var folder = !!(item.IsFolder || item.Type === 'Folder' || item.Type === 'ChannelFolderItem');
+        if (!folder) {
+            return false;
+        }
+        if (item.ProviderIds && (item.ProviderIds.LiveTv || item.ProviderIds.livetv)) {
+            return true;
+        }
+        return /\d+\s+Sender/i.test(String(item.Overview || ''));
     }
 
     function isLiveTvItem(item) {
@@ -269,15 +313,67 @@
         });
     }
 
-    function ensure() {
+    function isStalePage(node) {
+        if (!node || !node.classList) {
+            return true;
+        }
+        if (node.id === 'loginPage' || node.id === 'startupPage') {
+            return true;
+        }
+        return node.classList.contains('hide') || node.classList.contains('standalonePage');
+    }
+
+    function visibleHost() {
+        var pages = document.querySelectorAll('.page.libraryPage, .page.liveTvPage, .libraryPage, .liveTvPage');
+        var i;
+        var page;
+        var padded;
+        for (i = 0; i < pages.length; i++) {
+            page = pages[i];
+            if (isStalePage(page)) {
+                continue;
+            }
+            padded = page.querySelector('.padded-right.padded-left, .padded-right');
+            return padded || page;
+        }
+        pages = document.querySelectorAll('.mainAnimatedPage');
+        for (i = 0; i < pages.length; i++) {
+            page = pages[i];
+            if (isStalePage(page)) {
+                continue;
+            }
+            return page;
+        }
+        return null;
+    }
+
+    function overlayOnVisiblePage() {
         var box = document.getElementById('jf-livetv-overview');
-        if (box) {
+        var host = visibleHost();
+        return !!(box && host && host.contains(box));
+    }
+
+    function applyListMode() {
+        document.documentElement.classList.toggle('jf-livetv-list-on', owned && overlayOnVisiblePage());
+        if (owned) {
+            hideLibrarySpinner();
+        }
+    }
+
+    function ensure() {
+        var host = visibleHost();
+        var box = document.getElementById('jf-livetv-overview');
+        if (!host) {
             return box;
         }
-        box = document.createElement('div');
-        box.id = 'jf-livetv-overview';
-        box.className = 'verticalSection';
-        var host = document.querySelector('.libraryPage .padded-right, .libraryPage, .liveTvPage, .padded-right.padded-bottom-page, .mainAnimatedPage') || document.body;
+        if (box && host.contains(box)) {
+            return box;
+        }
+        if (!box) {
+            box = document.createElement('div');
+            box.id = 'jf-livetv-overview';
+            box.className = 'verticalSection';
+        }
         if (host.firstChild) {
             host.insertBefore(box, host.firstChild);
         } else {
@@ -286,17 +382,87 @@
         return box;
     }
 
+    function resolvePlaybackManager() {
+        if (window.playbackManager && typeof window.playbackManager.play === 'function') {
+            return window.playbackManager;
+        }
+        try {
+            var req;
+            var chunks = window.webpackChunk || (typeof self !== 'undefined' && self.webpackChunk);
+            if (chunks && typeof chunks.push === 'function') {
+                chunks.push([['jf-livetv-pm'], {}, function (r) { req = r; }]);
+            }
+            if (typeof req !== 'function') {
+                return null;
+            }
+            var ids = ['./components/playback/playbackmanager.js'];
+            var i;
+            for (i = 0; i < ids.length; i++) {
+                try {
+                    var exp = req(ids[i]);
+                    if (exp && exp.playbackManager && typeof exp.playbackManager.play === 'function') {
+                        window.playbackManager = exp.playbackManager;
+                        return exp.playbackManager;
+                    }
+                } catch (ignoreId) { /* next */ }
+            }
+            if (req.m) {
+                var key;
+                for (key in req.m) {
+                    if (!Object.prototype.hasOwnProperty.call(req.m, key) || key.indexOf('playbackmanager') === -1) {
+                        continue;
+                    }
+                    try {
+                        var mod = req(key);
+                        if (mod && mod.playbackManager && typeof mod.playbackManager.play === 'function') {
+                            window.playbackManager = mod.playbackManager;
+                            return mod.playbackManager;
+                        }
+                    } catch (ignoreKey) { /* next */ }
+                }
+            }
+        } catch (e) { /* ignore */ }
+        return null;
+    }
+
+    function playableItem(item) {
+        var copy = {};
+        var key;
+        for (key in item) {
+            if (Object.prototype.hasOwnProperty.call(item, key)) {
+                copy[key] = item[key];
+            }
+        }
+        copy.Type = 'TvChannel';
+        copy.MediaType = 'Video';
+        copy.IsLiveStream = true;
+        if (!copy.ChannelId) {
+            copy.ChannelId = item.Id;
+        }
+        var client = api();
+        if (!copy.ServerId && client && typeof client.serverId === 'function') {
+            copy.ServerId = client.serverId();
+        }
+        return copy;
+    }
+
     function play(item, list) {
         if (isGroupFolder(item)) {
-            location.hash = '#/list?parentId=' + item.Id;
+            location.hash = '#/list?parentId=' + item.Id + '&ltvgroup=1';
+            return;
+        }
+        var nativeOwns = window.NativePlayer && typeof window.NativePlayer.loadPlayer === 'function';
+        if (nativeOwns && window.FireTvLive && typeof window.FireTvLive.play === 'function') {
+            window.FireTvLive.play(item, list || items);
+            return;
+        }
+        var manager = resolvePlaybackManager();
+        if (manager) {
+            manager.play({ items: [playableItem(item)], fullscreen: true });
             return;
         }
         if (window.FireTvLive && typeof window.FireTvLive.play === 'function') {
             window.FireTvLive.play(item, list || items);
-            return;
-        }
-        if (window.playbackManager && typeof window.playbackManager.play === 'function') {
-            window.playbackManager.play({ items: [item], fullscreen: true });
             return;
         }
         if (item && item.Id) {
@@ -304,11 +470,124 @@
         }
     }
 
-    function render() {
+    function applyGuide(row, item, de) {
+        var guide = guideOf(item);
+        var show = row.querySelector('.jf-livetv-show');
+        var times = row.querySelector('.jf-livetv-times');
+        var fill = row.querySelector('.jf-livetv-bar > span');
+        var bar = row.querySelector('.jf-livetv-bar');
+        var next = row.querySelector('.jf-livetv-next');
+        if (guide.folder) {
+            if (show) {
+                show.textContent = guide.folderLine || (de ? 'Ordner' : 'Folder');
+            }
+            if (times) {
+                times.textContent = '';
+            }
+            if (next) {
+                next.textContent = '';
+            }
+            return;
+        }
+        if (show) {
+            show.textContent = guide.nowTitle
+                ? ((de ? 'Jetzt: ' : 'Now: ') + guide.nowTitle)
+                : (de ? 'Keine EPG-Daten' : 'No guide data');
+        }
+        if (times) {
+            times.textContent = guide.nowRange;
+        }
+        if (guide.percent != null && fill && bar) {
+            fill.style.width = guide.percent + '%';
+            bar.setAttribute('aria-valuenow', String(Math.round(guide.percent)));
+        }
+        if (next) {
+            next.textContent = guide.nextTitle
+                ? ((de ? 'Danach: ' : 'Next: ') + guide.nextTitle + (guide.nextRange ? ' · ' + guide.nextRange : ''))
+                : '';
+        }
+    }
+
+    function buildRow(item, index, de, shown, search) {
+        var guide = guideOf(item);
+        var row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'jf-livetv-row';
+        row.setAttribute('role', 'listitem');
+        row.setAttribute('data-id', item.Id || '');
+        row.setAttribute('data-type', item.Type || (guide.folder ? 'Folder' : 'TvChannel'));
+        row.tabIndex = 0;
+        var logo = document.createElement('div');
+        logo.className = 'jf-livetv-logo';
+        var url = posterUrl(item);
+        if (url) {
+            logo.style.backgroundImage = "url('" + String(url).replace(/'/g, '%27') + "')";
+        }
+        var sender = document.createElement('div');
+        sender.className = 'jf-livetv-sender';
+        var number = item.Number || item.ChannelNumber || '';
+        sender.textContent = number ? number + '  ' + guide.channelName : guide.channelName;
+        var now = document.createElement('div');
+        now.className = 'jf-livetv-now';
+        now.appendChild(document.createElement('div')).className = 'jf-livetv-show';
+        now.appendChild(document.createElement('div')).className = 'jf-livetv-times';
+        var bar = document.createElement('div');
+        bar.className = 'jf-livetv-bar';
+        bar.setAttribute('role', 'progressbar');
+        bar.setAttribute('aria-valuemin', '0');
+        bar.setAttribute('aria-valuemax', '100');
+        bar.appendChild(document.createElement('span'));
+        now.appendChild(bar);
+        var next = document.createElement('div');
+        next.className = 'jf-livetv-next';
+        row.appendChild(logo);
+        row.appendChild(sender);
+        row.appendChild(now);
+        row.appendChild(next);
+        applyGuide(row, item, de);
+        row.addEventListener('click', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            play(item, shown);
+        });
+        if (index === 0 && document.activeElement !== search) {
+            window.setTimeout(function () { row.focus(); }, 40);
+        }
+        return row;
+    }
+
+    function updateProgress(box, shown) {
+        var de = german();
+        var byId = {};
+        shown.forEach(function (item) {
+            if (item && item.Id) {
+                byId[item.Id] = item;
+            }
+        });
+        var rows = box.querySelectorAll('.jf-livetv-row');
+        var i;
+        for (i = 0; i < rows.length; i++) {
+            var item = byId[rows[i].getAttribute('data-id')];
+            if (item) {
+                applyGuide(rows[i], item, de);
+            }
+        }
+    }
+
+    function render(mode) {
         var box = ensure();
-        box.innerHTML = '';
+        if (!box) {
+            return;
+        }
         var de = german();
         var shown = visibleItems();
+        if (mode === 'progress' && box.querySelector('.jf-livetv-list')) {
+            updateProgress(box, shown);
+            return;
+        }
+        paintToken += 1;
+        var token = paintToken;
+        box.innerHTML = '';
         var head = document.createElement('div');
         head.className = 'jf-livetv-head';
         var title = document.createElement('div');
@@ -347,6 +626,9 @@
         var list = document.createElement('div');
         list.className = 'jf-livetv-list';
         list.setAttribute('role', 'list');
+        box.appendChild(head);
+        box.appendChild(cols);
+        box.appendChild(list);
         if (!shown.length) {
             var empty = document.createElement('div');
             empty.className = 'jf-livetv-empty';
@@ -362,89 +644,39 @@
                     : 'No channels. Check the tuner and guide on the server.';
             }
             list.appendChild(empty);
+            return;
         }
-        shown.forEach(function (item, index) {
-            var guide = guideOf(item);
-            var row = document.createElement('button');
-            row.type = 'button';
-            row.className = 'jf-livetv-row';
-            row.setAttribute('role', 'listitem');
-            row.setAttribute('data-id', item.Id || '');
-            row.setAttribute('data-type', item.Type || (guide.folder ? 'Folder' : 'TvChannel'));
-            row.tabIndex = 0;
-            var logo = document.createElement('div');
-            logo.className = 'jf-livetv-logo';
-            var url = posterUrl(item);
-            if (url) {
-                logo.style.backgroundImage = "url('" + String(url).replace(/'/g, '%27') + "')";
+        var offset = 0;
+        function paintChunk() {
+            if (token !== paintToken) {
+                return;
             }
-            var sender = document.createElement('div');
-            sender.className = 'jf-livetv-sender';
-            var number = item.Number || item.ChannelNumber || '';
-            sender.textContent = number ? number + '  ' + guide.channelName : guide.channelName;
-            var now = document.createElement('div');
-            now.className = 'jf-livetv-now';
-            var show = document.createElement('div');
-            show.className = 'jf-livetv-show';
-            var times = document.createElement('div');
-            times.className = 'jf-livetv-times';
-            var bar = document.createElement('div');
-            bar.className = 'jf-livetv-bar';
-            var fill = document.createElement('span');
-            if (guide.folder) {
-                show.textContent = guide.folderLine || (de ? 'Ordner' : 'Folder');
-                times.textContent = '';
-            } else {
-                show.textContent = guide.nowTitle
-                    ? ((de ? 'Jetzt: ' : 'Now: ') + guide.nowTitle)
-                    : (de ? 'Keine EPG-Daten' : 'No guide data');
-                times.textContent = guide.nowRange;
-                if (guide.percent != null) {
-                    fill.style.width = guide.percent + '%';
-                    bar.setAttribute('aria-valuenow', String(Math.round(guide.percent)));
-                    bar.setAttribute('role', 'progressbar');
-                    bar.setAttribute('aria-valuemin', '0');
-                    bar.setAttribute('aria-valuemax', '100');
-                    bar.appendChild(fill);
-                }
+            var end = Math.min(offset + ROW_CHUNK, shown.length);
+            var i;
+            for (i = offset; i < end; i++) {
+                list.appendChild(buildRow(shown[i], i, de, shown, search));
             }
-            now.appendChild(show);
-            now.appendChild(times);
-            if (fill.parentNode) {
-                now.appendChild(bar);
+            offset = end;
+            if (offset < shown.length && typeof window.requestAnimationFrame === 'function') {
+                window.requestAnimationFrame(paintChunk);
+            } else if (offset < shown.length) {
+                window.setTimeout(paintChunk, 0);
             }
-            var next = document.createElement('div');
-            next.className = 'jf-livetv-next';
-            if (!guide.folder && guide.nextTitle) {
-                next.textContent = (de ? 'Danach: ' : 'Next: ') + guide.nextTitle +
-                    (guide.nextRange ? ' · ' + guide.nextRange : '');
-            }
-            row.appendChild(logo);
-            row.appendChild(sender);
-            row.appendChild(now);
-            row.appendChild(next);
-            row.addEventListener('click', function (event) {
-                event.preventDefault();
-                event.stopPropagation();
-                play(item, shown);
-            });
-            list.appendChild(row);
-            if (index === 0 && document.activeElement !== search) {
-                window.setTimeout(function () { row.focus(); }, 40);
-            }
-        });
-        box.appendChild(head);
-        box.appendChild(cols);
-        box.appendChild(list);
+        }
+        paintChunk();
     }
 
     function show(on) {
         owned = on;
-        document.documentElement.classList.toggle('jf-livetv-list-on', on);
+        if (on) {
+            ensure();
+            hideLibrarySpinner();
+        }
         var box = document.getElementById('jf-livetv-overview');
         if (!on && box) {
             box.remove();
         }
+        applyListMode();
         var legacy = document.getElementById('firetv-live');
         if (on && legacy) {
             legacy.remove();
@@ -456,7 +688,7 @@
         if (on && !tickTimer) {
             tickTimer = window.setInterval(function () {
                 if (owned && items.length) {
-                    render();
+                    render('progress');
                 }
             }, 15000);
         }
@@ -466,6 +698,7 @@
         }
     }
 
+    /* Items / LiveTv/Channels on this Jellyfin only — never the IPTV playlist. */
     function fetchOfficial() {
         var client = api();
         if (!client || typeof client.getJSON !== 'function') {
@@ -490,7 +723,7 @@
         }
         return client.getItems(client.getCurrentUserId(), {
             ParentId: parentId,
-            Fields: 'OriginalTitle,Overview,ProviderIds,PremiereDate,StartDate,EndDate,CompletionPercentage,Tags',
+            Fields: 'OriginalTitle,Overview,ProviderIds,PremiereDate,StartDate,EndDate,CompletionPercentage,Tags,ExternalId',
             SortBy: 'SortName',
             SortOrder: 'Ascending',
             Limit: 800
@@ -500,21 +733,27 @@
     }
 
     function load() {
-        var key = hash() + '|' + pageTitle();
-        if (loading) {
+        var parentId = parentIdFromHash();
+        var key = hash() + '|' + parentId + '|' + pageTitle();
+        if (loading && lastKey === key) {
+            show(true);
+            hideLibrarySpinner();
             return;
         }
         if (items.length && lastKey === key) {
             show(true);
+            hideLibrarySpinner();
             render();
             return;
         }
         lastKey = key;
+        var gen = ++loadGen;
         loading = true;
         loadError = '';
+        emptyRetry = 0;
         show(true);
+        hideLibrarySpinner();
         render();
-        var parentId = parentIdFromHash();
         var work = isOfficialLiveHash()
             ? fetchOfficial().then(function (list) { parentItem = { Name: 'Live TV' }; return list; })
             : api().getItem(api().getCurrentUserId(), parentId).then(function (item) {
@@ -522,15 +761,66 @@
                 return fetchChildren(parentId);
             });
         work.then(function (list) {
-            loading = false;
+            if (gen !== loadGen) {
+                return;
+            }
+            hideLibrarySpinner();
             items = list || [];
+            if (!items.length && emptyRetry < EMPTY_RETRY_MS.length) {
+                loading = true;
+                render();
+                scheduleEmptyRetry(gen, parentId, isOfficialLiveHash());
+                return;
+            }
+            loading = false;
             render();
         }).catch(function () {
+            if (gen !== loadGen) {
+                return;
+            }
             loading = false;
+            hideLibrarySpinner();
             loadError = 'error';
             items = [];
             render();
         });
+    }
+
+    function scheduleEmptyRetry(gen, parentId, official) {
+        if (emptyRetry >= EMPTY_RETRY_MS.length) {
+            loading = false;
+            render();
+            return;
+        }
+        var delay = EMPTY_RETRY_MS[emptyRetry];
+        emptyRetry += 1;
+        window.setTimeout(function () {
+            if (gen !== loadGen) {
+                return;
+            }
+            if (!official && parentId && parentIdFromHash() !== parentId) {
+                return;
+            }
+            var again = official ? fetchOfficial() : fetchChildren(parentId);
+            again.then(function (list) {
+                if (gen !== loadGen) {
+                    return;
+                }
+                hideLibrarySpinner();
+                if (list && list.length) {
+                    loading = false;
+                    items = list;
+                    render();
+                    return;
+                }
+                scheduleEmptyRetry(gen, parentId, official);
+            }).catch(function () {
+                if (gen !== loadGen) {
+                    return;
+                }
+                scheduleEmptyRetry(gen, parentId, official);
+            });
+        }, delay);
     }
 
     function hide() {
@@ -542,7 +832,7 @@
         if (isGuidePage() || looksTreasureMaps(parent)) {
             return false;
         }
-        if (isOfficialLiveHash()) {
+        if (isOfficialLiveHash() || isLiveTvGroupHash()) {
             return true;
         }
         if (parent && isLiveTvParent(parent)) {
@@ -557,7 +847,7 @@
             return;
         }
         var parentId = parentIdFromHash();
-        if (isOfficialLiveHash()) {
+        if (isOfficialLiveHash() || isLiveTvGroupHash()) {
             load();
             return;
         }
@@ -583,6 +873,17 @@
         });
         var observer = new MutationObserver(function () {
             if (owned) {
+                var host = visibleHost();
+                var box = document.getElementById('jf-livetv-overview');
+                if (host && (!box || !host.contains(box))) {
+                    ensure();
+                    applyListMode();
+                    if (items.length || loading) {
+                        render();
+                    }
+                } else {
+                    applyListMode();
+                }
                 return;
             }
             window.clearTimeout(syncTimer);
@@ -604,11 +905,14 @@
     window.JellyfinLiveTvOverview = {
         __bound: true,
         ownsPage: function () { return owned; },
+        visibleHost: visibleHost,
         sync: sync,
         progressOf: progressOf,
         guideOf: guideOf,
         isLiveTvItem: isLiveTvItem,
-        play: play
+        play: play,
+        resolvePlaybackManager: resolvePlaybackManager,
+        playableItem: playableItem
     };
 
     if (document.readyState === 'loading') {

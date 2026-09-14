@@ -1,6 +1,7 @@
 #nullable disable
 
 #pragma warning disable CS1591
+#pragma warning disable CA1002
 
 using System;
 using System.Collections.Concurrent;
@@ -10,6 +11,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.LiveTv.Channels;
 using Jellyfin.LiveTv.Configuration;
 using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Library;
@@ -23,14 +25,20 @@ namespace Jellyfin.LiveTv.TunerHosts
 {
     public abstract class BaseTunerHost
     {
-        private readonly ConcurrentDictionary<string, List<ChannelInfo>> _cache;
+        private readonly ConcurrentDictionary<string, M3uListingSnapshot> _listingSnapshots;
+        private readonly ConcurrentDictionary<string, SemaphoreSlim> _refreshGates;
+        private readonly ConcurrentDictionary<string, byte> _backgroundRefresh;
+        private int _refreshInFlight;
 
         protected BaseTunerHost(IServerConfigurationManager config, ILogger<BaseTunerHost> logger, IFileSystem fileSystem)
         {
             Config = config;
             Logger = logger;
             FileSystem = fileSystem;
-            _cache = new ConcurrentDictionary<string, List<ChannelInfo>>();
+            _listingSnapshots = new ConcurrentDictionary<string, M3uListingSnapshot>(StringComparer.OrdinalIgnoreCase);
+            _refreshGates = new ConcurrentDictionary<string, SemaphoreSlim>(StringComparer.OrdinalIgnoreCase);
+            _backgroundRefresh = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
+            EnableBackgroundListingRefresh = true;
         }
 
         protected IServerConfigurationManager Config { get; }
@@ -46,40 +54,146 @@ namespace Jellyfin.LiveTv.TunerHosts
         protected virtual string ChannelIdPrefix => Type + "_";
 
         /// <summary>
+        /// Gets or sets a value indicating whether stale snapshots refresh on a background task.
+        /// Tests disable this so listing HTTP can be asserted.
+        /// </summary>
+        internal bool EnableBackgroundListingRefresh { get; set; }
+
+        /// <summary>
+        /// Gets or sets how long a cold Live TV root open may wait for the first playlist GET.
+        /// Group folders never wait. Tests set this to <see cref="TimeSpan.Zero"/> so a blocked
+        /// refresh cannot hang Items.
+        /// </summary>
+        internal TimeSpan FirstLoadWait { get; set; } = TimeSpan.FromSeconds(12);
+
+        /// <summary>
+        /// Gets a value indicating whether a listing refresh is running or queued.
+        /// </summary>
+        internal bool IsListingRefreshInFlight =>
+            Volatile.Read(ref _refreshInFlight) > 0 || !_backgroundRefresh.IsEmpty;
+
+        /// <summary>
         /// Clears the in-memory channel list cache, optionally for one tuner.
+        /// Disk snapshots stay so the next open can still serve last-good channels.
         /// </summary>
         /// <param name="tunerId">The tuner id, or <c>null</c> to clear every cached list.</param>
         public void ClearChannelCache(string tunerId = null)
         {
             if (string.IsNullOrEmpty(tunerId))
             {
-                _cache.Clear();
+                _listingSnapshots.Clear();
                 return;
             }
 
-            _cache.TryRemove(tunerId, out _);
+            _listingSnapshots.TryRemove(tunerId, out _);
         }
 
         protected abstract Task<List<ChannelInfo>> GetChannelsInternal(TunerHostInfo tuner, CancellationToken cancellationToken);
 
+        /// <summary>
+        /// Refreshes one tuner listing. M3U hosts send a conditional GET on the playlist URL only.
+        /// </summary>
+        /// <param name="tuner">The tuner.</param>
+        /// <param name="previous">The last-good snapshot, if any.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>The refresh outcome.</returns>
+        internal virtual async Task<M3uListingRefreshResult> RefreshListingAsync(
+            TunerHostInfo tuner,
+            M3uListingSnapshot previous,
+            CancellationToken cancellationToken)
+        {
+            var list = await GetChannelsInternal(tuner, cancellationToken).ConfigureAwait(false);
+            return new M3uListingRefreshResult
+            {
+                Channels = list ?? [],
+                PlaylistUrl = previous?.PlaylistUrl ?? tuner?.Url
+            };
+        }
+
         public async Task<List<ChannelInfo>> GetChannels(TunerHostInfo tuner, bool enableCache, CancellationToken cancellationToken)
         {
-            var key = tuner.Id;
+            ArgumentNullException.ThrowIfNull(tuner);
 
-            if (enableCache && !string.IsNullOrEmpty(key) && _cache.TryGetValue(key, out List<ChannelInfo> cache))
+            var snapshot = GetOrLoadSnapshot(tuner);
+            if (enableCache && HasChannels(snapshot))
             {
-                return cache;
+                ScheduleBackgroundRefreshIfNeeded(tuner, snapshot);
+                return snapshot.Channels;
             }
 
-            var list = await GetChannelsInternal(tuner, cancellationToken).ConfigureAwait(false);
-            // logger.LogInformation("Channels from {0}: {1}", tuner.Url, JsonSerializer.SerializeToString(list));
+            return await RefreshTunerLockedAsync(tuner, enableCache, cancellationToken).ConfigureAwait(false);
+        }
 
-            if (!string.IsNullOrEmpty(key) && list.Count > 0)
+        /// <summary>
+        /// Loads disk snapshots into memory and starts a background refresh when the listing is stale.
+        /// </summary>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>A task that loads local snapshots (network refresh is not awaited).</returns>
+        public async Task WarmAllAsync(CancellationToken cancellationToken)
+        {
+            foreach (var tuner in GetTunerHosts())
             {
-                _cache[key] = list;
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    await GetChannels(tuner, true, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Live TV listing warmup failed for tuner {TunerId}", tuner.Id);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Stores a listing snapshot after tuner save/validate so the next UI open is not a cold download.
+        /// </summary>
+        /// <param name="tuner">The tuner (must have an id).</param>
+        /// <param name="channels">Parsed channels.</param>
+        /// <param name="etag">Playlist ETag.</param>
+        /// <param name="lastModified">Playlist Last-Modified.</param>
+        /// <param name="playlistUrl">The listing URL.</param>
+        internal void AcceptListingSnapshot(
+            TunerHostInfo tuner,
+            List<ChannelInfo> channels,
+            string etag,
+            DateTimeOffset? lastModified,
+            string playlistUrl)
+        {
+            ArgumentNullException.ThrowIfNull(tuner);
+            if (string.IsNullOrEmpty(tuner.Id) || channels is null || channels.Count == 0)
+            {
+                return;
             }
 
-            return list;
+            var snapshot = new M3uListingSnapshot
+            {
+                Channels = channels,
+                ETag = etag,
+                LastModified = lastModified,
+                FetchedUtc = DateTime.UtcNow,
+                PlaylistUrl = playlistUrl
+            };
+            StoreSnapshot(tuner, snapshot);
+        }
+
+        internal M3uListingSnapshot PeekListingSnapshot(string tunerId)
+        {
+            if (string.IsNullOrEmpty(tunerId))
+            {
+                return null;
+            }
+
+            _listingSnapshots.TryGetValue(tunerId, out var snapshot);
+            return snapshot;
+        }
+
+        internal void SeedListingSnapshot(string tunerId, M3uListingSnapshot snapshot)
+        {
+            ArgumentException.ThrowIfNullOrEmpty(tunerId);
+            ArgumentNullException.ThrowIfNull(snapshot);
+            _listingSnapshots[tunerId] = snapshot;
+            LiveTvChannelSetIdentity.ReplaceFromChannels(tunerId, snapshot.Channels ?? []);
         }
 
         protected virtual IList<TunerHostInfo> GetTunerHosts()
@@ -97,57 +211,319 @@ namespace Jellyfin.LiveTv.TunerHosts
 
             foreach (var host in hosts)
             {
-                var channelCacheFile = Path.Combine(Config.ApplicationPaths.CachePath, host.Id + "_channels");
-
                 try
                 {
                     var channels = await GetChannels(host, enableCache, cancellationToken).ConfigureAwait(false);
                     var newChannels = channels.Where(i => !list.Any(l => string.Equals(i.Id, l.Id, StringComparison.OrdinalIgnoreCase))).ToList();
 
                     list.AddRange(newChannels);
-
-                    if (!enableCache)
-                    {
-                        try
-                        {
-                            Directory.CreateDirectory(Path.GetDirectoryName(channelCacheFile));
-                            var writeStream = AsyncFile.OpenWrite(channelCacheFile);
-                            await using (writeStream.ConfigureAwait(false))
-                            {
-                                await JsonSerializer.SerializeAsync(writeStream, channels, cancellationToken: cancellationToken).ConfigureAwait(false);
-                            }
-                        }
-                        catch (IOException)
-                        {
-                        }
-                    }
                 }
                 catch (Exception ex)
                 {
                     Logger.LogError(ex, "Error getting channel list");
 
-                    if (enableCache)
+                    var fallback = GetOrLoadSnapshot(host);
+                    if (HasChannels(fallback))
                     {
-                        try
-                        {
-                            var readStream = AsyncFile.OpenRead(channelCacheFile);
-                            await using (readStream.ConfigureAwait(false))
-                            {
-                                var channels = await JsonSerializer
-                                    .DeserializeAsync<List<ChannelInfo>>(readStream, cancellationToken: cancellationToken)
-                                    .ConfigureAwait(false);
-                                list.AddRange(channels);
-                            }
-                        }
-                        catch (IOException)
-                        {
-                        }
+                        Logger.LogWarning("Serving last-good Live TV snapshot for tuner {TunerId} after listing failure", host.Id);
+                        list.AddRange(fallback.Channels.Where(i => !list.Any(l => string.Equals(i.Id, l.Id, StringComparison.OrdinalIgnoreCase))));
                     }
                 }
             }
 
             return list;
         }
+
+        /// <summary>
+        /// Returns last-good listings without waiting for a playlist GET.
+        /// Missing tuners start a background refresh so the Items request can return.
+        /// </summary>
+        /// <returns>Cached channels, or an empty list when no snapshot exists yet.</returns>
+        public List<ChannelInfo> GetCachedChannels()
+        {
+            var list = new List<ChannelInfo>();
+
+            foreach (var host in GetTunerHosts())
+            {
+                try
+                {
+                    var snapshot = GetOrLoadSnapshot(host);
+                    if (HasChannels(snapshot))
+                    {
+                        ScheduleBackgroundRefreshIfNeeded(host, snapshot);
+                        list.AddRange(snapshot.Channels.Where(i => !list.Any(l => string.Equals(i.Id, l.Id, StringComparison.OrdinalIgnoreCase))));
+                    }
+                    else
+                    {
+                        ScheduleColdRefresh(host);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogDebug(ex, "Error reading cached Live TV channels");
+                }
+            }
+
+            return list;
+        }
+
+        private void ScheduleColdRefresh(TunerHostInfo tuner)
+        {
+            if (!EnableBackgroundListingRefresh || tuner is null || string.IsNullOrEmpty(tuner.Id))
+            {
+                return;
+            }
+
+            if (!_backgroundRefresh.TryAdd(tuner.Id, 0))
+            {
+                return;
+            }
+
+            _ = Task.Run(() => RefreshInBackgroundAsync(tuner), CancellationToken.None);
+        }
+
+        private async Task<List<ChannelInfo>> RefreshTunerLockedAsync(TunerHostInfo tuner, bool enableCache, CancellationToken cancellationToken)
+        {
+            var key = SnapshotKey(tuner);
+            var gate = _refreshGates.GetOrAdd(key, static _ => new SemaphoreSlim(1, 1));
+            Interlocked.Increment(ref _refreshInFlight);
+            try
+            {
+                await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    var snapshot = GetOrLoadSnapshot(tuner);
+                    if (enableCache && HasChannels(snapshot))
+                    {
+                        ScheduleBackgroundRefreshIfNeeded(tuner, snapshot);
+                        return snapshot.Channels;
+                    }
+
+                    return await RefreshTunerCoreAsync(tuner, snapshot, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _refreshInFlight);
+            }
+        }
+
+        private async Task<List<ChannelInfo>> RefreshTunerCoreAsync(
+            TunerHostInfo tuner,
+            M3uListingSnapshot previous,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var refreshed = await RefreshListingAsync(tuner, previous, cancellationToken).ConfigureAwait(false);
+                if (refreshed.NotModified && HasChannels(previous))
+                {
+                    previous.FetchedUtc = DateTime.UtcNow;
+                    if (!string.IsNullOrWhiteSpace(refreshed.ETag))
+                    {
+                        previous.ETag = refreshed.ETag;
+                    }
+
+                    if (refreshed.LastModified.HasValue)
+                    {
+                        previous.LastModified = refreshed.LastModified;
+                    }
+
+                    StoreSnapshot(tuner, previous);
+                    return previous.Channels;
+                }
+
+                var channels = refreshed.Channels ?? [];
+                if (channels.Count == 0 && HasChannels(previous))
+                {
+                    Logger.LogWarning("Live TV listing refresh returned no channels for tuner {TunerId}; keeping last-good snapshot", tuner.Id);
+                    return previous.Channels;
+                }
+
+                var snapshot = new M3uListingSnapshot
+                {
+                    Channels = channels,
+                    ETag = refreshed.ETag ?? previous?.ETag,
+                    LastModified = refreshed.LastModified ?? previous?.LastModified,
+                    FetchedUtc = DateTime.UtcNow,
+                    PlaylistUrl = refreshed.PlaylistUrl ?? previous?.PlaylistUrl
+                };
+                StoreSnapshot(tuner, snapshot);
+                return channels;
+            }
+            catch (Exception ex)
+            {
+                if (HasChannels(previous))
+                {
+                    Logger.LogWarning(ex, "Live TV listing refresh failed for tuner {TunerId}; serving last-good snapshot", tuner.Id);
+                    return previous.Channels;
+                }
+
+                throw;
+            }
+        }
+
+        private void ScheduleBackgroundRefreshIfNeeded(TunerHostInfo tuner, M3uListingSnapshot snapshot)
+        {
+            if (!EnableBackgroundListingRefresh || tuner is null || string.IsNullOrEmpty(tuner.Id))
+            {
+                return;
+            }
+
+            var playlistUrl = CurrentPlaylistUrl(tuner);
+            if (!M3uListingRefreshPolicy.ShouldRefreshListing(snapshot.FetchedUtc, DateTime.UtcNow, snapshot.PlaylistUrl, playlistUrl))
+            {
+                return;
+            }
+
+            if (!_backgroundRefresh.TryAdd(tuner.Id, 0))
+            {
+                return;
+            }
+
+            _ = Task.Run(() => RefreshInBackgroundAsync(tuner), CancellationToken.None);
+        }
+
+        private async Task RefreshInBackgroundAsync(TunerHostInfo tuner)
+        {
+            try
+            {
+                await RefreshTunerLockedAsync(tuner, enableCache: false, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Background Live TV listing refresh failed for tuner {TunerId}", tuner.Id);
+            }
+            finally
+            {
+                _backgroundRefresh.TryRemove(tuner.Id, out _);
+            }
+        }
+
+        private M3uListingSnapshot GetOrLoadSnapshot(TunerHostInfo tuner)
+        {
+            var key = SnapshotKey(tuner);
+            if (!string.IsNullOrEmpty(key) && _listingSnapshots.TryGetValue(key, out var memory) && HasChannels(memory))
+            {
+                return memory;
+            }
+
+            var disk = LoadDiskSnapshot(tuner);
+            if (HasChannels(disk) && !string.IsNullOrEmpty(key))
+            {
+                _listingSnapshots[key] = disk;
+                LiveTvChannelSetIdentity.ReplaceFromChannels(key, disk.Channels);
+                return disk;
+            }
+
+            return disk;
+        }
+
+        private void StoreSnapshot(TunerHostInfo tuner, M3uListingSnapshot snapshot)
+        {
+            var key = SnapshotKey(tuner);
+            if (string.IsNullOrEmpty(key) || snapshot is null)
+            {
+                return;
+            }
+
+            _listingSnapshots[key] = snapshot;
+            LiveTvChannelSetIdentity.ReplaceFromChannels(key, snapshot.Channels ?? []);
+            PersistDiskSnapshot(tuner, snapshot);
+        }
+
+        private M3uListingSnapshot LoadDiskSnapshot(TunerHostInfo tuner)
+        {
+            var path = ChannelCacheFile(tuner);
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            {
+                return null;
+            }
+
+            try
+            {
+                using var readStream = AsyncFile.OpenRead(path);
+                using var document = JsonDocument.Parse(readStream);
+                if (document.RootElement.ValueKind == JsonValueKind.Array)
+                {
+                    var channels = JsonSerializer.Deserialize<List<ChannelInfo>>(document.RootElement.GetRawText());
+                    if (channels is { Count: > 0 })
+                    {
+                        return new M3uListingSnapshot
+                        {
+                            Channels = channels,
+                            PlaylistUrl = CurrentPlaylistUrl(tuner)
+                        };
+                    }
+
+                    return null;
+                }
+
+                return JsonSerializer.Deserialize<M3uListingSnapshot>(document.RootElement.GetRawText());
+            }
+            catch (Exception ex) when (ex is IOException or JsonException)
+            {
+                Logger.LogDebug(ex, "Could not read Live TV channel snapshot {Path}", path);
+                return null;
+            }
+        }
+
+        private void PersistDiskSnapshot(TunerHostInfo tuner, M3uListingSnapshot snapshot)
+        {
+            var path = ChannelCacheFile(tuner);
+            if (string.IsNullOrEmpty(path) || snapshot is null || !HasChannels(snapshot))
+            {
+                return;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                using var writeStream = AsyncFile.Create(path);
+                JsonSerializer.Serialize(writeStream, snapshot);
+            }
+            catch (IOException ex)
+            {
+                Logger.LogDebug(ex, "Could not write Live TV channel snapshot {Path}", path);
+            }
+        }
+
+        private string ChannelCacheFile(TunerHostInfo tuner)
+        {
+            if (tuner is null || string.IsNullOrEmpty(tuner.Id) || Config?.ApplicationPaths?.CachePath is null)
+            {
+                return null;
+            }
+
+            return Path.Combine(Config.ApplicationPaths.CachePath, tuner.Id + "_channels");
+        }
+
+        private static string SnapshotKey(TunerHostInfo tuner)
+            => string.IsNullOrEmpty(tuner?.Id) ? tuner?.Url ?? "pending" : tuner.Id;
+
+        private static string CurrentPlaylistUrl(TunerHostInfo tuner)
+        {
+            if (tuner is null)
+            {
+                return null;
+            }
+
+            try
+            {
+                return M3uUrlFailover.GetPlaylistUrl(tuner);
+            }
+            catch (Exception)
+            {
+                return tuner.Url;
+            }
+        }
+
+        private static bool HasChannels(M3uListingSnapshot snapshot)
+            => snapshot?.Channels is { Count: > 0 };
 
         protected abstract Task<List<MediaSourceInfo>> GetChannelStreamMediaSources(TunerHostInfo tuner, ChannelInfo channel, CancellationToken cancellationToken);
 

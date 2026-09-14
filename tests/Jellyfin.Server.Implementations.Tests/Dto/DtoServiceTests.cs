@@ -12,6 +12,7 @@ using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Controller.Trickplay;
+using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Querying;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -107,6 +108,73 @@ public class DtoServiceTests
         Assert.NotNull(dto.ImageTags);
         Assert.True(dto.ImageTags.ContainsKey(ImageType.Primary));
         Assert.Null(dto.ParentPrimaryImageItemId);
+    }
+
+    [Fact]
+    public void GetBaseItemDto_ChannelVideoWithoutStaticSources_DoesNotThrow()
+    {
+        var mediaSources = new Mock<IMediaSourceManager>();
+        mediaSources
+            .Setup(m => m.GetStaticMediaSources(It.IsAny<BaseItem>(), It.IsAny<bool>(), It.IsAny<User>()))
+            .Returns(Array.Empty<MediaSourceInfo>());
+
+        var dtoService = new DtoService(
+            NullLogger<DtoService>.Instance,
+            _libraryManagerMock.Object,
+            _userDataManagerMock.Object,
+            new Mock<IImageProcessor>().Object,
+            new Mock<IProviderManager>().Object,
+            new Mock<IRecordingsManager>().Object,
+            new Mock<IApplicationHost>().Object,
+            mediaSources.Object,
+            new Lazy<ILiveTvManager>(() => new Mock<ILiveTvManager>().Object),
+            new Mock<ITrickplayManager>().Object,
+            new Mock<IChapterManager>().Object);
+
+        var item = new Video
+        {
+            Id = Guid.NewGuid(),
+            Name = "arte HD",
+            ChannelId = Guid.NewGuid()
+        };
+        var options = new DtoOptions(false)
+        {
+            EnableImages = false,
+            Fields = [ItemFields.MediaSources, ItemFields.MediaStreams]
+        };
+
+        var dto = dtoService.GetBaseItemDto(item, options);
+
+        Assert.NotNull(dto);
+        Assert.Empty(dto.MediaSources ?? []);
+        Assert.Empty(dto.MediaStreams ?? []);
+    }
+
+    [Fact]
+    public void MediaStreamsForDto_EmptySources_ReturnsEmpty()
+    {
+        var item = new Video { Id = Guid.NewGuid(), ChannelId = Guid.NewGuid() };
+        Assert.Empty(DtoService.MediaStreamsForDto([], item));
+        Assert.Empty(DtoService.MediaStreamsForDto(null, item));
+    }
+
+    [Fact]
+    public void MediaStreamsForDto_ChannelUsesFirstSourceStreams()
+    {
+        var item = new Video { Id = Guid.NewGuid(), ChannelId = Guid.NewGuid() };
+        var sources = new List<MediaSourceInfo>
+        {
+            new()
+            {
+                Id = "src",
+                MediaStreams = [new MediaStream { Type = MediaStreamType.Video, Index = -1 }]
+            }
+        };
+
+        var streams = DtoService.MediaStreamsForDto(sources, item);
+
+        Assert.Single(streams);
+        Assert.Equal(MediaStreamType.Video, streams[0].Type);
     }
 
     [Fact]

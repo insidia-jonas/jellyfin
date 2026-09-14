@@ -1399,28 +1399,10 @@ namespace Emby.Server.Implementations.Dto
                 // Add VideoInfo
                 if (item is IHasMediaSources)
                 {
-                    MediaStream[] mediaStreams;
-
-                    if (dto.MediaSources is not null && dto.MediaSources.Length > 0)
-                    {
-                        if (item.SourceType == SourceType.Channel)
-                        {
-                            mediaStreams = dto.MediaSources[0].MediaStreams.ToArray();
-                        }
-                        else
-                        {
-                            string id = item.Id.ToString("N", CultureInfo.InvariantCulture);
-                            mediaStreams = dto.MediaSources.Where(i => string.Equals(i.Id, id, StringComparison.OrdinalIgnoreCase))
-                                .SelectMany(i => i.MediaStreams)
-                                .ToArray();
-                        }
-                    }
-                    else
-                    {
-                        mediaStreams = _mediaSourceManager.GetStaticMediaSources(item, true)[0].MediaStreams.ToArray();
-                    }
-
-                    dto.MediaStreams = mediaStreams;
+                    IReadOnlyList<MediaSourceInfo> sources = dto.MediaSources is { Length: > 0 }
+                        ? dto.MediaSources
+                        : _mediaSourceManager.GetStaticMediaSources(item, true);
+                    dto.MediaStreams = MediaStreamsForDto(sources, item);
                 }
             }
 
@@ -1806,6 +1788,32 @@ namespace Emby.Server.Implementations.Dto
             }
 
             return item.GetDefaultPrimaryImageAspectRatio();
+        }
+
+        /// <summary>
+        /// Live IChannel items have no saved file source. Indexing [0] threw and
+        /// GET /Items/{id} returned 400, so the web player never reached PlaybackInfo.
+        /// </summary>
+        /// <param name="sources">Static or DTO media sources; may be empty.</param>
+        /// <param name="item">The library item being serialized.</param>
+        /// <returns>The streams to attach, or an empty array.</returns>
+        internal static MediaStream[] MediaStreamsForDto(IReadOnlyList<MediaSourceInfo>? sources, BaseItem item)
+        {
+            if (sources is null || sources.Count == 0)
+            {
+                return [];
+            }
+
+            if (item.SourceType == SourceType.Channel)
+            {
+                return sources[0].MediaStreams?.ToArray() ?? [];
+            }
+
+            var id = item.Id.ToString("N", CultureInfo.InvariantCulture);
+            return sources
+                .Where(source => string.Equals(source.Id, id, StringComparison.OrdinalIgnoreCase))
+                .SelectMany(source => source.MediaStreams ?? [])
+                .ToArray();
         }
     }
 }

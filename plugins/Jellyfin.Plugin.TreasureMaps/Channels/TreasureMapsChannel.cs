@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.TreasureMaps.Api;
 using Jellyfin.Plugin.TreasureMaps.Configuration;
 using Jellyfin.Plugin.TreasureMaps.Languages;
+using Jellyfin.Plugin.TreasureMaps.Listing;
 using Jellyfin.Plugin.TreasureMaps.ReleaseNaming;
 using Jellyfin.Plugin.TreasureMaps.Xrel;
 using MediaBrowser.Controller.Channels;
@@ -28,7 +29,7 @@ namespace Jellyfin.Plugin.TreasureMaps.Channels;
 /// Opening a series card lists every episode (seasons first when needed); each episode then
 /// lists qualities. Grab by marking a release as a favorite (heart).
 /// </summary>
-public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSearch, IDisableMediaSourceDisplay, IRequiresMediaInfoCallback, IHasCacheKey, ISupportsDelete
+public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSearch, IDisableMediaSourceDisplay, IRequiresMediaInfoCallback, IHasCacheKey, IChannelPresentationOverlay, ISupportsDelete
 {
     private const string GenrePrefix = "genre:";
     private const string FindPrefix = "find:";
@@ -56,6 +57,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
     private readonly GrabService _grabService;
     private readonly Recommendations.AiRecommender _ai;
     private readonly Metadata.MetadataCatalog _catalog;
+    private readonly TreasureMapsListingCache _listingCache;
     private readonly MediaBrowser.Controller.Library.ILibraryManager _libraryManager;
     private readonly MediaBrowser.Controller.Library.IUserManager _userManager;
     private readonly ILogger<TreasureMapsChannel> _logger;
@@ -68,6 +70,8 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
     /// <param name="sabnzbd">The SABnzbd client (for the Downloads folder).</param>
     /// <param name="grabService">The shared grab service (play-to-download).</param>
     /// <param name="ai">The AI recommender.</param>
+    /// <param name="catalog">The IMDb/iTunes metadata catalog.</param>
+    /// <param name="listingCache">The freshness-gated indexer snapshot cache.</param>
     /// <param name="libraryManager">The library manager (for the user's history).</param>
     /// <param name="userManager">The user manager.</param>
     /// <param name="logger">The logger.</param>
@@ -78,6 +82,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         GrabService grabService,
         Recommendations.AiRecommender ai,
         Metadata.MetadataCatalog catalog,
+        TreasureMapsListingCache listingCache,
         MediaBrowser.Controller.Library.ILibraryManager libraryManager,
         MediaBrowser.Controller.Library.IUserManager userManager,
         ILogger<TreasureMapsChannel> logger)
@@ -88,6 +93,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         _grabService = grabService;
         _ai = ai;
         _catalog = catalog;
+        _listingCache = listingCache;
         _libraryManager = libraryManager;
         _userManager = userManager;
         _logger = logger;
@@ -180,12 +186,15 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
 
             if (string.Equals(folderId, "new", StringComparison.Ordinal))
             {
-                return await GetRecentlyAddedAsync(cancellationToken).ConfigureAwait(false);
+                return FastFolder("folder:new", TreasureMapsListingCache.BrowseFreshTtl, GetRecentlyAddedAsync);
             }
 
             if (string.Equals(folderId, "foryou", StringComparison.Ordinal))
             {
-                return await GetForYouAsync(query.UserId, cancellationToken).ConfigureAwait(false);
+                return FastFolder(
+                    "folder:foryou:" + query.UserId.ToString("N"),
+                    TreasureMapsListingCache.BrowseFreshTtl,
+                    ct => GetForYouAsync(query.UserId, ct));
             }
 
             if (string.Equals(folderId, "downloads", StringComparison.Ordinal))
@@ -203,17 +212,43 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
             // A title card (GRP) opens into episodes (series) or qualities (movie).
             if (folderId.StartsWith(GroupPrefix, StringComparison.Ordinal))
             {
-                return await OpenGroupAsync(folderId, cancellationToken).ConfigureAwait(false);
+                if (!TryParseTitleCardId(folderId, GroupPrefix, out _, out _, out var groupTitle, out _, out _)
+                    || string.IsNullOrWhiteSpace(groupTitle))
+                {
+                    throw new InvalidOperationException("Treasure-Maps could not open this title.");
+                }
+
+                return FastFolder(
+                    "folder:" + folderId,
+                    TreasureMapsListingCache.BrowseFreshTtl,
+                    ct => OpenGroupAsync(folderId, ct));
             }
 
             if (folderId.StartsWith(SeasonPrefix, StringComparison.Ordinal))
             {
-                return await OpenSeasonAsync(folderId, cancellationToken).ConfigureAwait(false);
+                if (!TryParseTitleCardId(folderId, SeasonPrefix, out _, out _, out _, out _, out var seasonExtra)
+                    || !int.TryParse(seasonExtra, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+                {
+                    throw new InvalidOperationException("Treasure-Maps could not open this season.");
+                }
+
+                return FastFolder(
+                    "folder:" + folderId,
+                    TreasureMapsListingCache.BrowseFreshTtl,
+                    ct => OpenSeasonAsync(folderId, ct));
             }
 
             if (folderId.StartsWith(EpisodePrefix, StringComparison.Ordinal))
             {
-                return await OpenEpisodeAsync(folderId, cancellationToken).ConfigureAwait(false);
+                if (!TryParseTitleCardId(folderId, EpisodePrefix, out _, out _, out _, out _, out _))
+                {
+                    throw new InvalidOperationException("Treasure-Maps could not open this episode.");
+                }
+
+                return FastFolder(
+                    "folder:" + folderId,
+                    TreasureMapsListingCache.BrowseFreshTtl,
+                    ct => OpenEpisodeAsync(folderId, ct));
             }
 
             // A release tile (REL) is a folder too; opening it shows a small grab detail rather
@@ -245,42 +280,57 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
 
             if (folderId.StartsWith(FeedPrefix, StringComparison.Ordinal))
             {
-                return await GetSpotlightFeedAsync(folderId, cancellationToken).ConfigureAwait(false);
+                return FastFolder(
+                    "folder:" + folderId,
+                    TreasureMapsListingCache.SpotlightFreshTtl,
+                    ct => GetSpotlightFeedAsync(folderId, ct));
             }
 
             if (CategoryBrowse.TryParsePageFolder(folderId, out var pageScope, out var pageNumber)
                 && TryCategorySpec(pageScope, out var pageKind, out var pageGenre, out var pageCats))
             {
-                return await GetCategoryAsync(pageScope, pageKind, pageGenre, pageCats, pageNumber, cancellationToken)
-                    .ConfigureAwait(false);
+                return FastFolder(
+                    "folder:" + folderId,
+                    TreasureMapsListingCache.BrowseFreshTtl,
+                    ct => GetCategoryAsync(pageScope, pageKind, pageGenre, pageCats, pageNumber, ct));
             }
 
             if (string.Equals(folderId, "movies", StringComparison.Ordinal))
             {
-                return await GetCategoryAsync(folderId, "movie", null, null, 1, cancellationToken).ConfigureAwait(false);
+                return FastFolder(
+                    "folder:movies",
+                    TreasureMapsListingCache.BrowseFreshTtl,
+                    ct => GetCategoryAsync(folderId, "movie", null, null, 1, ct));
             }
 
             if (string.Equals(folderId, "tv", StringComparison.Ordinal))
             {
-                return await GetCategoryAsync(folderId, "tv", null, null, 1, cancellationToken).ConfigureAwait(false);
+                return FastFolder(
+                    "folder:tv",
+                    TreasureMapsListingCache.BrowseFreshTtl,
+                    ct => GetCategoryAsync(folderId, "tv", null, null, 1, ct));
             }
 
             // German rows, mirroring the website's "Movies - DE" / "TV - DE" category blocks.
             if (string.Equals(folderId, "movies-de", StringComparison.Ordinal))
             {
-                return await GetCategoryAsync(folderId, "movie", null, TreasureMapsApiClient.GermanMovieCategories, 1, cancellationToken)
-                    .ConfigureAwait(false);
+                return FastFolder(
+                    "folder:movies-de",
+                    TreasureMapsListingCache.BrowseFreshTtl,
+                    ct => GetCategoryAsync(folderId, "movie", null, TreasureMapsApiClient.GermanMovieCategories, 1, ct));
             }
 
             if (string.Equals(folderId, "tv-de", StringComparison.Ordinal))
             {
-                return await GetCategoryAsync(folderId, "tv", null, TreasureMapsApiClient.GermanTvCategories, 1, cancellationToken)
-                    .ConfigureAwait(false);
+                return FastFolder(
+                    "folder:tv-de",
+                    TreasureMapsListingCache.BrowseFreshTtl,
+                    ct => GetCategoryAsync(folderId, "tv", null, TreasureMapsApiClient.GermanTvCategories, 1, ct));
             }
 
             if (string.Equals(folderId, "genres", StringComparison.Ordinal))
             {
-                return await GetGenreFoldersAsync(cancellationToken).ConfigureAwait(false);
+                return FastFolder("folder:genres", TreasureMapsListingCache.CapsFreshTtl, GetGenreFoldersAsync);
             }
 
             if (string.Equals(folderId, "find", StringComparison.Ordinal))
@@ -290,18 +340,28 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
 
             if (folderId.StartsWith(FindPrefix, StringComparison.Ordinal))
             {
-                return await SearchByLetterAsync(folderId[FindPrefix.Length..], cancellationToken).ConfigureAwait(false);
+                var letter = folderId[FindPrefix.Length..];
+                return FastFolder(
+                    "folder:find:" + letter,
+                    TreasureMapsListingCache.BrowseFreshTtl,
+                    ct => SearchByLetterAsync(letter, ct));
             }
 
             if (folderId.StartsWith("search:", StringComparison.Ordinal))
             {
-                return await SearchLiveAsync(folderId["search:".Length..], cancellationToken).ConfigureAwait(false);
+                var term = folderId["search:".Length..];
+                return FastFolder(
+                    "folder:search:" + term.ToLowerInvariant(),
+                    TreasureMapsApiClient.CacheTtlForQuery(term),
+                    ct => SearchLiveAsync(term, ct));
             }
 
             if (folderId.StartsWith(GenrePrefix, StringComparison.Ordinal))
             {
-                return await GetCategoryAsync(folderId, "movie", folderId[GenrePrefix.Length..], null, 1, cancellationToken)
-                    .ConfigureAwait(false);
+                return FastFolder(
+                    "folder:" + folderId,
+                    TreasureMapsListingCache.BrowseFreshTtl,
+                    ct => GetCategoryAsync(folderId, "movie", folderId[GenrePrefix.Length..], null, 1, ct));
             }
 
             return Hint("unknown-folder", "Nothing here", "This Treasure-Maps category has no titles right now.");
@@ -578,7 +638,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
 
         var active = !string.Equals(entry.Status, "Completed", StringComparison.OrdinalIgnoreCase)
                      && !string.Equals(entry.Status, "Failed", StringComparison.OrdinalIgnoreCase);
-        var overview = DownloadOverview(entry, speed, quality);
+        var overview = DownloadOverlay.FormatOverview(entry, speed, quality);
         var cover = rec?.CoverUrl ?? _grabService.GetArtwork(entry.Id, entry.Name);
         if (string.IsNullOrWhiteSpace(cover))
         {
@@ -616,25 +676,6 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         }
 
         return card;
-    }
-
-    private static string DownloadOverview(SabnzbdClient.SabDownloadStatus entry, string? speed, string? quality)
-    {
-        var badge = string.IsNullOrWhiteSpace(quality) ? string.Empty : quality.Trim() + "\n\n";
-        if (string.Equals(entry.Status, "Completed", StringComparison.OrdinalIgnoreCase))
-        {
-            return badge + "Download complete. Open Movies or TV Shows once the library scan finishes.";
-        }
-
-        if (string.Equals(entry.Status, "Failed", StringComparison.OrdinalIgnoreCase))
-        {
-            return badge + "Download failed." + (string.IsNullOrWhiteSpace(entry.FailMessage) ? string.Empty : " " + entry.FailMessage);
-        }
-
-        return badge + $"Downloading \u2013 {entry.Percent:0}%"
-            + (string.IsNullOrWhiteSpace(speed) ? string.Empty : $" \u00B7 {speed}B/s")
-            + (string.IsNullOrWhiteSpace(entry.TimeLeft) ? string.Empty : $" \u00B7 {entry.TimeLeft} left")
-            + (string.IsNullOrWhiteSpace(entry.LeftMb) ? string.Empty : $" \u00B7 {entry.LeftMb}/{entry.SizeMb} MB remaining");
     }
 
     private ChannelItemResult GetDownloadDetail(string folderId)
@@ -695,11 +736,55 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
     /// <inheritdoc />
     public string? GetCacheKey(string? userId)
     {
-        // Jellyfin caches channel folder results on disk for hours; folding a 2-minute time
-        // bucket into the key keeps the Downloads view (progress in names) reasonably live.
-        // The plugin's own in-memory API caches keep this cheap for the indexer.
-        var bucket = DateTime.UtcNow.Ticks / TimeSpan.FromMinutes(2).Ticks;
-        return (userId ?? string.Empty) + "-" + DataVersion + "-" + bucket.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        // Identity + DataVersion + listing generation. A 2-minute time bucket used to
+        // rebuild every folder on every open. Download percent is overlaid locally;
+        // indexer freshness is enforced by the listing cache (expired rows are not
+        // returned as current) rather than rotating this key.
+        return TreasureMapsChannelCacheKey.Build(userId, DataVersion, _listingCache.Generation, DateTime.UtcNow);
+    }
+
+    /// <summary>
+    /// Returns a still-fresh folder snapshot immediately. Expired or missing snapshots
+    /// start a coalesced background build and return a pending result so Items does not
+    /// wait on indexer HTTP or IMDb lookups.
+    /// </summary>
+    private ChannelItemResult FastFolder(
+        string key,
+        TimeSpan ttl,
+        Func<CancellationToken, Task<ChannelItemResult>> build)
+    {
+        if (_listingCache.TryGetFreshOrSchedule(
+                key,
+                ttl,
+                async (_, token) =>
+                {
+                    var result = await build(token).ConfigureAwait(false);
+                    if (result is null || result.RefreshPending || TreasureMapsListingCache.IsEmptyListing(result))
+                    {
+                        return ListingFetch<ChannelItemResult>.DoNotStore(result);
+                    }
+
+                    return ListingFetch<ChannelItemResult>.Store(result, hash: TreasureMapsListingCache.HashPayload(result));
+                },
+                out var hit)
+            && hit is not null)
+        {
+            return hit;
+        }
+
+        return ChannelItemResult.Pending();
+    }
+
+    /// <inheritdoc />
+    public void OverlayPresentation(IReadOnlyList<MediaBrowser.Controller.Entities.BaseItem> items)
+    {
+        var snapshot = _sabnzbd.LastDownloadStatus;
+        if (snapshot is null)
+        {
+            return;
+        }
+
+        DownloadOverlay.Apply(items, snapshot.Items, snapshot.Speed, _grabService.Lookup);
     }
 
     /// <inheritdoc />
@@ -1731,23 +1816,34 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
 
         try
         {
-            var movies = await _client.SearchMoviesAsync(null, null, PageSize, cancellationToken).ConfigureAwait(false);
-            foreach (var card in (await BuildGroupCardsAsync(movies?.Items, "latest", Config.ResultLimit, null, cancellationToken).ConfigureAwait(false)).Items)
+            var latest = FastFolder(
+                "folder:latest",
+                TreasureMapsListingCache.BrowseFreshTtl,
+                async ct =>
+                {
+                    var movies = await _client.SearchMoviesAsync(null, null, PageSize, ct).ConfigureAwait(false);
+                    return await BuildGroupCardsAsync(movies?.Items, "latest", Config.ResultLimit, null, ct).ConfigureAwait(false);
+                });
+
+            if (!latest.RefreshPending)
             {
-                if (card.Type == ChannelItemType.Media)
+                foreach (var card in latest.Items)
                 {
-                    continue;
-                }
+                    if (card.Type == ChannelItemType.Media)
+                    {
+                        continue;
+                    }
 
-                if (!seen.Add(card.Name ?? card.Id))
-                {
-                    continue;
-                }
+                    if (!seen.Add(card.Name ?? card.Id))
+                    {
+                        continue;
+                    }
 
-                items.Add(card);
-                if (items.Count >= 24)
-                {
-                    break;
+                    items.Add(card);
+                    if (items.Count >= 24)
+                    {
+                        break;
+                    }
                 }
             }
         }

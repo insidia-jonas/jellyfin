@@ -42,8 +42,36 @@ public class LiveTvWebOverviewTests
         Assert.Contains("Keine Sender", js, StringComparison.Ordinal);
         Assert.Contains("Live TV konnte nicht geladen werden", js, StringComparison.Ordinal);
         Assert.Contains("FireTvLive", js, StringComparison.Ordinal);
+        Assert.Contains("resolvePlaybackManager", js, StringComparison.Ordinal);
+        Assert.Contains("playableItem", js, StringComparison.Ordinal);
+        Assert.Contains("webpackChunk", js, StringComparison.Ordinal);
+        Assert.Contains("playbackmanager.js", js, StringComparison.Ordinal);
+        Assert.Contains("Type = 'TvChannel'", js, StringComparison.Ordinal);
+        Assert.Contains("NativePlayer.loadPlayer", js, StringComparison.Ordinal);
         Assert.Contains("#/list?parentId=", js, StringComparison.Ordinal);
+        Assert.Contains("&ltvgroup=1", js, StringComparison.Ordinal);
+        Assert.Contains("split('?')[0]", js, StringComparison.Ordinal);
+        Assert.Contains("getUrl('LiveTv/Channels'", js, StringComparison.Ordinal);
+        Assert.Contains("client.getItems", js, StringComparison.Ordinal);
+        Assert.Contains("never the IPTV playlist", js, StringComparison.Ordinal);
         Assert.DoesNotContain("TreasureMaps/Search", js, StringComparison.Ordinal);
+        Assert.DoesNotContain(".m3u", js, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("requestAnimationFrame", js, StringComparison.Ordinal);
+        Assert.Contains("ROW_CHUNK", js, StringComparison.Ordinal);
+        Assert.Contains("render('progress')", js, StringComparison.Ordinal);
+        Assert.Contains("hideLibrarySpinner", js, StringComparison.Ordinal);
+        Assert.Contains("html.jf-livetv-list-on .loading", js, StringComparison.Ordinal);
+        Assert.Contains("indexOf('g:') === 0", js, StringComparison.Ordinal);
+        Assert.Contains("isLiveTvGroupHash", js, StringComparison.Ordinal);
+        Assert.Contains("loadGen", js, StringComparison.Ordinal);
+        Assert.Contains("emptyRetry", js, StringComparison.Ordinal);
+        Assert.Contains("EMPTY_RETRY_MS", js, StringComparison.Ordinal);
+        Assert.Contains("scheduleEmptyRetry", js, StringComparison.Ordinal);
+        Assert.Contains("window.loading.hide", js, StringComparison.Ordinal);
+        Assert.Contains("visibleHost", js, StringComparison.Ordinal);
+        Assert.Contains("loginPage", js, StringComparison.Ordinal);
+        Assert.Contains("overlayOnVisiblePage", js, StringComparison.Ordinal);
+        Assert.Contains("host.contains(box)", js, StringComparison.Ordinal);
     }
 
     [Fact]

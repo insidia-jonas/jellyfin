@@ -18,6 +18,8 @@
     var loading = false;
     var lastKey = "";
     var syncTimer = 0;
+    var paintToken = 0;
+    var ROW_CHUNK = 24;
 
     function german() {
         var lang = String((document.documentElement && document.documentElement.lang) || navigator.language || "").toLowerCase();
@@ -233,6 +235,47 @@
         });
     }
 
+    function resolvePlaybackManager() {
+        if (window.playbackManager && typeof window.playbackManager.play === "function") {
+            return window.playbackManager;
+        }
+        if (window.JellyfinLiveTvOverview && typeof window.JellyfinLiveTvOverview.resolvePlaybackManager === "function") {
+            return window.JellyfinLiveTvOverview.resolvePlaybackManager();
+        }
+        try {
+            var req;
+            var chunks = window.webpackChunk || (typeof self !== "undefined" && self.webpackChunk);
+            if (chunks && typeof chunks.push === "function") {
+                chunks.push([["jf-livetv-pm"], {}, function (r) { req = r; }]);
+            }
+            if (typeof req === "function") {
+                var exp = req("./components/playback/playbackmanager.js");
+                if (exp && exp.playbackManager && typeof exp.playbackManager.play === "function") {
+                    window.playbackManager = exp.playbackManager;
+                    return exp.playbackManager;
+                }
+            }
+        } catch (e) { /* web host without webpack */ }
+        return null;
+    }
+
+    function playableItem(item) {
+        var copy = {};
+        var key;
+        for (key in item) {
+            if (Object.prototype.hasOwnProperty.call(item, key)) {
+                copy[key] = item[key];
+            }
+        }
+        copy.Type = "TvChannel";
+        copy.MediaType = "Video";
+        copy.IsLiveStream = true;
+        if (!copy.ChannelId) {
+            copy.ChannelId = item.Id;
+        }
+        return copy;
+    }
+
     function play(item, list) {
         var creds = auth();
         var queue = (list && list.length ? list : channels).slice();
@@ -268,8 +311,9 @@
             window.NativePlayer.loadPlayer(JSON.stringify(payload));
             return;
         }
-        if (window.Emby && window.Emby.Page && typeof window.playbackManager !== "undefined") {
-            window.playbackManager.play({ items: [item], fullscreen: true });
+        var manager = resolvePlaybackManager();
+        if (manager) {
+            manager.play({ items: [playableItem(item)], fullscreen: true });
         }
     }
 
@@ -315,71 +359,114 @@
                 : (german() ? "Keine Sender. Tuner und Guide auf dem Server prüfen." : "No channels. Check the tuner and guide on the server.");
             list.appendChild(empty);
         }
-        shown.forEach(function (item, index) {
-            var row = document.createElement("button");
-            row.type = "button";
-            row.className = "firetv-live-row";
-            row.setAttribute("data-id", item.Id);
-            row.setAttribute("data-type", "TvChannel");
-            row.tabIndex = 0;
-            var logo = document.createElement("div");
-            logo.className = "firetv-live-logo";
-            var url = posterUrl(item);
-            if (url) {
-                logo.style.backgroundImage = "url('" + String(url).replace(/'/g, "%27") + "')";
-            }
-            var copy = document.createElement("div");
-            copy.className = "firetv-live-copy";
-            var name = document.createElement("div");
-            name.className = "firetv-live-name";
-            var number = item.Number || item.ChannelNumber || "";
-            name.textContent = number ? number + "  " + (item.Name || "") : (item.Name || "");
-            var now = document.createElement("div");
-            now.className = "firetv-live-now";
-            now.textContent = nowLine(item) || (german() ? "Keine EPG-Daten" : "No guide data");
-            var bar = document.createElement("div");
-            bar.className = "firetv-live-bar";
-            var fill = document.createElement("span");
-            var percent = progressOf(item, Date.now());
-            if (percent != null) {
-                fill.style.width = percent + "%";
-                bar.appendChild(fill);
-                bar.setAttribute("role", "progressbar");
-                bar.setAttribute("aria-valuenow", String(Math.round(percent)));
-            }
-            var next = document.createElement("div");
-            next.className = "firetv-live-next";
-            next.textContent = nextLine(item);
-            copy.appendChild(name);
-            copy.appendChild(now);
-            if (fill.parentNode) {
-                copy.appendChild(bar);
-            }
-            if (next.textContent) {
-                copy.appendChild(next);
-            }
-            row.appendChild(logo);
-            row.appendChild(copy);
-            row.addEventListener("focus", function () { row.classList.add("focused"); });
-            row.addEventListener("blur", function () { row.classList.remove("focused"); });
-            row.addEventListener("click", function (event) {
-                event.preventDefault();
-                event.stopPropagation();
-                play(item, shown);
-            });
-            list.appendChild(row);
-            if (index === 0 && document.activeElement !== search) {
-                window.setTimeout(function () { row.focus(); }, 40);
-            }
-        });
         box.appendChild(head);
         box.appendChild(list);
+        if (!shown.length) {
+            return;
+        }
+        paintToken += 1;
+        var token = paintToken;
+        var offset = 0;
+        function paintChunk() {
+            if (token !== paintToken || injectedOwns() || document.getElementById("jf-livetv-overview")) {
+                return;
+            }
+            var end = Math.min(offset + ROW_CHUNK, shown.length);
+            var i;
+            for (i = offset; i < end; i++) {
+                list.appendChild(buildLiveRow(shown[i], i, shown, search));
+            }
+            offset = end;
+            if (offset < shown.length && typeof window.requestAnimationFrame === "function") {
+                window.requestAnimationFrame(paintChunk);
+            } else if (offset < shown.length) {
+                window.setTimeout(paintChunk, 0);
+            }
+        }
+        paintChunk();
+    }
+
+    function buildLiveRow(item, index, shown, search) {
+        var row = document.createElement("button");
+        row.type = "button";
+        row.className = "firetv-live-row";
+        row.setAttribute("data-id", item.Id);
+        row.setAttribute("data-type", "TvChannel");
+        row.tabIndex = 0;
+        var logo = document.createElement("div");
+        logo.className = "firetv-live-logo";
+        var url = posterUrl(item);
+        if (url) {
+            logo.style.backgroundImage = "url('" + String(url).replace(/'/g, "%27") + "')";
+        }
+        var copy = document.createElement("div");
+        copy.className = "firetv-live-copy";
+        var name = document.createElement("div");
+        name.className = "firetv-live-name";
+        var number = item.Number || item.ChannelNumber || "";
+        name.textContent = number ? number + "  " + (item.Name || "") : (item.Name || "");
+        var now = document.createElement("div");
+        now.className = "firetv-live-now";
+        now.textContent = nowLine(item) || (german() ? "Keine EPG-Daten" : "No guide data");
+        var bar = document.createElement("div");
+        bar.className = "firetv-live-bar";
+        var fill = document.createElement("span");
+        var percent = progressOf(item, Date.now());
+        if (percent != null) {
+            fill.style.width = percent + "%";
+            bar.appendChild(fill);
+            bar.setAttribute("role", "progressbar");
+            bar.setAttribute("aria-valuenow", String(Math.round(percent)));
+        }
+        var next = document.createElement("div");
+        next.className = "firetv-live-next";
+        next.textContent = nextLine(item);
+        copy.appendChild(name);
+        copy.appendChild(now);
+        if (fill.parentNode) {
+            copy.appendChild(bar);
+        }
+        if (next.textContent) {
+            copy.appendChild(next);
+        }
+        row.appendChild(logo);
+        row.appendChild(copy);
+        row.addEventListener("focus", function () { row.classList.add("focused"); });
+        row.addEventListener("blur", function () { row.classList.remove("focused"); });
+        row.addEventListener("click", function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            play(item, shown);
+        });
+        if (index === 0 && document.activeElement !== search) {
+            window.setTimeout(function () { row.focus(); }, 40);
+        }
+        return row;
+    }
+
+    function hideLibrarySpinner() {
+        var nodes = document.querySelectorAll(
+            ".loading, .docspinner, .busyIndicator, paper-spinner-lite, .mdl-spinner, .progressring, .emby-progress, .busy"
+        );
+        var i;
+        for (i = 0; i < nodes.length; i++) {
+            nodes[i].classList.add("hide");
+            nodes[i].style.display = "none";
+        }
+        if (window.loading && typeof window.loading.hide === "function") {
+            try {
+                window.loading.hide();
+            } catch (e) { /* ignore */ }
+        }
     }
 
     function show(on) {
         document.documentElement.classList.toggle("firetv-live-on", on);
         if (document.body) {
             document.body.classList.toggle("firetv-live-on", on);
+        }
+        if (on) {
+            hideLibrarySpinner();
         }
         var box = document.getElementById("firetv-live");
         if (!on && box) {
@@ -390,21 +477,35 @@
     }
 
     function load() {
+        if (injectedOwns() || document.getElementById("jf-livetv-overview")) {
+            hide();
+            return;
+        }
         var key = hash() + "|" + pageTitle();
-        if (loading) {
+        if (loading && lastKey === key) {
+            show(true);
+            hideLibrarySpinner();
             return;
         }
         if (channels.length && lastKey === key) {
             show(true);
+            hideLibrarySpinner();
             render();
             return;
         }
         lastKey = key;
         loading = true;
         show(true);
+        hideLibrarySpinner();
         render();
         fetchChannels().then(function (items) {
+            if (injectedOwns() || document.getElementById("jf-livetv-overview")) {
+                loading = false;
+                hide();
+                return;
+            }
             loading = false;
+            hideLibrarySpinner();
             channels = items;
             render();
         });
