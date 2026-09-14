@@ -39,11 +39,7 @@ object PlayUrl {
 
     fun resolveLive(serverBase: String, source: MediaSourceUrls): String? {
         val base = serverBase.trimEnd('/')
-        val candidates = listOfNotNull(
-            source.directStreamUrl,
-            source.transcodingUrl,
-            source.path,
-        )
+        val candidates = liveCandidates(source)
         val proxy = candidates.firstNotNullOfOrNull { raw ->
             val bound = bindToServer(base, raw)
             bound?.takeIf { isLiveProxy(it) }
@@ -54,6 +50,31 @@ object PlayUrl {
         return candidates.firstNotNullOfOrNull { raw ->
             val bound = bindToServer(base, raw)
             bound?.takeIf { isSameOrigin(base, it) }
+        }
+    }
+
+    /**
+     * The `/LiveTv/LiveStreamFiles/…` proxy is a byte copy of the provider mux, so
+     * German IPTV hands ExoPlayer mpeg2video + mp2 that Fire TV hardware cannot
+     * decode — a black picture with no video size. Offer that raw path only when the
+     * server allowed direct streaming; otherwise the transcoded URL is the one that
+     * produces frames.
+     */
+    private fun liveCandidates(source: MediaSourceUrls): List<String> {
+        val directAllowed = source.supportsDirectStream || source.supportsDirectPlay
+        val transcoded = source.transcodingUrl?.takeIf { it.isNotBlank() }
+        val direct = source.directStreamUrl?.takeIf { it.isNotBlank() }
+        val raw = source.path?.takeIf { it.isNotBlank() }
+        return buildList {
+            if (directAllowed && direct != null) {
+                add(direct)
+            }
+            if (transcoded != null) {
+                add(transcoded)
+            }
+            if (raw != null && (directAllowed || transcoded == null)) {
+                add(raw)
+            }
         }
     }
 

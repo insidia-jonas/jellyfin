@@ -15,7 +15,7 @@ object DeviceProfile {
           "MaxStaticBitrate": 100000000,
           "MusicStreamingTranscodingBitrate": 320000,
           "DirectPlayProfiles": [
-            {"Container":"mp4,m4v,mov,mkv,webm,ts,mpegts,avi","Type":"Video","VideoCodec":"h264,hevc,vp8,vp9,av1,mpeg2video,mpeg4","AudioCodec":"aac,mp3,ac3,eac3,flac,opus,pcm,dts"},
+            {"Container":"mp4,m4v,mov,mkv,webm,ts,mpegts,avi","Type":"Video","VideoCodec":"h264,hevc,vp8,vp9,av1","AudioCodec":"aac,mp3,ac3,eac3,flac,opus,pcm,dts"},
             {"Container":"mp3,aac,flac,wav,ogg,opus,m4a","Type":"Audio"}
           ],
           "TranscodingProfiles": [
