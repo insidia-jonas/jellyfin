@@ -39,7 +39,7 @@
         'html.jf-livetv-list-on .progressring,' +
         'html.jf-livetv-list-on .emby-progress,' +
         'html.jf-livetv-list-on .busy{display:none!important;visibility:hidden!important}' +
-        '#jf-livetv-overview{margin:.2em 0 2em;max-width:76rem;box-sizing:border-box}' +
+        '#jf-livetv-overview{margin:.6em 1.2em 2em;max-width:76rem;box-sizing:border-box;position:relative;z-index:2}' +
         '#jf-livetv-overview .jf-livetv-head{display:flex;flex-wrap:wrap;align-items:center;gap:.7em 1.1em;margin:0 0 .85em}' +
         '#jf-livetv-overview .jf-livetv-title{font-size:1.55em;font-weight:750;letter-spacing:.02em}' +
         '#jf-livetv-overview .jf-livetv-count{opacity:.72;font-weight:600}' +
@@ -313,15 +313,67 @@
         });
     }
 
-    function ensure() {
+    function isStalePage(node) {
+        if (!node || !node.classList) {
+            return true;
+        }
+        if (node.id === 'loginPage' || node.id === 'startupPage') {
+            return true;
+        }
+        return node.classList.contains('hide') || node.classList.contains('standalonePage');
+    }
+
+    function visibleHost() {
+        var pages = document.querySelectorAll('.page.libraryPage, .page.liveTvPage, .libraryPage, .liveTvPage');
+        var i;
+        var page;
+        var padded;
+        for (i = 0; i < pages.length; i++) {
+            page = pages[i];
+            if (isStalePage(page)) {
+                continue;
+            }
+            padded = page.querySelector('.padded-right.padded-left, .padded-right');
+            return padded || page;
+        }
+        pages = document.querySelectorAll('.mainAnimatedPage');
+        for (i = 0; i < pages.length; i++) {
+            page = pages[i];
+            if (isStalePage(page)) {
+                continue;
+            }
+            return page;
+        }
+        return null;
+    }
+
+    function overlayOnVisiblePage() {
         var box = document.getElementById('jf-livetv-overview');
-        if (box) {
+        var host = visibleHost();
+        return !!(box && host && host.contains(box));
+    }
+
+    function applyListMode() {
+        document.documentElement.classList.toggle('jf-livetv-list-on', owned && overlayOnVisiblePage());
+        if (owned) {
+            hideLibrarySpinner();
+        }
+    }
+
+    function ensure() {
+        var host = visibleHost();
+        var box = document.getElementById('jf-livetv-overview');
+        if (!host) {
             return box;
         }
-        box = document.createElement('div');
-        box.id = 'jf-livetv-overview';
-        box.className = 'verticalSection';
-        var host = document.querySelector('.libraryPage .padded-right, .libraryPage, .liveTvPage, .padded-right.padded-bottom-page, .mainAnimatedPage') || document.body;
+        if (box && host.contains(box)) {
+            return box;
+        }
+        if (!box) {
+            box = document.createElement('div');
+            box.id = 'jf-livetv-overview';
+            box.className = 'verticalSection';
+        }
         if (host.firstChild) {
             host.insertBefore(box, host.firstChild);
         } else {
@@ -454,6 +506,9 @@
 
     function render(mode) {
         var box = ensure();
+        if (!box) {
+            return;
+        }
         var de = german();
         var shown = visibleItems();
         if (mode === 'progress' && box.querySelector('.jf-livetv-list')) {
@@ -543,14 +598,15 @@
 
     function show(on) {
         owned = on;
-        document.documentElement.classList.toggle('jf-livetv-list-on', on);
         if (on) {
+            ensure();
             hideLibrarySpinner();
         }
         var box = document.getElementById('jf-livetv-overview');
         if (!on && box) {
             box.remove();
         }
+        applyListMode();
         var legacy = document.getElementById('firetv-live');
         if (on && legacy) {
             legacy.remove();
@@ -747,6 +803,17 @@
         });
         var observer = new MutationObserver(function () {
             if (owned) {
+                var host = visibleHost();
+                var box = document.getElementById('jf-livetv-overview');
+                if (host && (!box || !host.contains(box))) {
+                    ensure();
+                    applyListMode();
+                    if (items.length || loading) {
+                        render();
+                    }
+                } else {
+                    applyListMode();
+                }
                 return;
             }
             window.clearTimeout(syncTimer);
@@ -768,6 +835,7 @@
     window.JellyfinLiveTvOverview = {
         __bound: true,
         ownsPage: function () { return owned; },
+        visibleHost: visibleHost,
         sync: sync,
         progressOf: progressOf,
         guideOf: guideOf,

@@ -62,6 +62,10 @@ public class LiveTvWebOverviewTests
         Assert.Contains("EMPTY_RETRY_MS", js, StringComparison.Ordinal);
         Assert.Contains("scheduleEmptyRetry", js, StringComparison.Ordinal);
         Assert.Contains("window.loading.hide", js, StringComparison.Ordinal);
+        Assert.Contains("visibleHost", js, StringComparison.Ordinal);
+        Assert.Contains("loginPage", js, StringComparison.Ordinal);
+        Assert.Contains("overlayOnVisiblePage", js, StringComparison.Ordinal);
+        Assert.Contains("host.contains(box)", js, StringComparison.Ordinal);
     }
 
     [Fact]
