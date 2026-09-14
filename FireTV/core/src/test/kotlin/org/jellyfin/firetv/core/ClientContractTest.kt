@@ -94,7 +94,7 @@ class PlaybackPayloadTest {
 class JellyfinHttpContractTest {
     @Test
     fun `sends modern media browser auth and a locale accept language`() {
-        val auth = JellyfinHttp.authorization("Jellyfin Fire TV", "Fire TV", "dev", "2.3.1", "tok")
+        val auth = JellyfinHttp.authorization("Jellyfin Fire TV", "Fire TV", "dev", "2.3.2", "tok")
         assertTrue(auth.startsWith("MediaBrowser "))
         assertTrue(auth.contains("Token=\"tok\""))
         assertFalse(auth.contains("/emby"))
@@ -103,7 +103,7 @@ class JellyfinHttpContractTest {
         assertTrue(DeviceProfile.JSON.contains("VideoRotation"))
         assertTrue(DeviceProfile.JSON.contains("vobsub"))
         assertTrue(DeviceProfile.JSON.contains("\"Container\":\"mp4\""))
-        assertEquals("2.3.1", FireTvClient.APP_VERSION)
+        assertEquals("2.3.2", FireTvClient.APP_VERSION)
         assertEquals("tv", FireTvClient.DEFAULT_LAYOUT)
     }
 }
