@@ -610,18 +610,44 @@
         });
     }
 
-    /* /videos/{id}/stream has no container extension, so the browser has to guess
-       the type from the response. Naming the container keeps Chrome on the mp4
-       demuxer for the fragmented stream ffmpeg writes. */
-    function progressivePath(url) {
+    /* The progressive transcoding url the server hands out carries no codec, so for a
+       live source whose codecs it has not probed it falls back to a stream copy — an
+       mpeg2video IPTV mux copied into mp4 gives a <video> element that reports
+       videoWidth 0 forever. Pin h264/aac and name the container so ffmpeg encodes
+       something the browser can actually decode. */
+    var FORCED_STREAM_PARAMS = {
+        videocodec: 'h264',
+        audiocodec: 'aac',
+        videobitrate: '8000000',
+        audiobitrate: '192000',
+        maxaudiochannels: '2',
+        'static': 'false'
+    };
+
+    function forceProgressiveTranscode(url) {
         var value = String(url || '');
         var cut = value.indexOf('?');
         var path = cut < 0 ? value : value.slice(0, cut);
-        var query = cut < 0 ? '' : value.slice(cut);
+        var query = cut < 0 ? '' : value.slice(cut + 1);
         if (/\/stream$/i.test(path)) {
             path += '.mp4';
         }
-        return path + query;
+        var kept = [];
+        var parts = query ? query.split('&') : [];
+        var i;
+        for (i = 0; i < parts.length; i++) {
+            var name = parts[i].split('=')[0];
+            if (name && !Object.prototype.hasOwnProperty.call(FORCED_STREAM_PARAMS, name.toLowerCase())) {
+                kept.push(parts[i]);
+            }
+        }
+        var key;
+        for (key in FORCED_STREAM_PARAMS) {
+            if (Object.prototype.hasOwnProperty.call(FORCED_STREAM_PARAMS, key)) {
+                kept.push(key + '=' + encodeURIComponent(FORCED_STREAM_PARAMS[key]));
+            }
+        }
+        return path + '?' + kept.join('&');
     }
 
     function buildStreamUrl(item, playbackInfo) {
@@ -631,23 +657,34 @@
         }
         var subProtocol = String(source.TranscodingSubProtocol || 'http').toLowerCase();
         if (source.TranscodingUrl && subProtocol === 'http') {
-            return serverUrl(progressivePath(source.TranscodingUrl));
+            return serverUrl(forceProgressiveTranscode(source.TranscodingUrl));
         }
         var client = api();
         var params = {
             MediaSourceId: source.Id,
             PlaySessionId: playbackInfo.PlaySessionId,
-            VideoCodec: 'h264',
-            AudioCodec: 'aac',
-            AudioStreamIndex: -1,
-            Static: false,
-            TranscodingContainer: 'mp4',
-            TranscodingProtocol: 'http'
+            AudioStreamIndex: -1
         };
         if (source.LiveStreamId) {
             params.LiveStreamId = source.LiveStreamId;
         }
-        return serverUrl(client.getUrl('Videos/' + item.Id + '/stream.mp4', params));
+        return serverUrl(forceProgressiveTranscode(client.getUrl('Videos/' + item.Id + '/stream.mp4', params)));
+    }
+
+    /* Radio channels legitimately decode to audio only; everything else reporting
+       no frames is the bug, not the content. */
+    function hasVideoStream(source) {
+        var streams = (source && source.MediaStreams) || [];
+        if (!streams.length) {
+            return true;
+        }
+        var i;
+        for (i = 0; i < streams.length; i++) {
+            if (streams[i] && String(streams[i].Type).toLowerCase() === 'video') {
+                return true;
+            }
+        }
+        return false;
     }
 
     function mediaElement() {
@@ -681,35 +718,52 @@
         }
     }
 
-    function playbackTookOver() {
-        var element = mediaElement();
+    /* "Started" has to mean visible frames. A stream copy of an mpeg2 IPTV mux
+       decodes as audio with videoWidth stuck at 0, which is exactly the failure this
+       list must not report as success. */
+    function elementState(element) {
         if (!element) {
-            return false;
+            return 'none';
         }
         nudge(element);
-        return element.readyState >= 2 || element.currentTime > 0;
+        if (element.videoWidth > 0 && element.readyState >= 2) {
+            return 'video';
+        }
+        if (element.readyState >= 2 && element.currentTime > 0.2 && !element.paused) {
+            return 'audio';
+        }
+        return 'none';
     }
 
     function waitForPlayback(gen, timeoutMs) {
         return new Promise(function (resolve) {
             var deadline = Date.now() + timeoutMs;
+            var best = 'none';
             function poll() {
                 if (gen !== playGen) {
-                    resolve(false);
+                    resolve('stale');
                     return;
                 }
-                if (playbackTookOver()) {
-                    resolve(true);
+                var state = elementState(mediaElement());
+                if (state === 'video') {
+                    resolve('video');
                     return;
+                }
+                if (state === 'audio') {
+                    best = 'audio';
                 }
                 if (Date.now() >= deadline) {
-                    resolve(false);
+                    resolve(best);
                     return;
                 }
                 window.setTimeout(poll, 300);
             }
             poll();
         });
+    }
+
+    function delay(ms) {
+        return new Promise(function (resolve) { window.setTimeout(resolve, ms); });
     }
 
     function hasNativeLive() {
@@ -729,6 +783,12 @@
         }
     }
 
+    /* Hand the single tuner back before asking for the next channel. */
+    function releaseTuner() {
+        stopManager();
+        return closeBuiltinPlayer();
+    }
+
     function play(item, list) {
         if (isGroupFolder(item)) {
             location.hash = '#/list?parentId=' + item.Id + '&ltvgroup=1';
@@ -738,7 +798,9 @@
         var gen = ++playGen;
         clearError();
         markBusy(item, true);
-        return startPlayback(item, queue, gen).then(function (how) {
+        return releaseTuner().then(function () {
+            return gen === playGen ? startPlayback(item, queue, gen) : 'stale';
+        }).then(function (how) {
             if (gen === playGen) {
                 markBusy(item, false);
             }
@@ -760,11 +822,15 @@
             if (nativeOwnsPlayback()) {
                 return Promise.resolve('native');
             }
-            return waitForPlayback(gen, HANDOFF_TIMEOUT_MS).then(function (ok) {
-                if (ok) {
+            return waitForPlayback(gen, HANDOFF_TIMEOUT_MS).then(function (how) {
+                if (how === 'video') {
                     return 'native';
                 }
-                return gen === playGen ? viaManager(item, queue, gen) : 'stale';
+                if (gen !== playGen) {
+                    return 'stale';
+                }
+                stopManager();
+                return viaManager(item, queue, gen);
             });
         }
         return viaManager(item, queue, gen);
@@ -783,45 +849,63 @@
         } catch (e) {
             return openBuiltinPlayer(item, queue, gen);
         }
-        return waitForPlayback(gen, HANDOFF_TIMEOUT_MS).then(function (ok) {
-            if (ok) {
+        /* Audio without frames means jellyfin-web settled on a stream copy of the
+           provider's mpeg2 mux, so keep going: the built-in player pins h264. */
+        return waitForPlayback(gen, HANDOFF_TIMEOUT_MS).then(function (how) {
+            if (how === 'video') {
                 return 'playbackManager';
             }
             if (gen !== playGen) {
                 return 'stale';
             }
+            /* jellyfin-web's own live stream still holds the tuner; give its close
+               a moment or the built-in player just trades one conflict for another. */
             stopManager();
-            return openBuiltinPlayer(item, queue, gen);
+            return delay(1500).then(function () {
+                return gen === playGen ? openBuiltinPlayer(item, queue, gen) : 'stale';
+            });
         });
     }
 
+    /* Resolves once the server has actually let go of the tuner. An M3U host with
+       TunerCount 1 — the normal IPTV subscription — rejects the next channel with
+       "simultaneous stream limit reached" while the previous stream is still open,
+       so switching senders has to wait for this, not fire and forget. */
     function closeBuiltinPlayer() {
         var state = playState;
         playState = null;
         if (!state) {
-            return;
+            return Promise.resolve();
         }
         if (state.keyHandler) {
             document.removeEventListener('keydown', state.keyHandler, true);
+        }
+        if (state.video) {
+            try {
+                state.video.pause();
+                state.video.removeAttribute('src');
+                state.video.load();
+            } catch (e) { /* the element is going away anyway */ }
         }
         if (state.box && state.box.parentNode) {
             state.box.parentNode.removeChild(state.box);
         }
         var client = api();
-        if (client && typeof client.getUrl === 'function') {
+        var pending = [];
+        if (client && typeof client.getUrl === 'function' && state.playSessionId) {
             try {
-                client.ajax({
+                pending.push(client.ajax({
                     type: 'DELETE',
                     url: client.getUrl('Videos/ActiveEncodings', {
                         deviceId: typeof client.deviceId === 'function' ? client.deviceId() : '',
-                        playSessionId: state.playSessionId || ''
+                        playSessionId: state.playSessionId
                     })
-                })['catch'](function () { /* the transcode may already be gone */ });
+                })['catch'](function () { /* the transcode may already be gone */ }));
             } catch (e) { /* best effort */ }
         }
         if (state.liveStreamId) {
-            apiPost('LiveStreams/Close', { liveStreamId: state.liveStreamId }, null)['catch'](
-                function () { /* the server closes idle streams anyway */ });
+            pending.push(apiPost('LiveStreams/Close', { liveStreamId: state.liveStreamId }, null)['catch'](
+                function () { /* the server closes idle streams anyway */ }));
         }
         if (client && typeof client.reportPlaybackStopped === 'function' && state.playSessionId) {
             try {
@@ -833,6 +917,7 @@
                 });
             } catch (e) { /* reporting is optional */ }
         }
+        return Promise.all(pending).then(function () { /* value is irrelevant */ });
     }
 
     function zap(step) {
@@ -852,9 +937,7 @@
             return;
         }
         var next = state.queue[(index + step + state.queue.length) % state.queue.length];
-        var queue = state.queue;
-        closeBuiltinPlayer();
-        play(next, queue);
+        play(next, state.queue);
     }
 
     function buildPlayerShell(item) {
@@ -904,7 +987,6 @@
         if (!client || !item || !item.Id) {
             return Promise.reject(new Error(german() ? 'Kein Server verfügbar.' : 'No server connection.'));
         }
-        closeBuiltinPlayer();
         var shell = buildPlayerShell(item);
         playState = {
             box: shell.box,
@@ -975,12 +1057,15 @@
                     });
                 } catch (e) { /* reporting is optional */ }
             }
-            return waitForPlayback(gen, HANDOFF_TIMEOUT_MS + 8000).then(function (ok) {
+            return waitForPlayback(gen, HANDOFF_TIMEOUT_MS + 8000).then(function (how) {
                 if (gen !== playGen || playState !== state) {
                     return 'stale';
                 }
-                if (ok) {
+                if (how === 'video') {
                     return 'builtin';
+                }
+                if (how === 'audio' && !hasVideoStream(source)) {
+                    return 'builtin-audio';
                 }
                 closeBuiltinPlayer();
                 throw new Error(german()
