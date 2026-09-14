@@ -27,13 +27,21 @@
     var syncTimer = 0;
     var modeTimer = 0;
     var wasPlaying = false;
+    var listHash = '';
     var paintToken = 0;
     var emptyRetry = 0;
     var EMPTY_RETRY_MS = [1500, 3000, 6000, 12000];
     var ROW_CHUNK = 24;
-    var HANDOFF_TIMEOUT_MS = 12000;
+    /* A live transcode needs roughly ten seconds to produce a first frame here and
+       longer on a Raspberry Pi, so give a working handoff room before calling it
+       dead — cutting it short only trades a slow start for a fallback. */
+    var NATIVE_HANDOFF_MS = 8000;
+    var HANDOFF_TIMEOUT_MS = 20000;
+    var BUILTIN_TIMEOUT_MS = 28000;
+    var TEARDOWN_TIMEOUT_MS = 8000;
     var playGen = 0;
     var playState = null;
+    var playError = null;
 
     var style = document.createElement('style');
     style.setAttribute('data-livetv-overview', '1');
@@ -819,10 +827,93 @@
         }
     }
 
-    /* Hand the single tuner back before asking for the next channel. */
+    function isVideoHash(value) {
+        return /#\/?video(\?|$)/i.test(String(value || '').toLowerCase());
+    }
+
+    function rememberListHash() {
+        var current = location.hash || '';
+        if (!isVideoHash(current)) {
+            listHash = current;
+        }
+        return listHash;
+    }
+
+    function managerPlayerOnScreen() {
+        var nodes = document.querySelectorAll('.videoPlayerContainer, .videoOsdBottom');
+        var i;
+        for (i = 0; i < nodes.length; i++) {
+            if (onScreen(nodes[i])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function managerIdle(manager) {
+        if (!manager) {
+            return true;
+        }
+        try {
+            if (typeof manager.isPlaying === 'function' && manager.isPlaying()) {
+                return false;
+            }
+        } catch (e) { /* an unusable manager is an idle one */ }
+        try {
+            if (typeof manager.getCurrentPlayer === 'function' && manager.getCurrentPlayer()) {
+                return false;
+            }
+        } catch (e) { /* same */ }
+        return true;
+    }
+
+    /* A live source that never delivers a first frame leaves jellyfin-web's
+       .videoPlayerContainer on screen showing the channel logo while the manager has
+       already dropped the player: isPlaying() is false and getCurrentPlayer() is
+       undefined, so stop() has nothing to act on and no amount of retrying clears it.
+       That orphan is the blurred placeholder the list gets blamed for. Removing a node
+       jellyfin-web no longer tracks cannot desync anything it still owns. */
+    function dropOrphanPlayerView() {
+        if (!managerIdle(window.playbackManager)) {
+            return false;
+        }
+        var nodes = document.querySelectorAll('.videoPlayerContainer');
+        var removed = false;
+        var i;
+        for (i = 0; i < nodes.length; i++) {
+            if (onScreen(nodes[i]) && nodes[i].parentNode) {
+                nodes[i].parentNode.removeChild(nodes[i]);
+                removed = true;
+            }
+        }
+        return removed;
+    }
+
+    /* Abandoning a handoff is a race: stop() cannot cancel a load that has not built
+       its player yet. Keep stopping until the player view is really gone, and walk
+       back to the list so the in-list error is the thing on screen. */
+    function leavePlayerView() {
+        var deadline = Date.now() + TEARDOWN_TIMEOUT_MS;
+        function attempt() {
+            stopManager();
+            if (isVideoHash(location.hash) && listHash) {
+                location.hash = listHash;
+            }
+            if (!managerPlayerOnScreen()) {
+                return Promise.resolve();
+            }
+            if (dropOrphanPlayerView() || Date.now() >= deadline) {
+                return Promise.resolve();
+            }
+            return delay(600).then(attempt);
+        }
+        return attempt();
+    }
+
+    /* Hand the single tuner back before asking for the next channel, and clear any
+       player a previous attempt left behind. */
     function releaseTuner() {
-        stopManager();
-        return closeBuiltinPlayer();
+        return Promise.all([leavePlayerView(), closeBuiltinPlayer()]);
     }
 
     function play(item, list) {
@@ -833,6 +924,7 @@
         var queue = (list && list.length ? list : items).slice();
         var gen = ++playGen;
         clearError();
+        rememberListHash();
         markBusy(item, true);
         return releaseTuner().then(function () {
             return gen === playGen ? startPlayback(item, queue, gen) : 'stale';
@@ -842,11 +934,14 @@
             }
             return how;
         }, function (error) {
-            if (gen === playGen) {
-                markBusy(item, false);
-                showError(item, error);
+            if (gen !== playGen) {
+                return 'error';
             }
-            return 'error';
+            markBusy(item, false);
+            return leavePlayerView().then(function () {
+                showError(item, error);
+                return 'error';
+            });
         });
     }
 
@@ -858,15 +953,16 @@
             if (nativeOwnsPlayback()) {
                 return Promise.resolve('native');
             }
-            return waitForPlayback(gen, HANDOFF_TIMEOUT_MS).then(function (how) {
+            return waitForPlayback(gen, NATIVE_HANDOFF_MS).then(function (how) {
                 if (how === 'video') {
                     return 'native';
                 }
                 if (gen !== playGen) {
                     return 'stale';
                 }
-                stopManager();
-                return viaManager(item, queue, gen);
+                return leavePlayerView().then(function () {
+                    return gen === playGen ? viaManager(item, queue, gen) : 'stale';
+                });
             });
         }
         return viaManager(item, queue, gen);
@@ -896,8 +992,9 @@
             }
             /* jellyfin-web's own live stream still holds the tuner; give its close
                a moment or the built-in player just trades one conflict for another. */
-            stopManager();
-            return delay(1500).then(function () {
+            return leavePlayerView().then(function () {
+                return delay(1500);
+            }).then(function () {
                 return gen === playGen ? openBuiltinPlayer(item, queue, gen) : 'stale';
             });
         });
@@ -1093,7 +1190,7 @@
                     });
                 } catch (e) { /* reporting is optional */ }
             }
-            return waitForPlayback(gen, HANDOFF_TIMEOUT_MS + 8000).then(function (how) {
+            return waitForPlayback(gen, BUILTIN_TIMEOUT_MS).then(function (how) {
                 if (gen !== playGen || playState !== state) {
                     return 'stale';
                 }
@@ -1135,19 +1232,26 @@
     }
 
     function clearError() {
+        playError = null;
         var node = document.querySelector('#jf-livetv-overview .jf-livetv-error');
         if (node && node.parentNode) {
             node.parentNode.removeChild(node);
         }
     }
 
-    function showError(item, error) {
-        clearError();
+    /* The banner has to be repainted with the list: leaving a failed sender repaints
+       the rows, and a one-shot node would vanish with the only explanation of why
+       nothing played. */
+    function paintError() {
         var box = document.getElementById('jf-livetv-overview');
-        if (!box) {
+        if (!box || !playError) {
             return;
         }
-        var reason = (error && error.message) || String(error || '');
+        var existing = box.querySelector('.jf-livetv-error');
+        if (existing && existing.parentNode) {
+            existing.parentNode.removeChild(existing);
+        }
+        var item = playError.item;
         var de = german();
         var banner = document.createElement('div');
         banner.className = 'jf-livetv-error';
@@ -1156,7 +1260,7 @@
         text.className = 'jf-livetv-error-text';
         text.textContent = (de ? 'Wiedergabe fehlgeschlagen: ' : 'Playback failed: ')
             + (item && item.Name ? item.Name + ' — ' : '')
-            + (reason || (de ? 'Unbekannter Fehler.' : 'Unknown error.'));
+            + (playError.reason || (de ? 'Unbekannter Fehler.' : 'Unknown error.'));
         var retry = document.createElement('button');
         retry.type = 'button';
         retry.textContent = de ? 'Erneut versuchen' : 'Try again';
@@ -1171,6 +1275,14 @@
         } else {
             box.appendChild(banner);
         }
+    }
+
+    function showError(item, error) {
+        playError = {
+            item: item,
+            reason: (error && error.message) || String(error || '')
+        };
+        paintError();
     }
 
     function applyGuide(row, item, de) {
@@ -1332,6 +1444,7 @@
         box.appendChild(head);
         box.appendChild(cols);
         box.appendChild(list);
+        paintError();
         if (!shown.length) {
             var empty = document.createElement('div');
             empty.className = 'jf-livetv-empty';
