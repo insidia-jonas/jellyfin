@@ -7,6 +7,23 @@ namespace Jellyfin.Plugin.TreasureMaps.Tests;
 
 public class ChannelPresentationTests
 {
+    [Theory]
+    [InlineData("movies")]
+    [InlineData("tv")]
+    [InlineData("movies-de")]
+    [InlineData("downloads")]
+    [InlineData("foryou")]
+    [InlineData("genres")]
+    [InlineData("find")]
+    public void MainCategory_HasBundledLandscapeArtwork(string category)
+    {
+        var path = ChannelArtwork.GetPosterPath(category, category);
+        Assert.NotNull(path);
+        var png = File.ReadAllBytes(path);
+        Assert.Equal(600, System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(png.AsSpan(16, 4)));
+        Assert.Equal(360, System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(png.AsSpan(20, 4)));
+    }
+
     [Fact]
     public void FolderSortName_PadsOrder()
     {

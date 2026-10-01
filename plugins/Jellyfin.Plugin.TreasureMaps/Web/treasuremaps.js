@@ -15,6 +15,19 @@
     var style = document.createElement('style');
     style.textContent =
         '.tmChannelPage .cardOverlayFab-primary{display:none!important}' +
+        '.tmChannelPage .btnPlayAll,.tmChannelPage .btnShuffle{display:none!important}' +
+        '.tmCategoryPage .alphaPicker{display:none!important}' +
+        '.tmCategoryPage .card{width:25%!important}' +
+        '.tmCategoryPage .cardPadder{padding-bottom:60%!important}' +
+        '.tmChannelPage .cardText-first{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.35;min-height:2.7em}' +
+        '.tmChannelPage .cardImageContainer{background-size:cover}' +
+        '.tmBrowseHeading{margin:1em 0 .6em;font-size:1.7em;font-weight:650}' +
+        '.tmBrowsePages{display:flex;flex-wrap:wrap;gap:.6em;margin:0 0 1.2em}' +
+        '.tmBrowsePages a{padding:.65em 1em;border:1px solid rgba(255,255,255,.3);border-radius:.5em;color:inherit;text-decoration:none}' +
+        '.tmBrowsePages a:focus,.tmBrowsePages a:hover{outline:2px solid #74b9ff;background:rgba(255,255,255,.1)}' +
+        '.tmLoadMessage{padding:1em 0;color:inherit;opacity:.85}' +
+        '.tmRetry{margin-left:1em;padding:.6em 1em;border:1px solid currentColor;border-radius:.5em;background:transparent;color:inherit;cursor:pointer}' +
+        '@media(max-width:700px){.tmCategoryPage .card{width:50%!important}}' +
         '#tmReleases{margin:1.2em 0;max-width:100%;box-sizing:border-box}' +
         '#tmReleases .tmRelRow{display:flex;flex-wrap:wrap;align-items:flex-start;gap:.55em .75em;' +
         'padding:.65em .8em;margin:.35em 0;border-radius:12px;background:rgba(255,255,255,.07);' +
@@ -106,8 +119,11 @@
 
     function api() { return window.ApiClient; }
 
-    function onNavigate() {
-        if (!api()) { return; }
+    function onNavigate(attempt) {
+        if (!api() || !api().getCurrentUserId()) {
+            if ((attempt || 0) < 40) { setTimeout(function () { onNavigate((attempt || 0) + 1); }, 250); }
+            return;
+        }
         var hash = location.hash || '';
         if (searchRequest) { searchRequest.abort(); searchRequest = null; }
         var details = hash.match(/[#/]details\?id=([a-f0-9]{32})/i);
@@ -156,9 +172,37 @@
             return;
         }
         var route = location.hash;
-        api().getItems(api().getCurrentUserId(), { ParentId: item.Id, Limit: 40 }).then(function (result) {
+        api().getItems(api().getCurrentUserId(), { ParentId: item.Id, Limit: 60, Fields: 'ProviderIds' }).then(function (result) {
             if (location.hash !== route) { return; }
             if (result && result.Items && result.Items.length) {
+                whenReady('.itemsContainer', 16, function (page, container) {
+                    var categories = result.Items.every(function (child) { return child.ProviderIds && child.ProviderIds.TreasureMapsCategory; });
+                    page.classList.toggle('tmCategoryPage', categories);
+                    page.classList.add('tmChannelPage');
+                    if (!page.querySelector('.tmBrowseHeading')) {
+                        var heading = document.createElement('h1');
+                        heading.className = 'tmBrowseHeading';
+                        heading.textContent = item.Name;
+                        container.parentNode.insertBefore(heading, container);
+                    }
+                    var pages = result.Items.filter(function (child) { return child.ProviderIds && /^pg:/.test(child.ProviderIds.TreasureMapsCategory || ''); });
+                    if (pages.length && !page.querySelector('.tmBrowsePages')) {
+                        var nav = document.createElement('nav');
+                        nav.className = 'tmBrowsePages'; nav.setAttribute('aria-label', 'Weitere Seiten');
+                        pages.forEach(function (child) {
+                            var link = document.createElement('a');
+                            link.href = '#/list?parentId=' + child.Id;
+                            link.textContent = child.Name.replace(/^Page /, 'Seite ');
+                            nav.appendChild(link);
+                        });
+                        container.parentNode.insertBefore(nav, container);
+                        whenReady('.card', 16, function () {
+                            pages.forEach(function (child) {
+                                page.querySelectorAll('.card[data-id="' + child.Id + '"]').forEach(function (card) { card.style.display = 'none'; });
+                            });
+                        }, route);
+                    }
+                }, route);
                 return;
             }
             window.setTimeout(function () {
@@ -494,21 +538,46 @@
             return;
         }
 
+        var route = location.hash;
+        var user = api().getCurrentUserId();
+        function current() { return location.hash === route && api().getCurrentUserId() === user; }
+        function message(text, retry) {
+            whenReady('.detailPageSecondaryContainer', 16, function (page, anchor) {
+                if (!current()) { return; }
+                var state = page.querySelector('.tmLoadMessage');
+                if (!state) { state = document.createElement('div'); state.className = 'tmLoadMessage'; state.setAttribute('role', 'status'); anchor.prepend(state); }
+                state.textContent = text;
+                if (retry) {
+                    var button = document.createElement('button');
+                    button.className = 'tmRetry'; button.textContent = 'Erneut laden';
+                    button.onclick = function () { loadReleases(0); };
+                    state.appendChild(button);
+                }
+            }, route);
+        }
         function loadReleases(attempt) {
+            if (!current()) { return; }
+            message('Verfügbare Versionen werden geladen …', false);
             api().getItems(api().getCurrentUserId(), { ParentId: item.Id, Fields: 'ProviderIds,Overview' }).then(function (result) {
+                if (!current()) { return; }
                 var releases = pickReleases(result.Items || []);
                 if (!releases.length) {
                     if (isDownloadItem(item)) { enhanceDownloadDetail(item); return; }
                     if ((attempt || 0) < 1) {
                         window.setTimeout(function () { loadReleases(1); }, 2500);
+                    } else {
+                        message('Aktuell sind keine Versionen verfügbar.', true);
                     }
                     return;
                 }
 
                 whenReady(childrenSelectors(), 28, function (page) {
+                    if (!current()) { return; }
+                    var state = page.querySelector('.tmLoadMessage');
+                    if (state) { state.remove(); }
                     renderReleaseList(page, item, releases);
-                });
-            }).catch(function () { });
+                }, route);
+            }).catch(function () { if (current()) { message('Versionen konnten nicht geladen werden.', true); } });
         }
         loadReleases(0);
     }
@@ -523,7 +592,7 @@
     }
 
     function childrenSelectors() {
-        return '.collectionItems, #childrenCollapsible, #listChildrenCollapsible, .childrenItemsContainer, .itemsContainer';
+        return '.collectionItems, #childrenCollapsible, #listChildrenCollapsible, .childrenItemsContainer';
     }
 
     function findChildrenHost(page) {
@@ -554,7 +623,6 @@
     }
 
     function renderReleaseList(page, item, releases) {
-        hideNativeChildren(page);
         var old = page.querySelector('#tmReleases');
         if (old) { old.remove(); }
 
@@ -567,13 +635,14 @@
         var list = episodeLike.length ? episodeLike : releases;
         title.textContent = episodeLike.length
             ? (episodeLike.every(function (r) { return r.Type === 'Season' || /^Season\s+\d/i.test(r.Name || ''); }) ? 'Seasons' : 'Episodes')
-            : 'Releases';
+            : 'Verfügbare Versionen';
         host.appendChild(title);
         list.forEach(function (release) {
             host.appendChild(episodeLike.length ? buildEpisodeRow(release) : buildRow(release, item.Name));
         });
 
-        var anchor = findChildrenHost(page)
+        var children = findChildrenHost(page);
+        var anchor = (children && (children.closest('#childrenCollapsible,#listChildrenCollapsible,.verticalSection,.detailVerticalSection') || children))
             || page.querySelector('.detailPageSecondaryContainer')
             || page.querySelector('.itemOverview')
             || page;

@@ -45,6 +45,29 @@ public sealed class PeopleRepositoryUpdatePeopleTests : SqliteDbTestFixture
     }
 
     [Fact]
+    public void UpdatePeople_CachedUnicodeCredits_AreReusedAcrossCards()
+    {
+        var credits = new[] { CreatePerson("Şener Şen", PersonKind.Actor, string.Empty), CreatePerson("Émilie", PersonKind.Director, string.Empty) };
+        _repository.UpdatePeople(_itemId, credits);
+        _repository.UpdatePeople(AddMovie("Another card"), credits);
+
+        using var context = CreateDbContext();
+        Assert.Equal(2, context.Peoples.Count());
+        Assert.Equal(4, context.PeopleBaseItemMap.Count());
+    }
+
+    [Fact]
+    public void UpdatePeople_FreshUnicodeCredits_ReuseExistingPeople()
+    {
+        _repository.UpdatePeople(_itemId, [CreatePerson("Şener Şen", PersonKind.Actor, string.Empty)]);
+        _repository.UpdatePeople(_itemId, [CreatePerson("Şener Şen", PersonKind.Actor, "Hero")]);
+
+        using var context = CreateDbContext();
+        Assert.Single(context.Peoples);
+        Assert.Equal("Hero", Assert.Single(context.PeopleBaseItemMap).Role);
+    }
+
+    [Fact]
     public void UpdatePeople_SamePersonAndTypeWithDifferentRoles_KeepsEveryCredit()
     {
         _repository.UpdatePeople(_itemId, [

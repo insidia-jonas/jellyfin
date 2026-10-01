@@ -128,6 +128,7 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
 
         var distinctPersons = distinctCredits.DistinctBy(e => (e.LoweredName, e.PersonType)).ToArray();
         var personKeys = distinctPersons.Select(e => e.LoweredName + "-" + e.PersonType).ToArray();
+        var exactNames = distinctPersons.Select(e => e.Person.Name).ToArray();
 
         using var context = _dbProvider.CreateDbContext();
         using var transaction = context.Database.BeginTransaction();
@@ -136,8 +137,12 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
             item = e,
             SelectionKey = e.Name.ToLower() + "-" + e.PersonType
         })
-            .Where(p => personKeys.Contains(p.SelectionKey))
+            // SQLite lower() only folds ASCII. Preserve exact Unicode matches (e.g. Şener Şen)
+            // before comparing normalized name/type keys in memory, or cached credits are inserted twice.
+            .Where(p => exactNames.Contains(p.item.Name) || personKeys.Contains(p.SelectionKey))
             .Select(f => f.item)
+            .AsEnumerable()
+            .Where(e => personKeys.Contains(e.Name.ToLowerInvariant() + "-" + e.PersonType))
             .ToArray();
 
         var existingPersonKeys = existingPersons.Select(e => (e.Name.ToLowerInvariant(), e.PersonType ?? string.Empty)).ToHashSet();

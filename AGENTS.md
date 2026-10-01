@@ -363,3 +363,10 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
 - ChannelManager briefly caches materialized search results by provider/version/user/limit/query. Check channel access before each cache lookup and propagate cancellation through external search.
 - API pages are capped at 100; the dashboard uses `offset` / `nextOffset` / `hasMore`. The Fire TV search preserves the typed year, aborts superseded work, and owns its result row so the plugin web script does not duplicate it.
 - Regression suites: `plugins/Jellyfin.Plugin.TreasureMaps.Tests`, `tests/Jellyfin.LiveTv.Tests`, and `npm test --prefix FireTV/tests/web`. The plugin's ffmpeg and POSIX-path tests require Linux with ffmpeg; run the portable test DLL there when developing on Windows.
+
+### Treasure-Maps cards and first-open behavior
+
+- Browsed folders await a coalesced fresh result through `TreasureMapsFolderListing`; do not return `Pending()` from their first open. Standard clients interpret that response as a completed empty folder and never poll it. Only the optional home-row warmup remains nonblocking.
+- Display titles can differ from indexer release names (e.g. “The Foster Brothers” / “Sut Kardesler”). Group ids carry the cleaned release search title in field 7; season/episode ids carry it in field 8. Preserve it while navigating into seasons and episodes. Old ids fall back to the display title.
+- Category generation `c6-`, DataVersion `40`, script `v12`, plugin `1.0.2.0`: bundled landscape PNGs have editable SVG sources under `Channels/Artwork`. No font, ffmpeg or image-provider request is needed for the main category cards. The `TreasureMapsCategory` provider id distinguishes navigation cards from posters and identifies page links.
+- The web script waits for API/login readiness, guards delayed detail responses against route changes, and inserts its release list outside the native containers it hides. Keep cast containers visible. Browser regressions cover readiness, navigation, hidden parents and retry behavior.

@@ -38,7 +38,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
     // Generation prefix for category-folder ids. Bumping it (c2-, c3-, ...) forces Jellyfin to
     // create fresh folder entities — needed once because the old entities had collage images
     // (child posters) baked in by the folder image provider, making categories look like movies.
-    private const string FolderIdPrefix = "c5-";
+    private const string FolderIdPrefix = "c6-";
     private const string GroupPrefix = "GRP::";
     private const string SeasonPrefix = "SEA::";
     private const string EpisodePrefix = "EP::";
@@ -115,7 +115,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
             var c = Config;
             return string.Join(
                 '|',
-                "39",
+                "40",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -174,7 +174,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         try
         {
             var folderId = query.FolderId ?? string.Empty;
-            if (folderId.StartsWith(FolderIdPrefix, StringComparison.Ordinal))
+            if ((folderId.StartsWith(FolderIdPrefix, StringComparison.Ordinal) || folderId.StartsWith("c5-", StringComparison.Ordinal)))
             {
                 folderId = folderId[FolderIdPrefix.Length..];
             }
@@ -186,15 +186,16 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
 
             if (string.Equals(folderId, "new", StringComparison.Ordinal))
             {
-                return FastFolder("folder:new", TreasureMapsListingCache.BrowseFreshTtl, GetRecentlyAddedAsync);
+                return await TreasureMapsFolderListing.LoadAsync(_listingCache, "folder:new", TreasureMapsListingCache.BrowseFreshTtl, GetRecentlyAddedAsync, cancellationToken).ConfigureAwait(false);
             }
 
             if (string.Equals(folderId, "foryou", StringComparison.Ordinal))
             {
-                return FastFolder(
+                return await TreasureMapsFolderListing.LoadAsync(
+                    _listingCache,
                     "folder:foryou:" + query.UserId.ToString("N"),
                     TreasureMapsListingCache.BrowseFreshTtl,
-                    ct => GetForYouAsync(query.UserId, ct));
+                    ct => GetForYouAsync(query.UserId, ct), cancellationToken).ConfigureAwait(false);
             }
 
             if (string.Equals(folderId, "downloads", StringComparison.Ordinal))
@@ -218,10 +219,11 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
                     throw new InvalidOperationException("Treasure-Maps could not open this title.");
                 }
 
-                return FastFolder(
+                return await TreasureMapsFolderListing.LoadAsync(
+                    _listingCache,
                     "folder:" + folderId,
                     TreasureMapsListingCache.BrowseFreshTtl,
-                    ct => OpenGroupAsync(folderId, ct));
+                    ct => OpenGroupAsync(folderId, ct), cancellationToken).ConfigureAwait(false);
             }
 
             if (folderId.StartsWith(SeasonPrefix, StringComparison.Ordinal))
@@ -232,10 +234,11 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
                     throw new InvalidOperationException("Treasure-Maps could not open this season.");
                 }
 
-                return FastFolder(
+                return await TreasureMapsFolderListing.LoadAsync(
+                    _listingCache,
                     "folder:" + folderId,
                     TreasureMapsListingCache.BrowseFreshTtl,
-                    ct => OpenSeasonAsync(folderId, ct));
+                    ct => OpenSeasonAsync(folderId, ct), cancellationToken).ConfigureAwait(false);
             }
 
             if (folderId.StartsWith(EpisodePrefix, StringComparison.Ordinal))
@@ -245,10 +248,11 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
                     throw new InvalidOperationException("Treasure-Maps could not open this episode.");
                 }
 
-                return FastFolder(
+                return await TreasureMapsFolderListing.LoadAsync(
+                    _listingCache,
                     "folder:" + folderId,
                     TreasureMapsListingCache.BrowseFreshTtl,
-                    ct => OpenEpisodeAsync(folderId, ct));
+                    ct => OpenEpisodeAsync(folderId, ct), cancellationToken).ConfigureAwait(false);
             }
 
             // A release tile (REL) is a folder too; opening it shows a small grab detail rather
@@ -280,57 +284,63 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
 
             if (folderId.StartsWith(FeedPrefix, StringComparison.Ordinal))
             {
-                return FastFolder(
+                return await TreasureMapsFolderListing.LoadAsync(
+                    _listingCache,
                     "folder:" + folderId,
                     TreasureMapsListingCache.SpotlightFreshTtl,
-                    ct => GetSpotlightFeedAsync(folderId, ct));
+                    ct => GetSpotlightFeedAsync(folderId, ct), cancellationToken).ConfigureAwait(false);
             }
 
             if (CategoryBrowse.TryParsePageFolder(folderId, out var pageScope, out var pageNumber)
                 && TryCategorySpec(pageScope, out var pageKind, out var pageGenre, out var pageCats))
             {
-                return FastFolder(
+                return await TreasureMapsFolderListing.LoadAsync(
+                    _listingCache,
                     "folder:" + folderId,
                     TreasureMapsListingCache.BrowseFreshTtl,
-                    ct => GetCategoryAsync(pageScope, pageKind, pageGenre, pageCats, pageNumber, ct));
+                    ct => GetCategoryAsync(pageScope, pageKind, pageGenre, pageCats, pageNumber, ct), cancellationToken).ConfigureAwait(false);
             }
 
             if (string.Equals(folderId, "movies", StringComparison.Ordinal))
             {
-                return FastFolder(
+                return await TreasureMapsFolderListing.LoadAsync(
+                    _listingCache,
                     "folder:movies",
                     TreasureMapsListingCache.BrowseFreshTtl,
-                    ct => GetCategoryAsync(folderId, "movie", null, null, 1, ct));
+                    ct => GetCategoryAsync(folderId, "movie", null, null, 1, ct), cancellationToken).ConfigureAwait(false);
             }
 
             if (string.Equals(folderId, "tv", StringComparison.Ordinal))
             {
-                return FastFolder(
+                return await TreasureMapsFolderListing.LoadAsync(
+                    _listingCache,
                     "folder:tv",
                     TreasureMapsListingCache.BrowseFreshTtl,
-                    ct => GetCategoryAsync(folderId, "tv", null, null, 1, ct));
+                    ct => GetCategoryAsync(folderId, "tv", null, null, 1, ct), cancellationToken).ConfigureAwait(false);
             }
 
             // German rows, mirroring the website's "Movies - DE" / "TV - DE" category blocks.
             if (string.Equals(folderId, "movies-de", StringComparison.Ordinal))
             {
-                return FastFolder(
+                return await TreasureMapsFolderListing.LoadAsync(
+                    _listingCache,
                     "folder:movies-de",
                     TreasureMapsListingCache.BrowseFreshTtl,
-                    ct => GetCategoryAsync(folderId, "movie", null, TreasureMapsApiClient.GermanMovieCategories, 1, ct));
+                    ct => GetCategoryAsync(folderId, "movie", null, TreasureMapsApiClient.GermanMovieCategories, 1, ct), cancellationToken).ConfigureAwait(false);
             }
 
             if (string.Equals(folderId, "tv-de", StringComparison.Ordinal))
             {
-                return FastFolder(
+                return await TreasureMapsFolderListing.LoadAsync(
+                    _listingCache,
                     "folder:tv-de",
                     TreasureMapsListingCache.BrowseFreshTtl,
-                    ct => GetCategoryAsync(folderId, "tv", null, TreasureMapsApiClient.GermanTvCategories, 1, ct));
+                    ct => GetCategoryAsync(folderId, "tv", null, TreasureMapsApiClient.GermanTvCategories, 1, ct), cancellationToken).ConfigureAwait(false);
             }
 
             if (string.Equals(folderId, "genres", StringComparison.Ordinal))
             {
-                return FastFolder("folder:genres", TreasureMapsListingCache.CapsFreshTtl, GetGenreFoldersAsync);
+                return await TreasureMapsFolderListing.LoadAsync(_listingCache, "folder:genres", TreasureMapsListingCache.CapsFreshTtl, GetGenreFoldersAsync, cancellationToken).ConfigureAwait(false);
             }
 
             if (string.Equals(folderId, "find", StringComparison.Ordinal))
@@ -341,27 +351,30 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
             if (folderId.StartsWith(FindPrefix, StringComparison.Ordinal))
             {
                 var letter = folderId[FindPrefix.Length..];
-                return FastFolder(
+                return await TreasureMapsFolderListing.LoadAsync(
+                    _listingCache,
                     "folder:find:" + letter,
                     TreasureMapsListingCache.BrowseFreshTtl,
-                    ct => SearchByLetterAsync(letter, ct));
+                    ct => SearchByLetterAsync(letter, ct), cancellationToken).ConfigureAwait(false);
             }
 
             if (folderId.StartsWith("search:", StringComparison.Ordinal))
             {
                 var term = folderId["search:".Length..];
-                return FastFolder(
+                return await TreasureMapsFolderListing.LoadAsync(
+                    _listingCache,
                     "folder:search:" + term.ToLowerInvariant(),
                     TreasureMapsApiClient.CacheTtlForQuery(term),
-                    ct => SearchLiveAsync(term, ct));
+                    ct => SearchLiveAsync(term, ct), cancellationToken).ConfigureAwait(false);
             }
 
             if (folderId.StartsWith(GenrePrefix, StringComparison.Ordinal))
             {
-                return FastFolder(
+                return await TreasureMapsFolderListing.LoadAsync(
+                    _listingCache,
                     "folder:" + folderId,
                     TreasureMapsListingCache.BrowseFreshTtl,
-                    ct => GetCategoryAsync(folderId, "movie", folderId[GenrePrefix.Length..], null, 1, ct));
+                    ct => GetCategoryAsync(folderId, "movie", folderId[GenrePrefix.Length..], null, 1, ct), cancellationToken).ConfigureAwait(false);
             }
 
             return Hint("unknown-folder", "Nothing here", "This Treasure-Maps category has no titles right now.");
@@ -388,18 +401,18 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         var order = 0;
         if (Recommendations.AiRecommender.IsEnabled)
         {
-            items.Add(Folder("foryou", "For You", order++));
+            items.Add(Folder("foryou", "Für dich", order++));
         }
 
         items.Add(Folder("downloads", "Downloads", order++));
-        items.Add(Folder("new", "Recently added", order++));
+        items.Add(Folder("new", "Neu hinzugefügt", order++));
         items.Add(Folder("trending", "Trending", order++));
-        items.Add(Folder("movies", "Movies", order++));
-        items.Add(Folder("tv", "TV Shows", order++));
-        items.Add(Folder("movies-de", "Movies (DE)", order++));
-        items.Add(Folder("tv-de", "TV Shows (DE)", order++));
-        items.Add(Folder("genres", "Browse by genre", order++));
-        items.Add(Folder("find", "Find A\u2013Z", order));
+        items.Add(Folder("movies", "Filme", order++));
+        items.Add(Folder("tv", "Serien", order++));
+        items.Add(Folder("movies-de", "Filme auf Deutsch", order++));
+        items.Add(Folder("tv-de", "Serien auf Deutsch", order++));
+        items.Add(Folder("genres", "Genres", order++));
+        items.Add(Folder("find", "Entdecken A–Z", order));
 
         return Result(items);
     }
@@ -1286,7 +1299,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
                     searchTerm);
             var card = new ChannelItemInfo
             {
-                Id = string.Join(Sep, GroupPrefix.TrimEnd(':'), scopeHash, marker, group.Kind, Encode(group.Key), Encode(displayTitle), Encode(group.Cover ?? string.Empty)),
+                Id = string.Join(Sep, GroupPrefix.TrimEnd(':'), scopeHash, marker, group.Kind, Encode(group.Key), Encode(displayTitle), Encode(group.Cover ?? string.Empty), Encode(ReleaseGrouper.SearchTitleOf(group))),
                 Name = displayTitle,
                 OriginalTitle = displayTitle,
                 SortName = ChannelPresentation.TitleSortName(group.Posted, group.Title),
@@ -1369,14 +1382,15 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
             return new ChannelItemResult();
         }
 
+        var searchTitle = SearchTitleFromCardId(groupId, title);
         if (!string.Equals(kind, "tv", StringComparison.Ordinal))
         {
-            var movies = await _client.SearchMoviesAsync(title, null, PageSize, cancellationToken).ConfigureAwait(false);
+            var movies = await _client.SearchMoviesAsync(searchTitle, null, PageSize, cancellationToken).ConfigureAwait(false);
             var movieRows = FilterShowReleases(movies?.Items, key, title);
             return await BuildReleaseTilesAsync(movieRows, groupId, cover, title, cancellationToken).ConfigureAwait(false);
         }
 
-        var matching = await FetchShowReleasesAsync(title, key, cancellationToken).ConfigureAwait(false);
+        var matching = await FetchShowReleasesAsync(searchTitle, key, cancellationToken).ConfigureAwait(false);
         var bundles = SeriesBrowse.GroupEpisodes(matching);
         return SeriesBrowse.LayoutFor(bundles) switch
         {
@@ -1398,7 +1412,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
             throw new InvalidOperationException("Treasure-Maps could not open this season.");
         }
 
-        var matching = await FetchShowReleasesAsync(title, key, cancellationToken).ConfigureAwait(false);
+        var matching = await FetchShowReleasesAsync(SearchTitleFromCardId(seasonId, title), key, cancellationToken).ConfigureAwait(false);
         var bundles = SeriesBrowse.ForSeason(SeriesBrowse.GroupEpisodes(matching), season);
         if (bundles.Count <= 1)
         {
@@ -1421,7 +1435,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
             throw new InvalidOperationException("Treasure-Maps could not open this episode.");
         }
 
-        var matching = await FetchShowReleasesAsync(title, key, cancellationToken).ConfigureAwait(false);
+        var matching = await FetchShowReleasesAsync(SearchTitleFromCardId(episodeId, title), key, cancellationToken).ConfigureAwait(false);
         var releases = SeriesBrowse.ReleasesFor(SeriesBrowse.GroupEpisodes(matching), episodeKey);
         if (releases.Count == 0)
         {
@@ -1504,7 +1518,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
             var posted = inSeason.Select(b => b.Posted).Where(d => d.HasValue).Select(d => d!.Value).DefaultIfEmpty().Max();
             var card = new ChannelItemInfo
             {
-                Id = string.Join(Sep, SeasonPrefix.TrimEnd(':'), scopeHash, marker, kind, Encode(key), Encode(title), Encode(cover), Encode(season.ToString(CultureInfo.InvariantCulture))),
+                Id = string.Join(Sep, SeasonPrefix.TrimEnd(':'), scopeHash, marker, kind, Encode(key), Encode(title), Encode(cover), Encode(season.ToString(CultureInfo.InvariantCulture)), Encode(SearchTitleFromCardId(parentId, title))),
                 Name = SeriesBrowse.SeasonLabel(season, inSeason.Count),
                 OriginalTitle = title,
                 SeriesName = title,
@@ -1546,7 +1560,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         {
             var card = new ChannelItemInfo
             {
-                Id = string.Join(Sep, EpisodePrefix.TrimEnd(':'), scopeHash, marker, kind, Encode(key), Encode(title), Encode(cover), Encode(bundle.Slot.Key)),
+                Id = string.Join(Sep, EpisodePrefix.TrimEnd(':'), scopeHash, marker, kind, Encode(key), Encode(title), Encode(cover), Encode(bundle.Slot.Key), Encode(SearchTitleFromCardId(parentId, title))),
                 Name = bundle.Slot.Label,
                 OriginalTitle = title,
                 SeriesName = title,
@@ -1574,6 +1588,14 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         }
 
         return items;
+    }
+
+    private static string SearchTitleFromCardId(string id, string fallback)
+    {
+        var parts = id.Split(Sep);
+        var index = id.StartsWith(GroupPrefix, StringComparison.Ordinal) ? 7 : 8;
+        var title = parts.Length > index ? Decode(parts[index]) : string.Empty;
+        return string.IsNullOrWhiteSpace(title) ? fallback : title;
     }
 
     private static bool TryParseTitleCardId(
@@ -1738,7 +1760,8 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         FolderType = ChannelFolderType.Container,
         DateCreated = _folderPinBase.AddMinutes(-order),
         ImageUrl = ChannelArtwork.GetPosterPath(id, name),
-        Overview = name
+        Overview = name,
+        ProviderIds = new Dictionary<string, string> { ["TreasureMapsCategory"] = id }
     };
 
     /// <inheritdoc />

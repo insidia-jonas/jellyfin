@@ -36,11 +36,30 @@ public static class ChannelArtwork
 
         lock (Lock)
         {
-            var dir = Path.Combine(Path.GetTempPath(), "treasuremaps", "posters");
+            var dir = Path.Combine(Path.GetTempPath(), "treasuremaps", "posters-v2");
             Directory.CreateDirectory(dir);
             var file = Path.Combine(dir, Sanitize(key) + ".png");
             if (File.Exists(file) && new FileInfo(file).Length > 200)
             {
+                return file;
+            }
+
+            var artworkKey = key switch
+            {
+                "movies-de" or "trending-movie" => "movies",
+                "tv-de" or "trending-tv" => "tv",
+                var value when value.StartsWith("genre:", StringComparison.Ordinal) => "genres",
+                var value when value.StartsWith("find:", StringComparison.Ordinal) => "find",
+                var value when value.StartsWith("tmfeed:", StringComparison.Ordinal) => "trending",
+                var value when value.StartsWith("pg:", StringComparison.Ordinal) => "find",
+                _ => key
+            };
+            using var artwork = typeof(ChannelArtwork).Assembly.GetManifestResourceStream(
+                "Jellyfin.Plugin.TreasureMaps.Channels.Artwork." + artworkKey + ".png");
+            if (artwork is not null)
+            {
+                using var target = File.Create(file);
+                artwork.CopyTo(target);
                 return file;
             }
 

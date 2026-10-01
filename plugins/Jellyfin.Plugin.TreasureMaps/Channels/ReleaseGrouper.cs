@@ -189,6 +189,14 @@ public static class ReleaseGrouper
         return kind == "tv" ? ShowNameFromScene(release.Title) : CleanSceneTitle(release.Title);
     }
 
+    /// <summary>Gets the name indexed in release filenames, which may differ from the translated display title.</summary>
+    public static string SearchTitleOf(ReleaseGroup group)
+    {
+        var release = group.Releases.FirstOrDefault(r => !string.IsNullOrWhiteSpace(r.Title));
+        var title = group.Kind == "tv" ? ShowNameFromScene(release?.Title) : CleanSceneTitle(release?.Title);
+        return string.IsNullOrWhiteSpace(title) ? group.Title : title;
+    }
+
     /// <summary>
     /// Picks the preferred release in a group: higher parsed quality score wins (4K &gt; 1080p,
     /// BluRay &gt; WEB, …). Used when the user favourites a title card rather than a specific row.

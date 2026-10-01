@@ -3,12 +3,13 @@
   <PropertyGroup>
     <RootNamespace>Jellyfin.Plugin.TreasureMaps</RootNamespace>
     <AssemblyName>Jellyfin.Plugin.TreasureMaps</AssemblyName>
-    <AssemblyVersion>1.0.1.0</AssemblyVersion>
-    <FileVersion>1.0.1.0</FileVersion>
-    <Version>1.0.1.0</Version>
+    <AssemblyVersion>1.0.2.0</AssemblyVersion>
+    <FileVersion>1.0.2.0</FileVersion>
+    <Version>1.0.2.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Channels\Artwork\*.png" />
     <!-- Provides ASP.NET Core (controllers) and Microsoft.Extensions.Http (IHttpClientFactory). -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
