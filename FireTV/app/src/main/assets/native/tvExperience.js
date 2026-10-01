@@ -522,7 +522,7 @@
         var request;
         if (window.fetch && client.getUrl && client.accessToken) {
             request = window.fetch(client.getUrl("Items", options), {
-                signal: signal, headers: { "X-Emby-Token": client.accessToken(), Accept: "application/json" }
+                signal: signal, headers: { Authorization: 'MediaBrowser Token="' + client.accessToken() + '"' , Accept: "application/json" }
             }).then(function (response) {
                 if (!response.ok) { throw new Error("Search failed: " + response.status); }
                 return response.json();

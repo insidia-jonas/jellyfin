@@ -192,7 +192,7 @@
             var url = api().getUrl('TreasureMaps/Search/Cards', { q: query });
             searchRequest = window.AbortController ? new AbortController() : null;
             var request = window.fetch && api().accessToken
-                ? window.fetch(url, { signal: searchRequest && searchRequest.signal, headers: { 'X-Emby-Token': api().accessToken() } }).then(function (response) {
+                ? window.fetch(url, { signal: searchRequest && searchRequest.signal, headers: { Authorization: 'MediaBrowser Token="' + api().accessToken() + '"'  } }).then(function (response) {
                     if (!response.ok) { throw new Error('Search failed'); }
                     return response.json();
                 })

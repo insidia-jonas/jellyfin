@@ -28,6 +28,7 @@ test('one exact search preserves the year and does not repeat when the input is 
     const e = setup(t); e.input.value = 'The Matrix 1999'; e.load(experience);
     await e.clock.tickAsync(1);
     assert.equal(e.calls.length, 1);
+    assert.equal(e.calls[0].options.headers.Authorization, 'MediaBrowser Token="test-token"');
     assert.equal(new URL(e.calls[0].url).searchParams.get('SearchTerm'), 'The Matrix 1999');
     assert.equal(new URL(e.calls[0].url).searchParams.has('ParentId'), false);
     e.calls[0].resolve({ Items: [{ Id: 'matrix', Name: 'The Matrix' }] });
