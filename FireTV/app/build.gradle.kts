@@ -14,8 +14,8 @@ android {
         manifestPlaceholders["appLabel"] = if (previewBuild) "Jellyfin IPTV Test" else "@string/app_name"
         minSdk = 25
         targetSdk = 34
-        versionCode = 20
-        versionName = "2.4.1"
+        versionCode = 21
+        versionName = "2.4.2"
     }
 
     buildTypes {

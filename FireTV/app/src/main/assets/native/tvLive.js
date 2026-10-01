@@ -19,6 +19,11 @@
     var lastKey = "";
     var syncTimer = 0;
     var requestToken = 0;
+    var routeKey = "";
+    var parentKey = "";
+    var parentLive = false;
+    var parentPending = false;
+    var parentToken = 0;
 
     function german() {
         var lang = String((document.documentElement && document.documentElement.lang) || navigator.language || "").toLowerCase();
@@ -27,20 +32,6 @@
 
     function hash() {
         return String(location.hash || "").toLowerCase();
-    }
-
-    function pageTitle() {
-        var root = pageRoot();
-        var node = root.querySelector(".pageTitle, h1, .sectionTitle") || document.querySelector(".headerTitle");
-        return node ? String(node.textContent || "").replace(/\s+/g, " ").trim() : "";
-    }
-
-    function pageRoot() {
-        var pages = document.querySelectorAll(".libraryPage, .liveTvPage, .mainAnimatedPage");
-        for (var i = 0; i < pages.length; i++) {
-            if (!pages[i].closest(".hide, [hidden], [aria-hidden='true']")) { return pages[i]; }
-        }
-        return document.body;
     }
 
     function isGuidePage() {
@@ -68,37 +59,17 @@
             var tab = document.querySelector(".skinHeader .emby-tab-button-active[data-index]");
             return !tab || ["0", "2"].indexOf(tab.getAttribute("data-index")) !== -1;
         }
-        // Cached home/detail pages can contain live cards. They must never cause
-        // the channel overlay to take over an unrelated route.
-        if (!/^#\/?(?:list|items|library)(?:[/?]|$)/.test(hash())) {
-            return false;
-        }
-        if (/treasure/i.test(pageTitle())) {
-            return false;
-        }
-        if (/live[\s-]?tv/i.test(pageTitle())) {
-            return true;
-        }
-        var labeled = document.querySelector(".card .cardText, .card .cardText-secondary, .posterItem");
-        if (labeled && /Jetzt:|Danach:/.test(String(labeled.textContent || ""))) {
-            return true;
-        }
-        // Cheap gate first: one selector probe instead of scanning every card's text.
-        if (!document.querySelector(".card[data-type='TvChannel'], .card[data-type='Program'], .card[data-type='LiveTvProgram'], .posterItem[data-type='TvChannel']")) {
-            return false;
-        }
-        var cards = document.querySelectorAll(".card, .posterItem");
-        if (cards.length < 3) {
-            return false;
-        }
-        var hits = 0;
-        for (var i = 0; i < cards.length; i++) {
-            var type = String(cards[i].getAttribute("data-type") || "").toLowerCase();
-            if (type === "tvchannel" || type === "program" || type === "livetvprogram") {
-                hits += 1;
-            }
-        }
-        return hits >= 3 && hits >= cards.length * 0.4;
+        return parentKey === scopeKey() + "|" + hash() && parentLive;
+    }
+
+    function liveParent(item) {
+        if (!item) { return false; }
+        var ids = item.ProviderIds || {};
+        if (ids.TreasureMaps || ids.treasuremaps || ids.TreasureMapsCategory || ids.treasuremapscategory
+            || /treasure[\s-]?maps/i.test(item.Name || item.ChannelName || "")) { return false; }
+        var folder = item.IsFolder || /^(?:Channel|ChannelFolderItem|Folder)$/.test(item.Type || "");
+        return !!(folder && (ids.LiveTv || ids.livetv || /^g:/.test(item.ExternalId || item.SourceId || "")
+            || /^live[\s-]?tv$/i.test(item.Name || "") || /\d+\s+Sender/i.test(item.Overview || "")));
     }
 
     function auth() {
@@ -118,7 +89,7 @@
             deviceId: device.deviceId || "",
             deviceName: device.deviceName || "Fire TV",
             appName: device.appName || "Jellyfin Fire TV",
-            appVersion: device.appVersion || "2.4.1"
+            appVersion: device.appVersion || "2.4.2"
         };
     }
 
@@ -695,8 +666,30 @@
     }
 
     function sync() {
-        if (!looksLikeLiveLibrary()) { hide(); return; }
         var key = scopeKey() + "|" + hash();
+        if (routeKey !== key) {
+            routeKey = key;
+            parentKey = ""; parentLive = false; parentPending = false; parentToken++;
+            hide();
+        }
+        // A previous page's heading and cards can stay mounted while the router
+        // loads the next one. Only the API identity of this parent can own a list.
+        var match = /^#\/?(?:list|items|library)\?/.test(hash()) && hash().match(/[?&]parentid=([a-f0-9]{32})(?:&|$)/);
+        var client = window.ApiClient;
+        if (match && parentKey !== key && !parentPending && client && client.getItem && client.getCurrentUserId()) {
+            parentPending = true;
+            var token = ++parentToken;
+            client.getItem(client.getCurrentUserId(), match[1]).then(function (item) {
+                if (token !== parentToken || key !== scopeKey() + "|" + hash()) { return; }
+                parentKey = key; parentLive = liveParent(item); parentPending = false;
+                sync();
+            }).catch(function () {
+                if (token !== parentToken || key !== scopeKey() + "|" + hash()) { return; }
+                parentKey = key; parentLive = false; parentPending = false;
+                hide();
+            });
+        }
+        if (!looksLikeLiveLibrary()) { hide(); return; }
         if (lastKey === key && viewport && viewport.isConnected) { return; }
         hide(); readState(); lastKey = key; show(true); ensure(); render(false);
         refreshChannels(true);
@@ -704,6 +697,15 @@
     }
 
     function start() {
+        ["pushState", "replaceState"].forEach(function (name) {
+            var original = window.history[name];
+            window.history[name] = function () {
+                var result = original.apply(this, arguments);
+                sync();
+                return result;
+            };
+        });
+        window.addEventListener("popstate", sync);
         window.addEventListener("hashchange", sync);
         window.addEventListener("resize", function () { if (viewport) { fitViewport(); paintWindow(); } });
         window.addEventListener("pagehide", persist);

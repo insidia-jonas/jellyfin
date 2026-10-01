@@ -21,6 +21,10 @@
     var loadError = '';
     var lastKey = '';
     var loadGen = 0;
+    var routeKey = '';
+    var checkedKey = '';
+    var checkingKey = '';
+    var checkGen = 0;
     var owned = false;
     var tickTimer = 0;
     var refreshTimer = 0;
@@ -126,11 +130,6 @@
         return hash().toLowerCase();
     }
 
-    function pageTitle() {
-        var node = document.querySelector('.libraryPage .pageTitle, .headerTitle, h1, .sectionTitle');
-        return node ? String(node.textContent || '').replace(/\s+/g, ' ').trim() : '';
-    }
-
     function isGuidePage() {
         return hashLower().indexOf('guide') !== -1;
     }
@@ -172,7 +171,8 @@
         if (!item) {
             return false;
         }
-        if (item.ProviderIds && (item.ProviderIds.TreasureMaps || item.ProviderIds.treasuremaps)) {
+        if (item.ProviderIds && (item.ProviderIds.TreasureMaps || item.ProviderIds.treasuremaps
+            || item.ProviderIds.TreasureMapsCategory || item.ProviderIds.treasuremapscategory)) {
             return true;
         }
         var name = String(item.Name || item.ChannelName || '');
@@ -426,6 +426,10 @@
        jf-livetv-playing used to leave the senders hidden behind a blank page until
        the two-minute refresh. Repaint as soon as the picture goes away. */
     function applyListMode() {
+        if (routeKey !== currentRouteKey()) {
+            sync();
+            return playbackVisible();
+        }
         var playing = playbackVisible();
         document.documentElement.classList.toggle('jf-livetv-playing', playing);
         document.documentElement.classList.toggle('jf-livetv-list-on', owned && !playing && overlayOnVisiblePage());
@@ -1439,6 +1443,7 @@
     }
 
     function render(mode) {
+        if (!owned || routeKey !== currentRouteKey()) { return; }
         var box = ensure();
         if (!box) {
             return;
@@ -1598,8 +1603,9 @@
     }
 
     function load() {
+        var route = currentRouteKey();
         var parentId = parentIdFromHash();
-        var key = hash() + '|' + parentId + '|' + pageTitle();
+        var key = route;
         if (loading && lastKey === key) {
             show(true);
             hideLibrarySpinner();
@@ -1619,14 +1625,10 @@
         show(true);
         hideLibrarySpinner();
         render();
-        var work = isOfficialLiveHash()
-            ? fetchOfficial().then(function (list) { parentItem = { Name: 'Live TV' }; return list; })
-            : api().getItem(api().getCurrentUserId(), parentId).then(function (item) {
-                parentItem = item;
-                return fetchChildren(parentId);
-            });
+        if (isOfficialLiveHash()) { parentItem = { Name: 'Live TV' }; }
+        var work = isOfficialLiveHash() ? fetchOfficial() : fetchChildren(parentId);
         work.then(function (list) {
-            if (gen !== loadGen) {
+            if (gen !== loadGen || route !== currentRouteKey()) {
                 return;
             }
             hideLibrarySpinner();
@@ -1640,7 +1642,7 @@
             loading = false;
             render();
         }).catch(function () {
-            if (gen !== loadGen) {
+            if (gen !== loadGen || route !== currentRouteKey()) {
                 return;
             }
             loading = false;
@@ -1697,7 +1699,7 @@
         if (isGuidePage() || looksTreasureMaps(parent)) {
             return false;
         }
-        if (isOfficialLiveHash() || isLiveTvGroupHash()) {
+        if (isOfficialLiveHash()) {
             return true;
         }
         if (parent && isLiveTvParent(parent)) {
@@ -1706,7 +1708,25 @@
         return false;
     }
 
+    function currentRouteKey() {
+        var client = api();
+        return hash() + '|' + (client && client.getCurrentUserId ? client.getCurrentUserId() : '');
+    }
+
     function sync() {
+        var key = currentRouteKey();
+        if (routeKey !== key) {
+            routeKey = key;
+            checkedKey = '';
+            checkingKey = '';
+            checkGen += 1;
+            loadGen += 1;
+            paintToken += 1;
+            items = [];
+            parentItem = null;
+            loading = false;
+            hide();
+        }
         if (playbackVisible()) {
             applyListMode();
             return;
@@ -1716,26 +1736,50 @@
             return;
         }
         var parentId = parentIdFromHash();
-        if (isOfficialLiveHash() || isLiveTvGroupHash()) {
+        if (isOfficialLiveHash()) {
             load();
             return;
         }
-        if (!parentId || !api()) {
+        if (!/^#\/?(?:list|items|library)(?:[/?]|$)/i.test(hash()) || !parentId || !api()
+            || !api().getCurrentUserId()) {
             hide();
             return;
         }
+        if (checkedKey === key) {
+            if (decide(parentItem)) { load(); } else { hide(); }
+            return;
+        }
+        if (checkingKey === key) { return; }
+        checkingKey = key;
+        var gen = ++checkGen;
         api().getItem(api().getCurrentUserId(), parentId).then(function (item) {
+            if (gen !== checkGen || key !== currentRouteKey()) { return; }
+            checkingKey = '';
+            checkedKey = key;
+            parentItem = item;
             if (decide(item)) {
                 load();
             } else {
                 hide();
             }
         }).catch(function () {
+            if (gen !== checkGen || key !== currentRouteKey()) { return; }
+            checkingKey = '';
             hide();
         });
     }
 
     function start() {
+        // React Router changes hashes with the History API, which emits neither
+        // hashchange nor popstate. Release ownership before the next page mounts.
+        ['pushState', 'replaceState'].forEach(function (name) {
+            var original = window.history[name];
+            window.history[name] = function () {
+                var result = original.apply(this, arguments);
+                sync();
+                return result;
+            };
+        });
         window.addEventListener('hashchange', function () {
             lastKey = '';
             sync();
@@ -1745,6 +1789,10 @@
             sync();
         });
         var observer = new MutationObserver(function () {
+            if (routeKey !== currentRouteKey()) {
+                sync();
+                return;
+            }
             if (owned) {
                 if (playbackVisible()) {
                     applyListMode();
@@ -1783,7 +1831,7 @@
 
     window.JellyfinLiveTvOverview = {
         __bound: true,
-        ownsPage: function () { return owned; },
+        ownsPage: function () { return owned && routeKey === currentRouteKey(); },
         visibleHost: visibleHost,
         sync: sync,
         progressOf: progressOf,

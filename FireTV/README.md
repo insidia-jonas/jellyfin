@@ -8,6 +8,10 @@ Das ist bewusst **kein** API-only-Client wie [jellyfin-androidtv](https://github
 
 Fire TV client that hosts the full Jellyfin web UI (same architecture as the official iOS app: WebView + NativeShell). Video playback uses ExoPlayer so selecting a movie cannot freeze Amazon WebView. Downloads use Android DownloadManager. The 1920 CSS-pixel TV layout is scaled to the actual window, with automatic viewport height.
 
+## Änderungen in 2.4.2
+
+Beim Wechsel von Live TV zu Filmen, Serien oder Treasure Maps wird die Senderliste sofort entfernt. Die Erweiterung berücksichtigt auch die Navigation über die History API des Webclients und Zurück/Vorwärts. Zwischengespeicherte Überschriften oder Senderkarten einer alten Seite können keine fremde Seite mehr als Live TV einstufen; Listen werden anhand ihres aktuellen API-Elternelements erkannt. Verspätete Antworten bleiben an die ursprüngliche Seite gebunden.
+
 ## Änderungen in 2.4.1
 
 Die globale Suche sendet pro Suchbegriff eine Anfrage mit unverändertem Titel und Jahr. Alte Anfragen werden beim Weitertippen oder Seitenwechsel abgebrochen; verspätete Antworten dürfen die neue Ansicht nicht ersetzen. Lokale Sender- und Dashboardfilter lösen keine globale Suche aus. Die Treasure-Maps-Web-Erweiterung nutzt auf Fire TV die gemeinsame Trefferansicht, statt eine zweite Suche zu starten.

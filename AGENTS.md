@@ -370,3 +370,9 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
 - Display titles can differ from indexer release names (e.g. “The Foster Brothers” / “Sut Kardesler”). Group ids carry the cleaned release search title in field 7; season/episode ids carry it in field 8. Preserve it while navigating into seasons and episodes. Old ids fall back to the display title.
 - Category generation `c6-`, DataVersion `40`, script `v13`, plugin `1.0.2.0`: bundled landscape PNGs have editable SVG sources under `Channels/Artwork`. No font, ffmpeg or image-provider request is needed for the main category cards. The `TreasureMapsCategory` provider id distinguishes navigation cards from posters and identifies page links.
 - The web script waits for API/login readiness, guards delayed detail responses against route changes, and inserts its release list outside the native containers it hides. Keep cast containers visible. Browser regressions cover readiness, navigation, hidden parents and retry behavior.
+
+### Live TV route ownership
+
+- React Router navigates with `history.pushState` / `replaceState`; these do not emit `hashchange` or `popstate`. Both the embedded server script (v8) and Fire TV overlay (2.4.2) release ownership immediately for History API navigation, hash changes and Back/Forward. Invalidate pending parent lookups, channel responses and render chunks when the route/user changes.
+- Never infer a list's identity from cached DOM headings or channel cards: old pages can remain mounted during a transition. Resolve the current `parentId` via the API, cache that decision for the route, and exclude `TreasureMapsCategory` as well as `TreasureMaps` provider ids.
+- `FireTV/tests/web/livetv-navigation.test.cjs` exercises both scripts with the same route/race scenarios. Real browser validation must click from Live TV through category and title cards; opening each URL in a fresh document misses this regression.
