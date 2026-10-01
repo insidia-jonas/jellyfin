@@ -48,7 +48,7 @@ public sealed class BaseTunerHostListingCacheTests
         Assert.Equal(0, host.CompletedRefreshes);
 
         host.ReleaseRefresh.TrySetResult();
-        await host.CompletedRefresh.Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        await WaitForPublishedRefreshAsync(host);
         Assert.Equal(1, host.CompletedRefreshes);
     }
 
@@ -83,7 +83,7 @@ public sealed class BaseTunerHostListingCacheTests
         Assert.Equal(0, host.CompletedRefreshes);
 
         host.ReleaseRefresh.TrySetResult();
-        await host.CompletedRefresh.Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        await WaitForPublishedRefreshAsync(host);
     }
 
     [Fact]
@@ -118,7 +118,7 @@ public sealed class BaseTunerHostListingCacheTests
         Assert.True(host.IsListingRefreshInFlight);
 
         host.ReleaseRefresh.TrySetResult();
-        await host.CompletedRefresh.Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        await WaitForPublishedRefreshAsync(host);
 
         var second = host.GetCachedChannels();
         Assert.Equal("new", Assert.Single(second).Id);
@@ -139,6 +139,19 @@ public sealed class BaseTunerHostListingCacheTests
         Assert.Equal("old", Assert.Single(first).Id);
         Assert.Equal("old", Assert.Single(second).Id);
         Assert.Equal(0, host.CompletedRefreshes);
+    }
+
+    private static async Task WaitForPublishedRefreshAsync(TestTunerHost host)
+    {
+        await host.CompletedRefresh.Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(2));
+        // The fake provider returns before BaseTunerHost publishes the snapshot.
+        // Wait for that publication too, rather than racing its continuation.
+        while (host.IsListingRefreshInFlight)
+        {
+            await Task.Delay(1, timeout.Token);
+        }
     }
 
     private TestTunerHost CreateHost(TunerHostInfo tuner)
