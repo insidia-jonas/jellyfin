@@ -1539,6 +1539,7 @@ namespace Jellyfin.LiveTv.Channels
                 }
             }
 
+            forceUpdate |= ChannelManagerBrowse.EnsurePresentationKey(item);
             item.OnMetadataChanged();
 
             if (isNew)

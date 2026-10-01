@@ -40,6 +40,23 @@ public enum ChannelFolderPaint
 public static class ChannelManagerBrowse
 {
     /// <summary>
+    /// Gives channel entities a stable grouping key before they are persisted. BoxSets
+    /// skip scraper refreshes, so leaving this null collapses all search cards into one.
+    /// </summary>
+    /// <param name="item">The new or previously cached channel entity.</param>
+    /// <returns>Whether the entity needs to be saved.</returns>
+    public static bool EnsurePresentationKey(BaseItem item)
+    {
+        if (!string.IsNullOrWhiteSpace(item.PresentationUniqueKey))
+        {
+            return false;
+        }
+
+        item.PresentationUniqueKey = item.CreatePresentationUniqueKey();
+        return true;
+    }
+
+    /// <summary>
     /// Overlay channels decide freshness themselves. The 3-hour ChannelManager
     /// disk file must not be treated as current (that hid expired Treasure-Maps
     /// rows, and the TTL-epoch workaround rebuilt every folder on every open).

@@ -12,6 +12,29 @@ namespace Jellyfin.LiveTv.Tests.Channels;
 
 public class ChannelManagerBrowseTests
 {
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void EnsurePresentationKey_RepairsOldAndNewChannelCards(string? missing)
+    {
+        var first = new MediaBrowser.Controller.Entities.Movies.BoxSet { Id = Guid.NewGuid(), PresentationUniqueKey = missing! };
+        var second = new MediaBrowser.Controller.Entities.Movies.BoxSet { Id = Guid.NewGuid(), PresentationUniqueKey = missing! };
+        Assert.True(ChannelManagerBrowse.EnsurePresentationKey(first));
+        Assert.True(ChannelManagerBrowse.EnsurePresentationKey(second));
+        Assert.Equal(first.Id.ToString("N"), first.PresentationUniqueKey);
+        Assert.NotEqual(first.PresentationUniqueKey, second.PresentationUniqueKey);
+        Assert.False(ChannelManagerBrowse.EnsurePresentationKey(first));
+    }
+
+    [Fact]
+    public void EnsurePresentationKey_PreservesExistingVersionGrouping()
+    {
+        var item = new Video { Id = Guid.NewGuid(), PresentationUniqueKey = "existing-primary-version" };
+        Assert.False(ChannelManagerBrowse.EnsurePresentationKey(item));
+        Assert.Equal("existing-primary-version", item.PresentationUniqueKey);
+    }
+
     [Fact]
     public void BypassDiskCache_OnlyOverlayChannels()
     {
