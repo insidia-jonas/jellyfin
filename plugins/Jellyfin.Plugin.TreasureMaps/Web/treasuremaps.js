@@ -21,6 +21,7 @@
         '.tmCategoryPage .cardPadder{padding-bottom:60%!important}' +
         '.tmChannelPage .cardText-first{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.35;min-height:2.7em}' +
         '.tmChannelPage .cardImageContainer{background-size:cover}' +
+        '.tmTitlePage .emby-scroller{max-width:100%;overflow:hidden}' +
         '.tmBrowseHeading{margin:1em 0 .6em;font-size:1.7em;font-weight:650}' +
         '.tmBrowsePages{display:flex;flex-wrap:wrap;gap:.6em;margin:0 0 1.2em}' +
         '.tmBrowsePages a{padding:.65em 1em;border:1px solid rgba(255,255,255,.3);border-radius:.5em;color:inherit;text-decoration:none}' +
