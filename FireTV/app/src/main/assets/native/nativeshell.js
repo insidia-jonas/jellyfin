@@ -24,7 +24,11 @@
         if (!head) {
             return;
         }
-        var meta = document.querySelector('meta[name="viewport"]');
+        var viewports = document.querySelectorAll('meta[name="viewport"]');
+        var meta = viewports[0];
+        // The hosted document can add its viewport after our document-start hook.
+        // Keep one authority for layout rather than two competing scale limits.
+        for (var i = 1; i < viewports.length; i++) { viewports[i].remove(); }
         if (!meta) {
             meta = document.createElement("meta");
             meta.setAttribute("name", "viewport");
@@ -32,7 +36,7 @@
         }
         meta.setAttribute(
             "content",
-            "width=1920, height=1080, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+            "width=1920, user-scalable=no, viewport-fit=cover"
         );
         document.documentElement.style.width = "100%";
         document.documentElement.style.height = "100%";
@@ -75,7 +79,7 @@
             ".layout-tv .dialog{",
             "  background:#151A24!important;",
             "  border-radius:16px!important;",
-            "  box-shadow:0 24px 80px rgba(0,0,0,.55)!important;",
+            "  box-shadow:none!important;",
             "}",
             "video{display:none!important;width:0!important;height:0!important;}"
         ].join("");
@@ -100,11 +104,18 @@
             script.async = true;
             parent.appendChild(script);
         }
-        if (!document.querySelector('script[src="/native/tvLive.js"]')) {
+        function loadLive() {
+            if (document.querySelector('script[src="/native/tvLive.js"]')) { return; }
             var live = document.createElement("script");
             live.src = "/native/tvLive.js";
-            live.async = true;
             parent.appendChild(live);
+        }
+        if (window.FireTvLogos) { loadLive(); }
+        else if (!document.querySelector('script[src="/native/tvLogos.js"]')) {
+            var logos = document.createElement("script");
+            logos.src = "/native/tvLogos.js";
+            logos.onload = logos.onerror = loadLive;
+            parent.appendChild(logos);
         }
     }
 
@@ -201,7 +212,7 @@
             deviceId: "firetv-web",
             deviceName: "Fire TV",
             appName: "Jellyfin Fire TV",
-            appVersion: "2.3.2"
+            appVersion: "2.4.1"
         };
     }
 
@@ -700,6 +711,9 @@
 
     window.FireTvPlayerSync = {
         apply: function (state) {
+            if (window.FireTvLive && window.FireTvLive.onPlaybackState) {
+                window.FireTvLive.onPlaybackState(state);
+            }
             var player = window.ExoPlayer;
             if (!player || !state) {
                 return;

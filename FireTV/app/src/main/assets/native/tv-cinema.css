@@ -45,13 +45,7 @@ html.layout-tv,
     margin-bottom: 0.4em !important;
 }
 
-.layout-tv .cardImageContainer,
-.layout-tv .cardImage,
-.layout-tv .coveredImage {
-    background-size: cover !important;
-    background-position: center 12% !important;
-    background-repeat: no-repeat !important;
-}
+/* Keep jellyfin-web's cover/contain choice: channel and library logos are not posters. */
 
 .layout-tv .cardPadder-portrait,
 .layout-tv .cardPadder-overflowPortrait {
@@ -77,12 +71,12 @@ html.layout-tv,
 
 .layout-tv .focused .cardImageContainer,
 .layout-tv .focused .cardBox {
-    filter: brightness(1.07);
+    filter: none;
 }
 
 .layout-tv .itemBackdrop {
-    mask-image: linear-gradient(180deg, #000 46%, transparent 100%);
-    -webkit-mask-image: linear-gradient(180deg, #000 46%, transparent 100%);
+    mask-image: none;
+    -webkit-mask-image: none;
 }
 
 .layout-tv .itemName,
@@ -90,7 +84,7 @@ html.layout-tv,
 .layout-tv .parentName {
     font-weight: 750 !important;
     letter-spacing: 0.01em !important;
-    text-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+    text-shadow: none;
 }
 
 .layout-tv .itemName {
@@ -156,6 +150,7 @@ html.layout-tv,
 }
 
 #firetv-smart-results .firetv-card {
+    font: inherit;
     flex: 0 0 11.4em;
     width: 11.4em;
     background: transparent;
@@ -171,12 +166,12 @@ html.layout-tv,
     padding-bottom: 150%;
     border-radius: 8px;
     background: #151a24 center 12% / cover no-repeat;
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+    box-shadow: none;
 }
 
 #firetv-smart-results .firetv-card.focused .firetv-poster {
-    filter: brightness(1.08);
-    transform: scale(1.05);
+    filter: none;
+    transform: none;
 }
 
 #firetv-smart-results .firetv-card-title {
@@ -290,7 +285,15 @@ html.jf-livetv-list-on .busy {
 }
 
 #firetv-live {
-    padding: 0.2em 0 2em;
+    position: fixed;
+    z-index: 12;
+    top: 7em;
+    bottom: 1em;
+    left: 1.5em;
+    right: 1.5em;
+    background: #07090f;
+    overflow: hidden;
+    padding: 0.2em 0 0;
 }
 
 #firetv-live .firetv-live-head {
@@ -331,6 +334,7 @@ html.jf-livetv-list-on .busy {
 }
 
 #firetv-live .firetv-live-row {
+    font: inherit;
     display: flex;
     align-items: center;
     gap: 1em;
@@ -346,16 +350,88 @@ html.jf-livetv-list-on .busy {
 }
 
 #firetv-live .firetv-live-row.focused {
-    filter: brightness(1.12);
+    filter: none;
     background: #1a2230;
 }
 
 #firetv-live .firetv-live-logo {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     flex: 0 0 4.6em;
     width: 4.6em;
     height: 4.6em;
     border-radius: 8px;
     background: #151a24 center / contain no-repeat;
+}
+
+#firetv-live .firetv-live-logo img {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #151a24;
+}
+
+#firetv-live .firetv-live-more {
+    min-height: 3em;
+    margin-top: 0.6em;
+    padding: 0.5em 1em;
+    border: 0;
+    border-radius: 8px;
+    background: #151a24;
+    color: #f4f7fb;
+    font: inherit;
+}
+
+#firetv-live .firetv-live-controls { display: flex; align-items: center; margin-bottom: 0.55em; }
+#firetv-live .firetv-live-controls button,
+#firetv-live .firetv-live-controls select {
+    font: inherit; color: #e8edf4; background: #151a24; border: 1px solid #334258;
+    padding: 0.4em 0.7em; margin-right: 0.65em; border-radius: 6px;
+}
+#firetv-live .firetv-live-controls [aria-pressed="true"] { background: #164a70; }
+#firetv-live .firetv-live-status { color: #d5c493; font-size: 0.85em; }
+#firetv-live .firetv-live-status:empty { display: none; }
+#firetv-live .firetv-live-viewport { overflow-y: auto; overflow-x: hidden; position: relative; padding: 3px; box-sizing: border-box; }
+#firetv-live .firetv-live-list { display: block; position: relative; width: 100%; max-width: none; }
+#firetv-live .firetv-live-entry { position: absolute; left: 0; right: 0; display: flex; align-items: stretch; box-sizing: border-box; padding-bottom: 0.45em; }
+#firetv-live .firetv-live-entry .firetv-live-row { flex: 1 1 auto; min-width: 0; min-height: 0; margin: 0; box-sizing: border-box; }
+#firetv-live .firetv-live-favorite { flex: 0 0 2.8em; font: inherit; font-size: 1.2em; background: #10141c; border: 0; border-radius: 8px; color: #d8bd72; margin-left: 0.2em; }
+#firetv-live .firetv-live-copy { flex: 1; overflow: hidden; }
+#firetv-live .firetv-live-name,
+#firetv-live .firetv-live-now,
+#firetv-live .firetv-live-next { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#firetv-live button:focus,
+#firetv-live select:focus,
+#firetv-live input:focus { outline: 2px solid #00a4dc; outline-offset: -2px; }
+
+#firetv-live .firetv-live-more:focus,
+#firetv-live .firetv-live-row:focus,
+#firetv-smart-results .firetv-card:focus .firetv-poster {
+    outline: 2px solid #00a4dc;
+    outline-offset: 2px;
+}
+
+/* Older Fire OS WebViews have no flex-gap support. */
+#firetv-live .firetv-live-list { gap: 0; }
+#firetv-live .firetv-live-row { gap: 0; margin-bottom: 0.45em; }
+#firetv-live .firetv-live-logo { margin-right: 1em; }
+#firetv-live .firetv-live-head { gap: 0; }
+#firetv-live .firetv-live-head > * { margin-right: 1.2em; margin-bottom: 0.8em; }
+#firetv-smart-results .firetv-smart-row { gap: 0; }
+#firetv-smart-results .firetv-card { margin-right: 1.05em; }
+
+.layout-tv .skinHeader,
+.layout-tv .dialog,
+.layout-tv .cardBox,
+.layout-tv .cardImageContainer {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    transition: none !important;
 }
 
 #firetv-live .firetv-live-copy {

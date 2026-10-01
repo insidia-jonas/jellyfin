@@ -6,6 +6,14 @@ import org.junit.jupiter.api.Test
 
 class ResourceKindTest {
     @Test
+    fun `only the fork's desktop live overview is replaced in the TV shell`() {
+        assertTrue(ResourceKind.isServerLiveOverview("/web/livetv-overview.js?v=6"))
+        assertTrue(ResourceKind.isServerLiveOverview("/jellyfin/web/livetv-overview.js"))
+        assertFalse(ResourceKind.isServerLiveOverview("/web/main.bundle.js"))
+        assertFalse(ResourceKind.isServerLiveOverview("/native/tvLive.js"))
+    }
+
+    @Test
     fun `video streams are media and must not be intercepted as html`() {
         assertTrue(ResourceKind.isMedia("/Videos/abc/stream"))
         assertTrue(ResourceKind.isMedia("/videos/abc/master.m3u8"))

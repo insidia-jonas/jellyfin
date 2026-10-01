@@ -54,6 +54,7 @@ object JellyfinHttp {
         appVersion: String = FireTvClient.APP_VERSION,
         connectTimeoutMs: Int = 12_000,
         readTimeoutMs: Int = 20_000,
+        cancellation: HttpCancellation? = null,
     ): Response {
         return request(
             url = url,
@@ -67,6 +68,7 @@ object JellyfinHttp {
             appVersion = appVersion,
             connectTimeoutMs = connectTimeoutMs,
             readTimeoutMs = readTimeoutMs,
+            cancellation = cancellation,
         )
     }
 
@@ -82,9 +84,11 @@ object JellyfinHttp {
         appVersion: String,
         connectTimeoutMs: Int,
         readTimeoutMs: Int,
+        cancellation: HttpCancellation? = null,
     ): Response {
         val connection = URL(url).openConnection() as HttpURLConnection
         try {
+            cancellation?.attach(connection)
             connection.connectTimeout = connectTimeoutMs
             connection.readTimeout = readTimeoutMs
             connection.requestMethod = method
@@ -112,6 +116,7 @@ object JellyfinHttp {
             return Response(code, text)
         } finally {
             connection.disconnect()
+            cancellation?.detach(connection)
         }
     }
 

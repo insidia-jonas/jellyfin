@@ -5,6 +5,9 @@ package org.jellyfin.firetv.core
  * inject NativeShell into the web document, and can downscale artwork.
  */
 object ResourceKind {
+    fun isServerLiveOverview(path: String): Boolean =
+        path.lowercase().substringBefore('?').endsWith("/web/livetv-overview.js")
+
     fun isNativeBridge(path: String): Boolean {
         return path.contains("/native/", ignoreCase = true)
     }

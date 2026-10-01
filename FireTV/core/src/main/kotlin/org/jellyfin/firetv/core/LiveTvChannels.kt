@@ -22,6 +22,27 @@ data class LiveTvChannel(
 )
 
 object LiveTvChannels {
+    fun withPrograms(channel: LiveTvChannel, body: String, nowEpochMs: Long): LiveTvChannel {
+        val programs = jsonArrayObjects(body, "Items")
+            .filter { jsonStringField(it, "ChannelId") == channel.id }
+            .sortedBy { parseEpochMs(jsonStringField(it, "StartDate")) ?: Long.MAX_VALUE }
+        val current = programs.firstOrNull {
+            val start = parseEpochMs(jsonStringField(it, "StartDate"))
+            val end = parseEpochMs(jsonStringField(it, "EndDate"))
+            start != null && end != null && start <= nowEpochMs && end > nowEpochMs
+        }
+        val next = programs.firstOrNull { (parseEpochMs(jsonStringField(it, "StartDate")) ?: Long.MIN_VALUE) > nowEpochMs }
+        return channel.copy(
+            nowTitle = current?.let { jsonStringField(it, "Name") },
+            nowStart = current?.let { jsonStringField(it, "StartDate") },
+            nowEnd = current?.let { jsonStringField(it, "EndDate") },
+            nowOverview = current?.let { jsonStringField(it, "Overview") },
+            nextTitle = next?.let { jsonStringField(it, "Name") },
+            nextStart = next?.let { jsonStringField(it, "StartDate") },
+            nextEnd = next?.let { jsonStringField(it, "EndDate") },
+        )
+    }
+
     fun parse(body: String): List<LiveTvChannel> {
         val items = jsonArrayObjects(body, "Items").ifEmpty { jsonRootArrayObjects(body) }
         return items.mapNotNull { parseOne(it) }
@@ -53,12 +74,18 @@ object LiveTvChannels {
         )
     }
 
-    fun clock(iso: String?): String? {
+    fun clock(iso: String?, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String? {
         if (iso.isNullOrBlank()) {
             return null
         }
-        val time = iso.substringAfter('T', "").take(5)
-        return time.takeIf { it.length == 5 && time[2] == ':' }
+        return runCatching {
+            java.time.OffsetDateTime.parse(iso).atZoneSameInstant(zone)
+                .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+        }.getOrElse {
+            runCatching {
+                java.time.LocalDateTime.parse(iso).format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+            }.getOrNull()
+        }
     }
 
     fun nowLine(channel: LiveTvChannel, german: Boolean = true): String? {

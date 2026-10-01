@@ -40,7 +40,7 @@ class LiveTvChannelsTest {
         assertEquals("Das Erste", channels[0].name)
         assertEquals("1", channels[0].number)
         assertEquals("Tagesschau", channels[0].nowTitle)
-        assertEquals("20:00", LiveTvChannels.clock(channels[0].nowStart))
+        assertEquals("20:00", LiveTvChannels.clock(channels[0].nowStart, java.time.ZoneOffset.UTC))
         assertTrue(LiveTvChannels.nowLine(channels[0])!!.contains("Tagesschau"))
         assertEquals("Wetter", channels[0].nextTitle)
         assertTrue(LiveTvChannels.nextLine(channels[0])!!.contains("Wetter"))

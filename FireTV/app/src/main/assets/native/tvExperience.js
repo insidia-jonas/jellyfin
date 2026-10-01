@@ -1,7 +1,7 @@
 /**
  * Fire TV cinema layer for hosted jellyfin-web.
  *
- * - Hides empty / failed home categories (including plugin "Failed to retrieve" rows)
+ * - Hides failed home categories (including plugin "Failed to retrieve" rows)
  * - Does not hide official Live TV / Guide sections (few cards, Guide buttons)
  * - Restyles Live TV library-channel tiles as landscape now/next rows
  * - Smart-searches mixed libraries such as Treasure Maps (jellyfin-web skips those)
@@ -32,6 +32,11 @@
     var hideTimer = 0;
     var searchTimer = 0;
     var lastQuery = "";
+    var searchGeneration = 0;
+    var smartRequest = null;
+    var smartKey = "";
+    var smartUntil = 0;
+    window.FireTvSmartSearch = true;
     var lastParentId = "";
 
     function $(selector, root) {
@@ -57,20 +62,6 @@
     function extractYear(value) {
         var match = String(value || "").match(/\b((?:19|20)\d{2})\b/);
         return match ? parseInt(match[1], 10) : null;
-    }
-
-    function queryVariants(raw) {
-        var parsed = normalize(String(raw || "").replace(/\b((?:19|20)\d{2})\b/g, " "));
-        var out = [];
-        function add(value) {
-            if (value && value.length >= 2 && out.indexOf(value) === -1) {
-                out.push(value);
-            }
-        }
-        add(String(raw || "").trim());
-        add(parsed);
-        add(parsed.replace(/ae/g, "ä").replace(/oe/g, "ö").replace(/ue/g, "ü"));
-        return out;
     }
 
     function looksFailed(text) {
@@ -166,7 +157,7 @@
 
     function isSearchPage() {
         var hash = String(location.hash || "").toLowerCase();
-        return hash.indexOf("search") !== -1 || !!$(".searchFields, .searchfields-input, input[type='search']");
+        return /(^|\/)search(?:[?/#]|$)/i.test(hash);
     }
 
     function isHomePage() {
@@ -288,12 +279,6 @@
         return lang.indexOf("de") === 0;
     }
 
-    function restyleLiveTvCards() {
-        if (window.FireTvLive && typeof window.FireTvLive.sync === "function") {
-            window.FireTvLive.sync();
-        }
-    }
-
     function hideFailedSections() {
         var roots = all(".homeSectionsContainer, .homePage, .modularHome, .sections, .searchResults, .searchResultsContainer");
         if (!roots.length && isHomePage()) {
@@ -317,20 +302,26 @@
                 var text = ((title && title.textContent) || "").replace(/\s+/g, " ").trim();
                 var bodyText = (section.textContent || "").replace(/\s+/g, " ").trim().slice(0, 200);
                 var failed = looksFailed(text) || looksFailed(bodyText);
-                var empty = cards.length === 0 && !!title;
-                if (failed || (empty && (isHomePage() || isSearchPage()) && bodyText.length < 240)) {
+                // Empty rows can still be waiting for Jellyfin's lazy loader.
+                // Hiding them removes their viewport intersection and prevents loading.
+                if (failed && !cards.length) {
                     section.setAttribute("data-firetv-hidden", "1");
                 } else if (section.getAttribute("data-firetv-hidden") === "1" && cards.length) {
                     section.removeAttribute("data-firetv-hidden");
                 }
             });
         });
-        restyleLiveTvCards();
     }
 
     function scheduleHide() {
-        window.clearTimeout(hideTimer);
-        hideTimer = window.setTimeout(hideFailedSections, 280);
+        if (hideTimer) { return; }
+        hideTimer = window.setTimeout(function () {
+            hideTimer = 0;
+            wrapApiClient();
+            bindSearch();
+            if (isDetailPage()) { enhanceDetails(); }
+            hideFailedSections();
+        }, 280);
     }
 
     function originalGetItems(client) {
@@ -355,25 +346,8 @@
             if (!opts.SearchTerm) {
                 return client.__firetvOrigGetItems.apply(client, arguments);
             }
-            var preferred = currentParentId();
-            var local = {};
-            Object.keys(opts).forEach(function (key) { local[key] = opts[key]; });
-            // 12.0 already applies Recursive with filters + includeItemTypes; keep it on for search ranking only.
-            local.Recursive = true;
-            if (!local.ParentId && preferred && isSearchPage()) {
-                local.ParentId = preferred;
-            }
-            return client.__firetvOrigGetItems.call(client, uid, local).then(function (result) {
-                var items = (result && result.Items) || [];
-                if (items.length >= 8 || !preferred) {
-                    return rankResult(result, items, opts.SearchTerm, preferred);
-                }
-                var wide = {};
-                Object.keys(local).forEach(function (key) { wide[key] = local[key]; });
-                delete wide.ParentId;
-                return client.__firetvOrigGetItems.call(client, uid, wide).then(function (globalResult) {
-                    return rankResult(result || globalResult, mergeItems(items, (globalResult && globalResult.Items) || []), opts.SearchTerm, preferred);
-                });
+            return client.__firetvOrigGetItems.call(client, uid, opts).then(function (result) {
+                return rankResult(result, (result && result.Items) || [], opts.SearchTerm, currentParentId());
             });
         };
         return true;
@@ -398,9 +372,10 @@
         var ranked = (items || []).slice().sort(function (a, b) {
             return scoreItem(b, query, preferred) - scoreItem(a, query, preferred);
         });
-        var copy = result ? JSON.parse(JSON.stringify(result)) : { Items: [], TotalRecordCount: 0 };
+        var copy = {};
+        Object.keys(result || {}).forEach(function (key) { copy[key] = result[key]; });
         copy.Items = ranked;
-        copy.TotalRecordCount = ranked.length;
+        if (copy.TotalRecordCount == null) { copy.TotalRecordCount = ranked.length; }
         return copy;
     }
 
@@ -533,72 +508,84 @@
         });
     }
 
-    function fetchSmart(query) {
+    function fetchSmart(query, signal) {
         var client = window.ApiClient;
-        if (!client || typeof client.getItems !== "function") {
-            return Promise.resolve([]);
-        }
+        if (!client || typeof client.getItems !== "function") { return Promise.resolve([]); }
         var uid = client.getCurrentUserId && client.getCurrentUserId();
         var parent = currentParentId();
-        var getItems = originalGetItems(client);
-        var fields = "PrimaryImageAspectRatio,ProductionYear,CommunityRating,OfficialRating,ProviderIds,Overview,OriginalTitle,Genres,RunTimeTicks,ParentId";
-        var requests = [];
-        queryVariants(query).forEach(function (term) {
-            var base = {
-                Recursive: true,
-                SearchTerm: term,
-                Limit: 40,
-                Fields: fields,
-                IncludeItemTypes: "Movie,Series,BoxSet,Video,Folder,TvChannel,LiveTvProgram,MusicAlbum,Audio",
-                EnableTotalRecordCount: false
-            };
-            if (parent) {
-                var scoped = {};
-                Object.keys(base).forEach(function (key) { scoped[key] = base[key]; });
-                scoped.ParentId = parent;
-                requests.push(getItems.call(client, uid, scoped));
-            }
-            requests.push(getItems.call(client, uid, base));
-        });
-        return Promise.all(requests.map(function (promise) {
-            return promise.catch(function () { return { Items: [] }; });
-        })).then(function (results) {
-            var merged = [];
-            results.forEach(function (result) {
-                merged = mergeItems(merged, (result && result.Items) || []);
+        var options = {
+            UserId: uid, Recursive: true, SearchTerm: query, Limit: 40,
+            Fields: "PrimaryImageAspectRatio,ProductionYear,CommunityRating,OfficialRating,ProviderIds,Overview,OriginalTitle,Genres,RunTimeTicks,ParentId",
+            IncludeItemTypes: "Movie,Series,BoxSet,Video,Folder,TvChannel,LiveTvProgram,MusicAlbum,Audio",
+            EnableTotalRecordCount: false
+        };
+        var request;
+        if (window.fetch && client.getUrl && client.accessToken) {
+            request = window.fetch(client.getUrl("Items", options), {
+                signal: signal, headers: { "X-Emby-Token": client.accessToken(), Accept: "application/json" }
+            }).then(function (response) {
+                if (!response.ok) { throw new Error("Search failed: " + response.status); }
+                return response.json();
             });
-            return merged.sort(function (a, b) {
+        } else {
+            request = originalGetItems(client).call(client, uid, options);
+        }
+        return request.then(function (result) {
+            return ((result && result.Items) || []).slice().sort(function (a, b) {
                 return scoreItem(b, query, parent) - scoreItem(a, query, parent);
             });
         });
     }
 
+    function cancelSmartSearch() {
+        searchGeneration++;
+        if (smartRequest) { smartRequest.abort(); smartRequest = null; }
+        smartKey = "";
+        smartUntil = 0;
+        var box = $("#firetv-smart-results");
+        if (box) { box.setAttribute("data-firetv-hidden", "1"); }
+        all(".card[data-firetv-hidden='1']").forEach(function (card) { card.removeAttribute("data-firetv-hidden"); });
+    }
+
     function runSmartSearch(query) {
         query = String(query || "").trim();
         lastQuery = query;
-        if (query.length < 2) {
-            var box = $("#firetv-smart-results");
-            if (box) {
-                box.setAttribute("data-firetv-hidden", "1");
-                box.innerHTML = "";
-            }
-            scheduleHide();
-            return;
-        }
-        fetchSmart(query).then(function (items) {
-            if (query !== lastQuery) {
-                return;
-            }
+        var client = window.ApiClient;
+        if (!client || !isSearchPage()) { cancelSmartSearch(); return; }
+        var key = (client.getCurrentUserId && client.getCurrentUserId()) + "|" +
+            (client.serverAddress && client.serverAddress()) + "|" + query;
+        if (key === smartKey && (smartRequest || Date.now() < smartUntil)) { return; }
+        cancelSmartSearch();
+        if (query.length < 2) { return; }
+        smartKey = key;
+        var generation = searchGeneration;
+        var route = location.hash;
+        smartRequest = window.AbortController ? new AbortController() : { abort: function () {} };
+        fetchSmart(query, smartRequest.signal).then(function (items) {
+            if (generation !== searchGeneration || route !== location.hash ||
+                key !== ((client.getCurrentUserId && client.getCurrentUserId()) + "|" +
+                    (client.serverAddress && client.serverAddress()) + "|" + query)) { return; }
+            smartRequest = null;
+            smartUntil = Date.now() + 20000;
             renderOverlay(items, query);
             scheduleHide();
+        }).catch(function () {
+            if (generation === searchGeneration) { smartRequest = null; smartKey = ""; }
         });
     }
 
     function searchInput() {
-        return $("input[type='search'], input.searchfields-txtSearch, .searchFields input, .searchfields-header input, .searchfields-input");
+        var inputs = all("input[type='search'], input.searchfields-txtSearch, .searchFields input, .searchfields-header input, .searchfields-input");
+        for (var i = 0; i < inputs.length; i++) {
+            if (!inputs[i].closest("#firetv-live, #jf-livetv-overview, .hide, [hidden], [aria-hidden='true']")) {
+                return inputs[i];
+            }
+        }
+        return null;
     }
 
     function bindSearch() {
+        if (!isSearchPage()) { return; }
         var input = searchInput();
         if (!input || input.__firetvBound) {
             return;
@@ -606,6 +593,7 @@
         input.__firetvBound = true;
         input.addEventListener("input", function () {
             window.clearTimeout(searchTimer);
+            cancelSmartSearch();
             var value = input.value;
             searchTimer = window.setTimeout(function () { runSmartSearch(value); }, 320);
         });
@@ -723,14 +711,18 @@
         tick();
         window.addEventListener("hashchange", function () {
             window.__firetvDetailId = "";
+            window.clearTimeout(searchTimer);
+            cancelSmartSearch();
+            lastQuery = "";
             tick();
         });
-        var observer = new MutationObserver(function () {
-            wrapApiClient();
-            bindSearch();
-            scheduleHide();
-            if (isDetailPage()) {
-                enhanceDetails();
+        var observer = new MutationObserver(function (records) {
+            for (var i = 0; i < records.length; i++) {
+                var node = records[i].target;
+                if (!node.closest || !node.closest("#firetv-live, #firetv-smart-results, #firetv-imdb-meta")) {
+                    scheduleHide();
+                    break;
+                }
             }
         });
         if (document.documentElement) {

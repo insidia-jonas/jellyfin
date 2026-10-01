@@ -51,6 +51,11 @@ class JellyfinWebViewClient(
         if (ResourceKind.isNativeBridge(path)) {
             return serveNativeAsset(request.url.lastPathSegment)
         }
+        // This fork also injects its desktop channel list. Use our virtualized
+        // implementation in the WebView so two observers cannot own the page.
+        if (ResourceKind.isServerLiveOverview(path)) {
+            return serveNativeAsset("tvLive.js")
+        }
         if (ResourceKind.isMedia(path)) {
             return null
         }

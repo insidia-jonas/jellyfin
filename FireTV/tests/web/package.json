@@ -1,0 +1,12 @@
+{
+  "name": "firetv-web-regressions",
+  "private": true,
+  "scripts": {
+    "test": "node --test *.test.cjs"
+  },
+  "devDependencies": {
+    "@sinonjs/fake-timers": "15.0.0",
+    "fake-indexeddb": "6.2.4",
+    "jsdom": "26.1.0"
+  }
+}

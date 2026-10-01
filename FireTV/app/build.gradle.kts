@@ -3,16 +3,19 @@ plugins {
     kotlin("android")
 }
 
+val previewBuild = providers.gradleProperty("firetvPreview").orNull == "true"
+
 android {
     namespace = "org.jellyfin.firetv"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "org.jellyfin.firetvweb"
+        applicationId = if (previewBuild) "org.jellyfin.firetvweb.preview" else "org.jellyfin.firetvweb"
+        manifestPlaceholders["appLabel"] = if (previewBuild) "Jellyfin IPTV Test" else "@string/app_name"
         minSdk = 25
         targetSdk = 34
-        versionCode = 17
-        versionName = "2.3.2"
+        versionCode = 20
+        versionName = "2.4.1"
     }
 
     buildTypes {
@@ -26,6 +29,7 @@ android {
     }
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -41,6 +45,7 @@ android {
 }
 
 dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.3")
     implementation(project(":core"))
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.constraintlayout:constraintlayout:2.2.0")

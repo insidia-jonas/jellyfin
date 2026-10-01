@@ -1,13 +1,14 @@
 package org.jellyfin.firetv.core
 
+import kotlin.math.floor
 import kotlin.math.roundToInt
 
 /**
  * Maps the Fire TV window to the 1920×1080 CSS space jellyfin-web's TV layout uses.
  *
- * Chromium WebView: 1 CSS pixel = [density] physical pixels at zoom 1. A 1080p
- * Cube (1920×1080, density 2.0) therefore needs zoom 50% so 1920 CSS fills the
- * panel. Using [android.util.DisplayMetrics.widthPixels] alone is wrong on a
+ * WebView.setInitialScale takes a physical-pixel percentage, unlike the viewport
+ * meta tag. Dividing by Android density a second time shrinks the Cube's UI.
+ * Using DisplayMetrics.widthPixels alone is wrong on a
  * 4K-capable Cube plugged into a 1080p TV — the metric can stay 3840 while the
  * activity window is 1920, which made the UI overflow.
  *
@@ -19,15 +20,15 @@ object DisplayScale {
     const val DESIGN_HEIGHT_PX: Int = 1080
 
     const val VIEWPORT_CONTENT: String =
-        "width=1920, height=1080, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+        "width=1920, user-scalable=no, viewport-fit=cover"
 
-    fun pageScalePercent(viewWidthPx: Int, density: Float): Int {
+    fun pageScalePercent(viewWidthPx: Int): Int {
         if (viewWidthPx <= 0) {
             return 100
         }
-        val dpr = if (density < 0.5f) 1f else density
-        val percent = (viewWidthPx * 100f) / (DESIGN_WIDTH_PX * dpr)
-        return percent.roundToInt().coerceIn(40, 250)
+        // Round down so the fixed-width layout never extends beyond the view.
+        val percent = (viewWidthPx * 100.0) / DESIGN_WIDTH_PX
+        return floor(percent).toInt().coerceIn(1, 250)
     }
 
     fun overscanInsetPx(widthPx: Int, heightPx: Int): Int {

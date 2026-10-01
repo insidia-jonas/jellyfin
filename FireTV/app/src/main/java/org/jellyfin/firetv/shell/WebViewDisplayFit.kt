@@ -37,8 +37,7 @@ object WebViewDisplayFit {
             } else {
                 (windowW - 2 * inset).coerceAtLeast(1)
             }
-            val density = webView.resources.displayMetrics.density
-            webView.setInitialScale(DisplayScale.pageScalePercent(width, density))
+            webView.setInitialScale(DisplayScale.pageScalePercent(width))
         }
 
         var lastWidth = -1

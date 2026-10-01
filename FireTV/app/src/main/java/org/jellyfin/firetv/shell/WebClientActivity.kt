@@ -129,7 +129,6 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(binding.webView, true)
         WebViewDisplayFit.apply(binding.webView)
-        binding.webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             binding.webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
             @Suppress("DEPRECATION")
@@ -145,7 +144,9 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
             allowFileAccess = false
             allowContentAccess = false
             cacheMode = WebSettings.LOAD_DEFAULT
-            offscreenPreRaster = true
+            // Hardware acceleration is enabled by the activity. Extra offscreen
+            // tiles and a forced view layer waste memory on older Fire TV Cubes.
+            offscreenPreRaster = false
             loadsImagesAutomatically = true
             blockNetworkImage = false
             userAgentString = "$userAgentString ${FireTvClient.APP_NAME.replace(" ", "")}/${FireTvClient.APP_VERSION}"
@@ -430,6 +431,22 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
         val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
         val target = ((percent.coerceIn(0, 100) / 100f) * max).toInt()
         audio.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
+    }
+
+    override fun onPause() {
+        if (::binding.isInitialized) {
+            binding.webView.evaluateJavascript("window.FireTvLive&&window.FireTvLive.setActive(false)", null)
+            binding.webView.onPause()
+        }
+        super.onPause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::binding.isInitialized) {
+            binding.webView.onResume()
+            binding.webView.evaluateJavascript("window.FireTvLive&&window.FireTvLive.setActive(true)", null)
+        }
     }
 
     override fun onDestroy() {

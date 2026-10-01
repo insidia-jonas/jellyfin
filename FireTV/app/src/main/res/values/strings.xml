@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">Jellyfin</string>
     <string name="app_version_label">Version %1$s</string>
-    <string name="connect_kicker">Fire TV · 2.3.2</string>
+    <string name="connect_kicker">Fire TV · 2.4.0</string>
     <string name="connect_title">The cinema for your server.</string>
     <string name="connect_subtitle">The complete Jellyfin web UI, matched to this server. Movies, series, music, and Live TV play on the Fire TV player. Up opens audio and subtitles. Menu opens the client rail.</string>
     <string name="connect_form_title">Connect your server</string>
@@ -69,4 +69,7 @@
         <item quantity="one">Download started</item>
         <item quantity="other">%d downloads started</item>
     </plurals>
+    <string name="live_unavailable">Channel unavailable. Try another channel or try again later.</string>
+    <string name="live_buffering">Connection interrupted – buffering…</string>
+    <string name="live_retry_status">Reconnecting (%1$d/%2$d)…</string>
 </resources>

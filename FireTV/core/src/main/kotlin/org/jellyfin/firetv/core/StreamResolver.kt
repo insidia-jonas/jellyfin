@@ -35,6 +35,7 @@ object StreamResolver {
         ignoreSslErrors: Boolean,
         audioStreamIndex: Int? = null,
         subtitleStreamIndex: Int? = null,
+        cancellation: HttpCancellation? = null,
     ): ResolvedPlayback {
         val requestedId = PlaybackPayload.itemId(payload) ?: error("No items to play")
         val tunerId = LivePlayback.tunerChannelId(payload)
@@ -59,10 +60,10 @@ object StreamResolver {
 
         val body = buildPlaybackInfoBody(userId, startTicks, mediaSourceId, audioIndex, subtitleIndex)
         var itemId = requestedId
-        var response = playbackInfo(server, itemId, userId, body, token, ignoreSslErrors, deviceId, deviceName, appName, appVersion)
+        var response = playbackInfo(server, itemId, userId, body, token, ignoreSslErrors, deviceId, deviceName, appName, appVersion, cancellation)
         if (response.code !in 200..299 && !tunerId.isNullOrBlank() && tunerId != itemId) {
             itemId = tunerId
-            response = playbackInfo(server, itemId, userId, body, token, ignoreSslErrors, deviceId, deviceName, appName, appVersion)
+            response = playbackInfo(server, itemId, userId, body, token, ignoreSslErrors, deviceId, deviceName, appName, appVersion, cancellation)
         }
         require(response.code in 200..299) {
             "PlaybackInfo failed HTTP ${response.code} ${response.body.take(240)}"
@@ -90,6 +91,7 @@ object StreamResolver {
                 mediaSourceId = jsonStringField(source, "Id") ?: mediaSourceId,
                 playSessionId = playSessionId,
                 openToken = openToken,
+                cancellation = cancellation,
             )?.let { opened ->
                 source = opened
             }
@@ -151,6 +153,8 @@ object StreamResolver {
                 deviceName = playback.deviceName,
                 appName = playback.appName,
                 appVersion = playback.appVersion,
+                connectTimeoutMs = 2_000,
+                readTimeoutMs = 3_000,
             )
         }
     }
@@ -173,6 +177,7 @@ object StreamResolver {
         mediaSourceId: String?,
         playSessionId: String?,
         openToken: String?,
+        cancellation: HttpCancellation?,
     ): String? {
         val body = buildString {
             append('{')
@@ -202,8 +207,9 @@ object StreamResolver {
             deviceName = deviceName,
             appName = appName,
             appVersion = appVersion,
-            connectTimeoutMs = 15_000,
-            readTimeoutMs = 35_000,
+            connectTimeoutMs = 8_000,
+            readTimeoutMs = 12_000,
+            cancellation = cancellation,
         )
         if (response.code !in 200..299) {
             return null
@@ -222,6 +228,7 @@ object StreamResolver {
         deviceName: String,
         appName: String,
         appVersion: String,
+        cancellation: HttpCancellation?,
     ): JellyfinHttp.Response {
         return JellyfinHttp.post(
             url = "$server/Items/$itemId/PlaybackInfo?userId=$userId",
@@ -232,8 +239,9 @@ object StreamResolver {
             deviceName = deviceName,
             appName = appName,
             appVersion = appVersion,
-            connectTimeoutMs = 15_000,
-            readTimeoutMs = 35_000,
+            connectTimeoutMs = 8_000,
+            readTimeoutMs = 12_000,
+            cancellation = cancellation,
         )
     }
 

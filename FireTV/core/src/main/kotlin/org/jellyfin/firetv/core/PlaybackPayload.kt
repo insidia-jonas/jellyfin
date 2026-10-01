@@ -77,7 +77,7 @@ object PlaybackPayload {
         }.distinct()
         val fromIds = jsonStringArray(json, "ids").filter { it.isNotBlank() }.distinct()
         return when {
-            fromIds.size > fromItems.size -> fromIds
+            fromIds.isNotEmpty() -> fromIds
             fromItems.isNotEmpty() -> fromItems
             else -> fromIds
         }

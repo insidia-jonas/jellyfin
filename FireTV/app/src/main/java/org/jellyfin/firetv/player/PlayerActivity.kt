@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.view.KeyEvent
 import android.widget.Button
 import android.widget.LinearLayout
@@ -28,6 +29,7 @@ import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.CaptionStyleCompat
 import kotlinx.coroutines.Dispatchers
@@ -37,12 +39,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.jellyfin.firetv.R
+import org.jellyfin.firetv.core.HttpCancellation
+import org.jellyfin.firetv.core.LiveTuneState
+import org.jellyfin.firetv.core.LiveTvChannels
+import org.jellyfin.firetv.core.LiveTvChannel
 import org.jellyfin.firetv.core.JellyfinHttp
 import org.jellyfin.firetv.core.LivePlayback
 import org.jellyfin.firetv.core.LiveTvNowNextText
 import org.jellyfin.firetv.core.MediaTrack
 import org.jellyfin.firetv.core.MediaTracks
 import org.jellyfin.firetv.core.PlaybackPayload
+import org.jellyfin.firetv.core.PlaybackBuffers
 import org.jellyfin.firetv.core.PlayerPayloadStore
 import org.jellyfin.firetv.core.PlayerSyncState
 import org.jellyfin.firetv.core.RemoteSubtitle
@@ -53,19 +60,33 @@ import org.jellyfin.firetv.core.StreamResolver
 import org.jellyfin.firetv.core.SubtitleSearchOutcome
 import org.jellyfin.firetv.databinding.ActivityPlayerBinding
 import java.util.Locale
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private lateinit var binding: ActivityPlayerBinding
     private var player: ExoPlayer? = null
     private var playback: ResolvedPlayback? = null
     private var reporter: PlaybackReporter? = null
-    private var resolveJob: Job? = null
+    private var resolveHttp: HttpCancellation? = null
+    private var pendingTune: Runnable? = null
+    private var resolveDeadline: Runnable? = null
+    private var cleanupFuture: Future<*>? = null
+    private val tune = LiveTuneState()
+    private var playerListener: Player.Listener? = null
+    private var playerIsLive = false
+    private var tuneStartedAt = 0L
+    private var bufferingStartedAt = 0L
+    private var stableSince = 0L
+    private var liveGuideChannel: LiveTvChannel? = null
+    private var guideJob: Job? = null
+    private var nextGuideAt = 0L
     private var originalPayload: String? = null
     private var queuePayload: String? = null
     private var ignoreSsl: Boolean = false
     private var pausedBySystem: Boolean = false
-    private var liveRetries: Int = 0
     private var lastEmittedVolume: Int = 100
     private var lastServerProgressAt: Long = 0L
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -87,8 +108,12 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private val stallWatchdog = Runnable {
         val exo = player ?: return@Runnable
         if (exo.playbackState == Player.STATE_BUFFERING) {
-            Toast.makeText(this, R.string.playback_timeout, Toast.LENGTH_LONG).show()
-            stopAndClose()
+            if (playback?.isLive == true) {
+                retryLive(getString(R.string.live_unavailable))
+            } else {
+                Toast.makeText(this, R.string.playback_timeout, Toast.LENGTH_LONG).show()
+                stopAndClose()
+            }
         }
     }
     private val progressTick = object : Runnable {
@@ -101,10 +126,17 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastServerProgressAt >= 10_000) {
                     lastServerProgressAt = now
-                    lifecycleScope.launch(Dispatchers.IO) {
-                        reporter?.progress(exo.currentPosition, !exo.isPlaying)
-                    }
+                    val position = exo.currentPosition
+                    val paused = !exo.isPlaying
+                    val currentReporter = reporter
+                    lifecycleScope.launch(Dispatchers.IO) { currentReporter?.progress(position, paused) }
                 }
+            }
+            if (current?.isLive == true) {
+                if (exo.isPlaying && stableSince > 0 && SystemClock.elapsedRealtime() - stableSince >= 30_000) {
+                    tune.stablePlayback()
+                }
+                refreshLiveGuide(current)
             }
             mainHandler.postDelayed(this, 2_000)
         }
@@ -141,47 +173,91 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             ?: intent.getStringExtra(EXTRA_PAYLOAD)
     }
 
-    private fun beginResolve(payload: String?, resetQueue: Boolean = true, resetRetries: Boolean = true) {
+    private fun cancelPendingTune() {
+        resolveHttp?.cancel()
+        resolveHttp = null
+        pendingTune?.let { mainHandler.removeCallbacks(it) }
+        pendingTune = null
+        resolveDeadline?.let { mainHandler.removeCallbacks(it) }
+        resolveDeadline = null
+    }
+
+    private fun beginResolve(
+        payload: String?,
+        resetQueue: Boolean = true,
+        resetRetries: Boolean = true,
+        delayMs: Long = 0,
+        audioStreamIndex: Int? = null,
+        subtitleStreamIndex: Int? = null,
+        resumePositionMs: Long? = null,
+    ) {
         if (payload.isNullOrBlank()) {
-            if (playback == null) {
-                finish()
-            }
+            if (playback == null) finish()
             return
         }
+        cancelPendingTune()
         originalPayload = payload
-        if (resetQueue) {
-            queuePayload = payload
-        }
-        if (resetRetries) {
-            liveRetries = 0
-        }
-        resolveJob?.cancel()
+        if (resetQueue) queuePayload = payload
+        val generation = tune.select(PlaybackPayload.itemId(payload), resetRetries)
         val liveHint = LivePlayback.isLivePayload(payload)
+        retirePlayback(keepPlayer = liveHint && playerIsLive)
+        tuneStartedAt = SystemClock.elapsedRealtime()
+        liveGuideChannel = null
+        nextGuideAt = 0
         binding.loading.isVisible = true
-        binding.loadingTitle.setText(R.string.app_name)
+        binding.loadingTitle.text = PlaybackPayload.itemName(payload)
         binding.loadingHint.setText(if (liveHint) R.string.preparing_live else R.string.preparing_playback)
-        resolveJob = lifecycleScope.launch {
-            val resolved = withContext(Dispatchers.IO) {
-                runCatching {
-                    withTimeout(if (liveHint) 40_000 else 25_000) {
-                        StreamResolver.resolve(payload, ignoreSsl)
+        Log.i("FireTvPlayback", "tune request=$generation live=$liveHint retry=${tune.retries}")
+        val pending = Runnable {
+            pendingTune = null
+            val cancellation = HttpCancellation()
+            resolveHttp = cancellation
+            val cleanup = cleanupFuture
+            val ssl = ignoreSsl
+            val deadline = Runnable {
+                if (tune.accepts(generation) && resolveHttp === cancellation) {
+                    cancellation.cancel()
+                    tune.invalidate()
+                    resolveHttp = null
+                    handleResolveFailure(liveHint)
+                }
+            }
+            resolveDeadline = deadline
+            mainHandler.postDelayed(deadline, if (liveHint) 25_000 else 30_000)
+            resolverExecutor.execute {
+                val result = runCatching {
+                    // Release the old tuner slot before opening another stream.
+                    cleanup?.get(7, TimeUnit.SECONDS)
+                    cancellation.checkActive()
+                    StreamResolver.resolve(payload, ssl, audioStreamIndex, subtitleStreamIndex, cancellation)
+                }
+                mainHandler.post {
+                    mainHandler.removeCallbacks(deadline)
+                    val resolved = result.getOrNull()
+                    if (!tune.accepts(generation) || cancellation.isCancelled || !isActiveSafe()) {
+                        if (resolved != null) cleanupExecutor.execute { StreamResolver.closeLiveStream(resolved, ssl) }
+                        return@post
+                    }
+                    resolveHttp = null
+                    resolveDeadline = null
+                    if (resolved == null) {
+                        handleResolveFailure(liveHint)
+                    } else {
+                        Log.i("FireTvPlayback", "resolved request=$generation ms=${SystemClock.elapsedRealtime() - tuneStartedAt}")
+                        startPlayer(resolved, resumePositionMs)
                     }
                 }
             }
-            if (!isActiveSafe()) {
-                return@launch
-            }
-            val playback = resolved.getOrNull()
-            if (playback == null) {
-                val reason = when (val error = resolved.exceptionOrNull()) {
-                    is TimeoutCancellationException -> getString(R.string.playback_timeout)
-                    else -> error?.message ?: getString(R.string.playback_failed)
-                }
-                Toast.makeText(this@PlayerActivity, reason, Toast.LENGTH_LONG).show()
-                finish()
-                return@launch
-            }
-            startPlayer(playback)
+        }
+        pendingTune = pending
+        mainHandler.postDelayed(pending, delayMs)
+    }
+
+    private fun handleResolveFailure(live: Boolean) {
+        if (live) retryLive(getString(R.string.live_unavailable))
+        else {
+            Toast.makeText(this, R.string.playback_timeout, Toast.LENGTH_LONG).show()
+            stopAndClose()
         }
     }
 
@@ -209,12 +285,12 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
 
     private fun startPlayer(resolved: ResolvedPlayback, resumePositionMs: Long? = null) {
         val keepPosition = resumePositionMs ?: resolved.startPositionMs
-        releasePlayer(clearPlayback = false)
+        if (playback != null) retirePlayback(keepPlayer = resolved.isLive && playerIsLive)
         playback = resolved
         reporter = PlaybackReporter(resolved, ignoreSsl)
         binding.osdTitle.text = liveChannelTitle() ?: resolved.title
         binding.loadingTitle.text = resolved.title
-        binding.loadingHint.setText(R.string.preparing_playback)
+        binding.loadingHint.setText(if (resolved.isLive) R.string.preparing_live else R.string.preparing_playback)
         val headers = linkedMapOf<String, String>()
         headers["Accept-Language"] = JellyfinHttp.acceptLanguage()
         if (resolved.accessToken.isNotBlank()) {
@@ -229,24 +305,27 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         }
         val dataSourceFactory = DefaultHttpDataSource.Factory()
             .setUserAgent("${resolved.appName}/${resolved.appVersion}")
-            .setConnectTimeoutMs(if (resolved.isLive) 20_000 else 12_000)
-            .setReadTimeoutMs(if (resolved.isLive) 45_000 else 20_000)
+            .setConnectTimeoutMs(if (resolved.isLive) 8_000 else 12_000)
+            .setReadTimeoutMs(if (resolved.isLive) 10_000 else 20_000)
             .setAllowCrossProtocolRedirects(true)
             .setDefaultRequestProperties(headers)
+        val reused = player != null && playerIsLive == resolved.isLive
+        if (player != null && !reused) releasePlayer(clearPlayback = false)
+        val buffers = PlaybackBuffers.forPlayback(resolved.isLive)
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                if (resolved.isLive) 2_500 else 3_000,
-                if (resolved.isLive) 15_000 else 20_000,
-                if (resolved.isLive) 1_500 else 1_000,
-                if (resolved.isLive) 3_000 else 2_500,
+                buffers.minMs, buffers.maxMs, buffers.startMs, buffers.rebufferMs,
             )
             .build()
-        val exo = ExoPlayer.Builder(this)
+        val exo = player ?: ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
             .setLoadControl(loadControl)
             .build()
             .also { player = it }
+        playerIsLive = resolved.isLive
+        playerListener?.let { exo.removeListener(it) }
         binding.playerView.player = exo
+        Log.i("FireTvPlayback", "player reused=$reused request=${tune.generation}")
         binding.playerView.useController = false
         exo.setAudioAttributes(
             AudioAttributes.Builder()
@@ -255,18 +334,34 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                 .build(),
             true,
         )
-        exo.addListener(object : Player.Listener {
+        val requestGeneration = tune.generation
+        val listener = object : Player.Listener {
+            override fun onRenderedFirstFrame() {
+                if (!tune.accepts(requestGeneration)) return
+                Log.i("FireTvPlayback", "first_frame request=$requestGeneration ms=${SystemClock.elapsedRealtime() - tuneStartedAt}")
+            }
             override fun onPlaybackStateChanged(playbackState: Int) {
+                if (!tune.accepts(requestGeneration) || playback !== resolved) return
                 if (playbackState == Player.STATE_READY) {
                     binding.loading.isVisible = false
                     mainHandler.removeCallbacks(stallWatchdog)
+                    stableSince = SystemClock.elapsedRealtime()
+                    if (bufferingStartedAt > 0) {
+                        Log.i("FireTvPlayback", "buffer_end request=$requestGeneration ms=${stableSince - bufferingStartedAt}")
+                        bufferingStartedAt = 0
+                    }
                     applyPreferredTracks(exo, resolved)
                     emitSync("durationchange")
                     emitSync("playing")
                 }
                 if (playbackState == Player.STATE_BUFFERING) {
                     mainHandler.removeCallbacks(stallWatchdog)
-                    mainHandler.postDelayed(stallWatchdog, if (resolved.isLive) 120_000 else 45_000)
+                    stableSince = 0
+                    bufferingStartedAt = SystemClock.elapsedRealtime()
+                    binding.loading.isVisible = true
+                    binding.loadingHint.setText(if (resolved.isLive) R.string.live_buffering else R.string.preparing_playback)
+                    Log.i("FireTvPlayback", "buffer_start request=$requestGeneration")
+                    mainHandler.postDelayed(stallWatchdog, if (resolved.isLive) 15_000 else 45_000)
                 }
                 if (playbackState == Player.STATE_ENDED) {
                     emitSync("ended")
@@ -279,10 +374,13 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (!tune.accepts(requestGeneration) || playback !== resolved) return
                 emitSync(if (isPlaying) "playing" else "pause")
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                if (!tune.accepts(requestGeneration) || playback !== resolved) return
+                Log.i("FireTvPlayback", "error request=$requestGeneration code=${error.errorCode}")
                 emitSync("error")
                 if (resolved.isLive) {
                     retryLive(error.message?.takeIf { it.isNotBlank() } ?: getString(R.string.playback_failed))
@@ -295,15 +393,25 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                 ).show()
                 stopAndClose()
             }
-        })
-        exo.setMediaItem(mediaItemFor(resolved))
+        }
+        playerListener = listener
+        exo.addListener(listener)
+        if (!reused) {
+            exo.addAnalyticsListener(object : AnalyticsListener {
+                override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
+                    Log.i("FireTvPlayback", "dropped_frames count=$droppedFrames elapsed_ms=$elapsedMs")
+                }
+            })
+        }
+        exo.setMediaSource(DefaultMediaSourceFactory(dataSourceFactory).createMediaSource(mediaItemFor(resolved)))
         exo.prepare()
         if (!resolved.isLive && keepPosition > 0) {
             exo.seekTo(keepPosition)
         }
         exo.playWhenReady = true
-        lifecycleScope.launch(Dispatchers.IO) { reporter?.playing() }
-        emitSync("playing")
+        val currentReporter = reporter
+        lifecycleScope.launch(Dispatchers.IO) { currentReporter?.playing() }
+        mainHandler.removeCallbacks(progressTick)
         mainHandler.post(progressTick)
         renderTrackPanel()
         showOsd()
@@ -338,15 +446,23 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             .setUri(resolved.url)
             .setSubtitleConfigurations(configs)
         LivePlayback.mimeType(resolved.container, resolved.url)?.let { builder.setMimeType(it) }
+        if (resolved.isLive) {
+            builder.setLiveConfiguration(MediaItem.LiveConfiguration.Builder()
+                .setTargetOffsetMs(3_000L + tune.retries * 2_000L)
+                .setMinOffsetMs(2_000)
+                .setMaxOffsetMs(15_000)
+                .build())
+        }
         return builder.build()
     }
 
     private fun retryLive(message: String) {
         val payload = originalPayload
-        if (liveRetries < MAX_LIVE_RETRIES && !payload.isNullOrBlank()) {
-            liveRetries += 1
-            Toast.makeText(this, R.string.live_reconnecting, Toast.LENGTH_SHORT).show()
-            beginResolve(payload, resetQueue = false, resetRetries = false)
+        val delay = tune.retryDelayMs()
+        if (delay != null && !payload.isNullOrBlank()) {
+            Log.i("FireTvPlayback", "retry attempt=${tune.retries} delay_ms=$delay")
+            beginResolve(payload, resetQueue = false, resetRetries = false, delayMs = delay)
+            binding.loadingHint.text = getString(R.string.live_retry_status, tune.retries, 3)
             return
         }
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
@@ -355,13 +471,14 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
 
     private fun playAdjacentFromQueue(next: Boolean): Boolean {
         val source = queuePayload ?: originalPayload ?: return false
-        val currentId = playback?.itemId ?: return false
+        val currentId = tune.selectedId ?: playback?.itemId ?: return false
         val targetId = if (next) {
             PlaybackPayload.nextItemId(source, currentId)
         } else {
             PlaybackPayload.previousItemId(source, currentId)
         } ?: return false
-        beginResolve(PlaybackPayload.retarget(source, targetId), resetQueue = false, resetRetries = true)
+        val payload = PlaybackPayload.retarget(source, targetId)
+        beginResolve(payload, resetQueue = false, delayMs = if (LivePlayback.isLivePayload(payload)) 180 else 0)
         return true
     }
 
@@ -399,11 +516,15 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             }
             return super.dispatchKeyEvent(event)
         }
+        val liveSelection = originalPayload?.let { LivePlayback.isLivePayload(it) } == true
+        if (liveSelection && event.keyCode in listOf(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_MEDIA_NEXT, KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_MEDIA_PREVIOUS)) {
+            playAdjacentFromQueue(event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN || event.keyCode == KeyEvent.KEYCODE_MEDIA_NEXT)
+            return true
+        }
         val exo = player
         if (exo == null) {
             if (event.keyCode == KeyEvent.KEYCODE_BACK || event.keyCode == KeyEvent.KEYCODE_ESCAPE) {
-                resolveJob?.cancel()
-                finish()
+                stopAndClose()
                 return true
             }
             return super.dispatchKeyEvent(event)
@@ -569,7 +690,9 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     }
 
     private fun liveGuideLine(): String? {
-        return liveGuide()?.nowLine()
+        return liveGuideChannel?.let { channel ->
+            listOfNotNull(LiveTvChannels.nowLine(channel), LiveTvChannels.nextLine(channel)).joinToString("  ·  ")
+        } ?: liveGuide()?.nowLine()
     }
 
     private fun trackSummary(): String {
@@ -701,27 +824,8 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private fun reloadTracks(audioIndex: Int?, subtitleIndex: Int?) {
         val payload = originalPayload ?: return
         val position = player?.currentPosition ?: playback?.startPositionMs ?: 0L
-        binding.loading.isVisible = true
-        resolveJob?.cancel()
-        resolveJob = lifecycleScope.launch {
-            val resolved = withContext(Dispatchers.IO) {
-                runCatching {
-                    withTimeout(25_000) {
-                        StreamResolver.resolve(payload, ignoreSsl, audioIndex, subtitleIndex)
-                    }
-                }
-            }
-            if (!isActiveSafe()) {
-                return@launch
-            }
-            val playback = resolved.getOrNull()
-            if (playback == null) {
-                binding.loading.isVisible = false
-                Toast.makeText(this@PlayerActivity, R.string.playback_failed, Toast.LENGTH_LONG).show()
-                return@launch
-            }
-            startPlayer(playback.copy(selectedAudioIndex = audioIndex, selectedSubtitleIndex = subtitleIndex), position)
-        }
+        beginResolve(payload, resetQueue = false, audioStreamIndex = audioIndex,
+            subtitleStreamIndex = subtitleIndex, resumePositionMs = position)
     }
 
     private fun showSearchPanel() {
@@ -931,22 +1035,68 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         onSubtitlePicked(track)
     }
 
-    private fun stopAndClose() {
-        emitSync("playbackstop")
-        val exo = player
-        val position = exo?.currentPosition ?: 0L
-        val closing = playback
-        lifecycleScope.launch(Dispatchers.IO) {
-            reporter?.stopped(position)
-            if (closing != null) {
-                StreamResolver.closeLiveStream(closing, ignoreSsl)
+    private fun refreshLiveGuide(current: ResolvedPlayback) {
+        val now = SystemClock.elapsedRealtime()
+        if (now < nextGuideAt || guideJob?.isActive == true) return
+        nextGuideAt = now + 60_000
+        val channel = LiveTvChannel(current.itemId, liveChannelTitle() ?: current.title)
+        guideJob = lifecycleScope.launch {
+            val channel = withContext(Dispatchers.IO) {
+                runCatching {
+                    val at = java.time.Instant.now()
+                    val query = "userId=${current.userId}&channelIds=${current.itemId}" +
+                        "&minEndDate=${Uri.encode(at.toString())}&maxStartDate=${Uri.encode(at.plusSeconds(43_200).toString())}" +
+                        "&sortBy=StartDate&sortOrder=Ascending&enableImages=false&enableUserData=false&limit=64"
+                    val response = JellyfinHttp.get(
+                        "${current.serverAddress}/LiveTv/Programs?$query",
+                        current.accessToken, ignoreSsl, connectTimeoutMs = 4_000, readTimeoutMs = 4_000,
+                    )
+                    if (response.code in 200..299) LiveTvChannels.withPrograms(channel, response.body, at.toEpochMilli()) else null
+                }.getOrNull()
             }
+            if (playback === current && channel != null) liveGuideChannel = channel
         }
-        releasePlayer()
+    }
+
+    private fun stopAndClose() {
+        tune.invalidate()
+        cancelPendingTune()
+        emitSync("playbackstop")
+        retirePlayback(keepPlayer = false)
         finish()
     }
 
+    private fun retirePlayback(keepPlayer: Boolean) {
+        guideJob?.cancel()
+        val exo = player
+        val position = exo?.currentPosition ?: 0L
+        val closing = playback
+        val closingReporter = reporter
+        val ssl = ignoreSsl
+        playerListener?.let { exo?.removeListener(it) }
+        playerListener = null
+        playback = null
+        reporter = null
+        mainHandler.removeCallbacks(progressTick)
+        mainHandler.removeCallbacks(hideOsd)
+        mainHandler.removeCallbacks(osdTick)
+        mainHandler.removeCallbacks(stallWatchdog)
+        if (keepPlayer) {
+            exo?.stop()
+            exo?.clearMediaItems()
+        } else releasePlayer()
+        if (closing != null) {
+            // Outlives the Activity so Back cannot cancel tuner cleanup.
+            cleanupFuture = cleanupExecutor.submit {
+                StreamResolver.closeLiveStream(closing, ssl)
+                cleanupExecutor.execute { closingReporter?.stopped(position) }
+            }
+        }
+    }
+
     private fun releasePlayer(clearPlayback: Boolean = true) {
+        playerListener?.let { player?.removeListener(it) }
+        playerListener = null
         mainHandler.removeCallbacks(progressTick)
         mainHandler.removeCallbacks(hideOsd)
         mainHandler.removeCallbacks(osdTick)
@@ -954,9 +1104,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         binding.playerView.player = null
         player?.release()
         player = null
-        if (clearPlayback) {
-            playback = null
-        }
+        if (clearPlayback) playback = null
     }
 
     override fun onStart() {
@@ -970,7 +1118,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     override fun onStop() {
         super.onStop()
         if (isFinishing) {
-            releasePlayer()
+            retirePlayback(keepPlayer = false)
         } else if (player?.isPlaying == true) {
             player?.pause()
             pausedBySystem = true
@@ -978,11 +1126,12 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     }
 
     override fun onDestroy() {
-        resolveJob?.cancel()
+        tune.invalidate()
+        cancelPendingTune()
         if (PlayerCommands.listener === this) {
             PlayerCommands.listener = null
         }
-        releasePlayer()
+        retirePlayback(keepPlayer = false)
         super.onDestroy()
     }
 
@@ -990,6 +1139,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         const val EXTRA_PAYLOAD = "payload"
         const val EXTRA_PAYLOAD_ID = "payload_id"
         const val EXTRA_IGNORE_SSL = "ignore_ssl"
-        private const val MAX_LIVE_RETRIES = 3
+        private val resolverExecutor = Executors.newFixedThreadPool(2)
+        private val cleanupExecutor = Executors.newCachedThreadPool()
     }
 }

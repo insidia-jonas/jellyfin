@@ -5,6 +5,8 @@ local.properties
 .idea/
 .cxx/
 captures/
+!tests/web/
+node_modules/
 *.apk
 !sideload/Jellyfin-FireTV.apk
 *.aab
