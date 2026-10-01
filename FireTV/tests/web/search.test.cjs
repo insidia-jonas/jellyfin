@@ -88,3 +88,31 @@ test('Treasure Maps rejects responses from a previous search route', async t => 
     e.calls[0].resolve({ ok: true, items: [{ id: 'matrix', name: 'Matrix' }] }); await e.clock.tickAsync(1);
     assert.equal(e.w.document.querySelector('.tmSearchName').textContent, 'Alien');
 });
+
+
+test('dashboard ignores superseded searches and appends deduplicated pages', async t => {
+    const html = fs.readFileSync(path.join(root, 'plugins/Jellyfin.Plugin.TreasureMaps/Configuration/browse.html'), 'utf8');
+    const dom = new JSDOM(html, { url: 'http://jellyfin.test/web/#/configurationpage', runScripts: 'outside-only' });
+    const w = dom.window;
+    const calls = [];
+    w.ApiClient = { accessToken: () => 'test-token', getUrl: (p, q) => 'http://jellyfin.test/' + p + '?' + new URLSearchParams(q) };
+    w.fetch = (url, options) => new Promise(resolve => calls.push({ url, options, resolve: data => resolve({ ok: true, json: () => Promise.resolve(data) }) }));
+    t.after(() => w.close());
+    w.eval(w.document.querySelector('script').textContent);
+    const settle = () => new Promise(resolve => setImmediate(resolve));
+    w.document.querySelector('[data-type="movie"]').click();
+    w.document.querySelector('[data-type="tv"]').click();
+    assert.equal(calls[0].options.signal.aborted, true);
+    assert.equal(calls[1].options.headers.Authorization, 'MediaBrowser Token="test-token"');
+    calls[1].resolve({ ok: true, items: [{ guid: 'first', title: 'Series' }], hasMore: true, nextOffset: 100 });
+    await settle();
+    calls[0].resolve({ ok: true, items: [{ guid: 'old', title: 'Old movie' }] });
+    await settle();
+    assert.equal(w.document.querySelector('.tmTitle').textContent, 'Series');
+    w.document.querySelector('#tmMore').click();
+    assert.equal(new URL(calls[2].url).searchParams.get('offset'), '100');
+    calls[2].resolve({ ok: true, items: [{ guid: 'first', title: 'Series' }, { guid: 'second', title: 'Next' }], hasMore: false, nextOffset: 102 });
+    await settle();
+    assert.equal(w.document.querySelectorAll('.tmCard').length, 2);
+    assert.equal(w.document.querySelector('#tmMore').hidden, true);
+});
