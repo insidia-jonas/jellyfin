@@ -58,6 +58,7 @@ namespace Jellyfin.LiveTv.Channels
             o.PoolInitialFill = 1;
         });
 
+        private readonly ChannelSearchCache _searchCache = new();
         private readonly ConcurrentDictionary<string, byte> _liveTvFolderSyncs = new(StringComparer.Ordinal);
         private readonly JsonSerializerOptions _jsonOptions = JsonDefaults.Options;
         private bool _disposed = false;
@@ -725,6 +726,7 @@ namespace Jellyfin.LiveTv.Channels
         /// <inheritdoc />
         public async Task<IReadOnlyList<BaseItem>> SearchChannelItemsAsync(string searchTerm, Guid? userId, int? limit, CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (string.IsNullOrWhiteSpace(searchTerm))
             {
                 return Array.Empty<BaseItem>();
@@ -737,8 +739,11 @@ namespace Jellyfin.LiveTv.Channels
             }
 
             var results = new List<BaseItem>();
+            var take = Math.Clamp(limit ?? 100, 1, 100);
+            searchTerm = searchTerm.Trim();
             foreach (var channel in channels)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (channel is not ISupportsSearch searchable)
                 {
                     continue;
@@ -746,30 +751,58 @@ namespace Jellyfin.LiveTv.Channels
 
                 try
                 {
-                    var internalChannel = await GetChannel(channel, cancellationToken).ConfigureAwait(false);
-                    var infos = await searchable.GetSearchResults(
-                        new ChannelSearchInfo
+                    if (userId.HasValue && !channel.IsEnabledFor(userId.Value.ToString("N", CultureInfo.InvariantCulture)))
+                    {
+                        continue;
+                    }
+
+                    // Native Items, Search/Hints and plugin cards often ask for the same
+                    // titles concurrently. Serialize the lookup and reuse materialized
+                    // entities briefly instead of repeatedly writing them to the database.
+                    var cacheKey = string.Join('|', "channel-search", channel.Name, channel.DataVersion, userId, take, searchTerm);
+                    var found = await _searchCache.GetOrCreateAsync(
+                        cacheKey,
+                        async token =>
                         {
-                            SearchTerm = searchTerm,
-                            UserId = userId?.ToString("N", CultureInfo.InvariantCulture),
-                            Limit = limit
+                            var channelResults = new List<BaseItem>();
+                            var internalChannel = await GetChannel(channel, token).ConfigureAwait(false);
+                            var infos = await searchable.GetSearchResults(
+                                new ChannelSearchInfo
+                                {
+                                    SearchTerm = searchTerm,
+                                    UserId = userId?.ToString("N", CultureInfo.InvariantCulture),
+                                    Limit = take
+                                },
+                                token).ConfigureAwait(false);
+
+                            foreach (var info in infos)
+                            {
+                                token.ThrowIfCancellationRequested();
+                                if (info is null || IsPlayToDownloadClip(info) || info.Type == ChannelItemType.Media)
+                                {
+                                    continue;
+                                }
+
+                                channelResults.Add(await GetChannelItemEntityAsync(
+                                    info,
+                                    channel,
+                                    internalChannel.Id,
+                                    internalChannel,
+                                    token).ConfigureAwait(false));
+                                if (channelResults.Count >= take)
+                                {
+                                    break;
+                                }
+                            }
+
+                            return channelResults;
                         },
                         cancellationToken).ConfigureAwait(false);
-
-                    foreach (var info in infos)
-                    {
-                        if (info is null || IsPlayToDownloadClip(info) || info.Type == ChannelItemType.Media)
-                        {
-                            continue;
-                        }
-
-                        results.Add(await GetChannelItemEntityAsync(
-                            info,
-                            channel,
-                            internalChannel.Id,
-                            internalChannel,
-                            cancellationToken).ConfigureAwait(false));
-                    }
+                    results.AddRange(found);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {
@@ -1688,6 +1721,7 @@ namespace Jellyfin.LiveTv.Channels
             if (disposing)
             {
                 _folderLocks?.Dispose();
+                _searchCache.Dispose();
             }
 
             _disposed = true;
