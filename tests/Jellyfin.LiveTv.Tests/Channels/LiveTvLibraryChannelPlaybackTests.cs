@@ -29,6 +29,24 @@ public class LiveTvLibraryChannelPlaybackTests
     }
 
     [Fact]
+    public void PrepareMediaSources_RefusesDirectPlay()
+    {
+        // German IPTV ships mpeg2video + mp2, which neither a browser nor Fire TV
+        // hardware decodes; a direct play would also drop the VLC user agent the
+        // provider expects. Every source has to go through the server.
+        var sources = new List<MediaSourceInfo>
+        {
+            new() { Id = "src", SupportsDirectPlay = true },
+            new() { Id = "src2", OpenToken = "already", SupportsDirectPlay = true }
+        };
+
+        var prepared = LiveTvLibraryChannelPlayback.PrepareMediaSources(sources, "m3u_channel1");
+
+        Assert.All(prepared, source => Assert.False(source.SupportsDirectPlay));
+        Assert.Equal("already", prepared[1].OpenToken);
+    }
+
+    [Fact]
     public void EnsureLiveStreamId_FillsMissingIdFromMediaSource()
     {
         var source = new MediaSourceInfo { Id = "src-md5" };

@@ -37,6 +37,11 @@ internal static class LiveTvLibraryChannelPlayback
             {
                 source.OpenToken = channelId;
             }
+
+            // A direct play would send the client at the provider ingest host with no
+            // VLC user agent, and hand it the raw mux (German IPTV is mpeg2video + mp2,
+            // which neither a browser nor Fire TV hardware decodes).
+            source.SupportsDirectPlay = false;
         }
 
         return list as IReadOnlyList<MediaSourceInfo> ?? list.ToArray();
