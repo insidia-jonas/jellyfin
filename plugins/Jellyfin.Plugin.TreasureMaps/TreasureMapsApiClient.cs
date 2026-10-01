@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -18,7 +19,7 @@ namespace Jellyfin.Plugin.TreasureMaps;
 /// <summary>
 /// Thin typed client for the Treasure-Maps REST API.
 /// </summary>
-public class TreasureMapsApiClient
+public sealed class TreasureMapsApiClient : IDisposable
 {
     private static readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -55,6 +56,7 @@ public class TreasureMapsApiClient
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly TreasureMapsListingCache _listingCache;
     private readonly ILogger<TreasureMapsApiClient> _logger;
+    private readonly IndexerRequestGate _requests = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TreasureMapsApiClient"/> class.
@@ -71,6 +73,9 @@ public class TreasureMapsApiClient
         _listingCache = listingCache;
         _logger = logger;
     }
+
+    /// <inheritdoc />
+    public void Dispose() => _requests.Dispose();
 
     private static PluginConfiguration Config =>
         Plugin.Instance?.Configuration ?? new PluginConfiguration();
@@ -106,10 +111,10 @@ public class TreasureMapsApiClient
     {
         var parameters = new Dictionary<string, string?>
         {
-            ["q"] = string.IsNullOrWhiteSpace(query) ? "*" : query,
+            ["q"] = string.IsNullOrWhiteSpace(query) ? "*" : query.Trim(),
             ["genre"] = genre,
             ["cat"] = string.IsNullOrWhiteSpace(categories) ? MovieCategories : categories,
-            ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
+            ["limit"] = Math.Clamp(limit, 1, 100).ToString(CultureInfo.InvariantCulture),
             ["offset"] = offset > 0 ? offset.ToString(CultureInfo.InvariantCulture) : null,
             ["sort"] = "posted_desc",
             ["extended"] = "1"
@@ -140,9 +145,9 @@ public class TreasureMapsApiClient
     {
         var parameters = new Dictionary<string, string?>
         {
-            ["q"] = string.IsNullOrWhiteSpace(query) ? null : query,
+            ["q"] = string.IsNullOrWhiteSpace(query) ? null : query.Trim(),
             ["cat"] = string.IsNullOrWhiteSpace(categories) ? TvCategories : categories,
-            ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
+            ["limit"] = Math.Clamp(limit, 1, 100).ToString(CultureInfo.InvariantCulture),
             ["offset"] = offset > 0 ? offset.ToString(CultureInfo.InvariantCulture) : null,
             ["sort"] = "posted_desc",
             ["extended"] = "1"
@@ -171,7 +176,7 @@ public class TreasureMapsApiClient
         var parameters = new Dictionary<string, string?>
         {
             ["type"] = type,
-            ["limit"] = limit.ToString(CultureInfo.InvariantCulture)
+            ["limit"] = Math.Clamp(limit, 1, 100).ToString(CultureInfo.InvariantCulture)
         };
         return GetJsonAsync<ReleaseListResponse>("trending", parameters, TreasureMapsListingCache.BrowseFreshTtl, cancellationToken);
     }
@@ -191,7 +196,7 @@ public class TreasureMapsApiClient
         {
             ["type"] = type,
             ["feed"] = feed.ToString(CultureInfo.InvariantCulture),
-            ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
+            ["limit"] = Math.Clamp(limit, 1, 100).ToString(CultureInfo.InvariantCulture),
             ["extended"] = "1"
         };
         return GetJsonAsync<ReleaseListResponse>("spotlight", parameters, TreasureMapsListingCache.SpotlightFreshTtl, cancellationToken);
@@ -273,6 +278,8 @@ public class TreasureMapsApiClient
         CancellationToken cancellationToken)
         where T : class
     {
+        using var slot = await _requests.EnterAsync(cancellationToken).ConfigureAwait(false);
+        var started = Stopwatch.GetTimestamp();
         using var client = CreateClient();
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         if (!string.IsNullOrEmpty(validator))
@@ -280,8 +287,18 @@ public class TreasureMapsApiClient
             request.Headers.TryAddWithoutValidation("If-None-Match", validator);
         }
 
-        _logger.LogDebug("Treasure-Maps request: {Url}", url);
         using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        _logger.LogDebug("Treasure-Maps {Endpoint}: HTTP {Status} in {ElapsedMs} ms",
+            new Uri(url).AbsolutePath, (int)response.StatusCode, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+        if (response.StatusCode == HttpStatusCode.TooManyRequests)
+        {
+            var retry = response.Headers.RetryAfter;
+            _requests.BackOff(retry?.Delta ?? (retry?.Date - DateTimeOffset.UtcNow) ?? TimeSpan.FromSeconds(5));
+        }
+        else if (response.StatusCode is HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout)
+        {
+            _requests.BackOff(TimeSpan.FromSeconds(3));
+        }
         if (response.StatusCode == HttpStatusCode.NotModified)
         {
             return (null, validator, true);

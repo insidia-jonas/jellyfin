@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -83,7 +84,8 @@ public sealed class TreasureMapsListingCache
     private const int MaxEntries = 256;
 
     private readonly ConcurrentDictionary<string, Snapshot> _snapshots = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, Task<FetchBox>> _inflight = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, Flight> _inflight = new(StringComparer.Ordinal);
+    private readonly object _gate = new();
     private readonly Func<DateTimeOffset> _clock;
     private readonly Func<string> _identity;
     private int _generation;
@@ -139,7 +141,7 @@ public sealed class TreasureMapsListingCache
             c.MinRating.ToString(CultureInfo.InvariantCulture),
             c.ResultLimit.ToString(CultureInfo.InvariantCulture),
             c.EnableXrel ? "1" : "0",
-            string.IsNullOrWhiteSpace(c.OmdbApiKey) ? "0" : "1");
+            ShortSecret(c.OmdbApiKey));
     }
 
     /// <summary>
@@ -256,6 +258,7 @@ public sealed class TreasureMapsListingCache
         CancellationToken cancellationToken)
         where T : class
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (TryGetFresh<T>(key, out var hit, out var shouldRefresh))
         {
             if (shouldRefresh)
@@ -266,7 +269,17 @@ public sealed class TreasureMapsListingCache
             return hit;
         }
 
-        var box = await CoalesceAsync(key, freshTtl, fetch, cancellationToken).ConfigureAwait(false);
+        var flight = AcquireFlight(key, freshTtl, fetch, background: false);
+        FetchBox box;
+        try
+        {
+            box = await flight.Completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            ReleaseWaiter(key, flight);
+        }
+
         return box.Value as T;
     }
 
@@ -293,8 +306,17 @@ public sealed class TreasureMapsListingCache
     /// </summary>
     public void InvalidateAll()
     {
-        _snapshots.Clear();
-        Interlocked.Increment(ref _generation);
+        lock (_gate)
+        {
+            Interlocked.Increment(ref _generation);
+            _snapshots.Clear();
+            foreach (var flight in _inflight.Values)
+            {
+                flight.Cancellation.Cancel();
+            }
+
+            _inflight.Clear();
+        }
     }
 
     /// <summary>
@@ -303,7 +325,14 @@ public sealed class TreasureMapsListingCache
     /// <param name="key">The query key.</param>
     public void Invalidate(string key)
     {
-        _snapshots.TryRemove(key, out _);
+        lock (_gate)
+        {
+            _snapshots.TryRemove(key, out _);
+            if (_inflight.TryRemove(key, out var flight))
+            {
+                flight.Cancellation.Cancel();
+            }
+        }
     }
 
     /// <summary>
@@ -386,45 +415,82 @@ public sealed class TreasureMapsListingCache
         }
     }
 
+    private void ReleaseWaiter(string key, Flight flight)
+    {
+        lock (_gate)
+        {
+            flight.Waiters--;
+            if (flight.Waiters == 0 && !flight.Background && !flight.Completion.Task.IsCompleted)
+            {
+                _inflight.TryRemove(new KeyValuePair<string, Flight>(key, flight));
+                flight.Cancellation.Cancel();
+            }
+        }
+    }
+
     private void ScheduleRefreshCore<T>(
         string key,
         TimeSpan freshTtl,
         Func<string?, CancellationToken, Task<ListingFetch<T>>> fetch)
         where T : class
     {
-        if (_inflight.ContainsKey(key))
-        {
-            return;
-        }
-
-        _ = CoalesceAsync(key, freshTtl, fetch, CancellationToken.None);
+        AcquireFlight(key, freshTtl, fetch, background: true);
     }
 
-    private Task<FetchBox> CoalesceAsync<T>(
+    private Flight AcquireFlight<T>(
         string key,
         TimeSpan freshTtl,
         Func<string?, CancellationToken, Task<ListingFetch<T>>> fetch,
-        CancellationToken cancellationToken)
+        bool background)
         where T : class
     {
-        var task = _inflight.GetOrAdd(key, _ => RunFetchAsync(key, freshTtl, fetch, cancellationToken));
-        _ = ForgetInflight(key, task);
-        return task;
+        lock (_gate)
+        {
+            var identity = _identity();
+            if (!_inflight.TryGetValue(key, out var flight) || flight.Identity != identity || flight.Generation != Generation)
+            {
+                flight?.Cancellation.Cancel();
+                flight = new Flight(identity, Generation);
+                _inflight[key] = flight;
+                // Publish the flight BEFORE starting work. ConcurrentDictionary value
+                // factories can run more than once, including their HTTP side effects.
+                _ = Task.Run(() => ExecuteFlightAsync(key, freshTtl, fetch, flight));
+            }
+
+            if (background) flight.Background = true;
+            else flight.Waiters++;
+            return flight;
+        }
     }
 
-    private async Task ForgetInflight(string key, Task<FetchBox> task)
+    private async Task ExecuteFlightAsync<T>(
+        string key,
+        TimeSpan freshTtl,
+        Func<string?, CancellationToken, Task<ListingFetch<T>>> fetch,
+        Flight flight)
+        where T : class
     {
         try
         {
-            await task.ConfigureAwait(false);
+            var result = await RunFetchAsync(key, freshTtl, fetch, flight).ConfigureAwait(false);
+            flight.Completion.TrySetResult(result);
         }
-        catch (Exception)
+        catch (OperationCanceledException)
         {
-            // The awaiting caller observes the exception; this only clears the slot.
+            flight.Completion.TrySetCanceled();
+        }
+        catch (Exception ex)
+        {
+            flight.Completion.TrySetException(ex);
+            _ = flight.Completion.Task.Exception; // Also observe background refresh failures.
         }
         finally
         {
-            _inflight.TryRemove(new KeyValuePair<string, Task<FetchBox>>(key, task));
+            lock (_gate)
+            {
+                _inflight.TryRemove(new KeyValuePair<string, Flight>(key, flight));
+                flight.Cancellation.Dispose();
+            }
         }
     }
 
@@ -432,48 +498,53 @@ public sealed class TreasureMapsListingCache
         string key,
         TimeSpan freshTtl,
         Func<string?, CancellationToken, Task<ListingFetch<T>>> fetch,
-        CancellationToken cancellationToken)
+        Flight flight)
         where T : class
     {
-        var identity = _identity();
+        var cancellationToken = flight.Cancellation.Token;
+        cancellationToken.ThrowIfCancellationRequested();
+        var identity = flight.Identity;
         var validator = GetValidator(key);
-        var previousHash = _snapshots.TryGetValue(key, out var existing)
-            && string.Equals(existing.Identity, identity, StringComparison.Ordinal)
-            ? existing.Hash
-            : null;
-
         var result = await fetch(validator, cancellationToken).ConfigureAwait(false);
-        if (result.NotModified
-            || (!string.IsNullOrEmpty(result.Hash) && string.Equals(result.Hash, previousHash, StringComparison.Ordinal)))
+        lock (_gate)
         {
-            if (_snapshots.TryGetValue(key, out var snap)
-                && string.Equals(snap.Identity, identity, StringComparison.Ordinal)
-                && snap.Value is T)
+            cancellationToken.ThrowIfCancellationRequested();
+            if (flight.Generation != Generation || !string.Equals(identity, _identity(), StringComparison.Ordinal))
             {
-                snap.FreshUntil = _clock().Add(freshTtl);
-                snap.Ttl = freshTtl;
-                snap.Validator = result.Validator ?? snap.Validator;
-                snap.Hash = result.Hash ?? snap.Hash;
-                return new FetchBox { Value = snap.Value };
+                throw new OperationCanceledException("Listing configuration changed");
             }
 
-            if (result.Value is T validated)
+            if (result.NotModified)
             {
-                Store(key, identity, validated, freshTtl, result.Validator, result.Hash);
-                return new FetchBox { Value = validated };
+                if (_snapshots.TryGetValue(key, out var snap)
+                    && string.Equals(snap.Identity, identity, StringComparison.Ordinal)
+                    && snap.Value is T)
+                {
+                    snap.FreshUntil = _clock().Add(freshTtl);
+                    snap.Ttl = freshTtl;
+                    snap.Validator = result.Validator ?? snap.Validator;
+                    snap.Hash = result.Hash ?? snap.Hash;
+                    return new FetchBox { Value = snap.Value };
+                }
+
+                if (result.Value is T validated)
+                {
+                    Store(key, identity, validated, freshTtl, result.Validator, result.Hash);
+                    return new FetchBox { Value = validated };
+                }
+
+                return new FetchBox();
             }
 
-            return new FetchBox();
-        }
+            if (!result.Persist || result.Value is null || IsEmptyListing(result.Value))
+            {
+                return new FetchBox { Value = result.Value };
+            }
 
-        if (!result.Persist || result.Value is null || IsEmptyListing(result.Value))
-        {
+            var hash = result.Hash ?? HashPayload(result.Value);
+            Store(key, identity, result.Value, freshTtl, result.Validator, hash);
             return new FetchBox { Value = result.Value };
         }
-
-        var hash = result.Hash ?? HashPayload(result.Value);
-        Store(key, identity, result.Value, freshTtl, result.Validator, hash);
-        return new FetchBox { Value = result.Value };
     }
 
     private void Store(string key, string identity, object value, TimeSpan ttl, string? validator, string? hash)
@@ -515,7 +586,11 @@ public sealed class TreasureMapsListingCache
             return;
         }
 
-        _snapshots.Clear();
+        // Evict a small oldest slice, never every warm folder at the capacity boundary.
+        foreach (var pair in _snapshots.OrderBy(pair => pair.Value.FreshUntil).Take(Math.Max(1, MaxEntries / 8)))
+        {
+            _snapshots.TryRemove(pair.Key, out _);
+        }
     }
 
     private static string ShortSecret(string? value)
@@ -525,8 +600,17 @@ public sealed class TreasureMapsListingCache
             return "0";
         }
 
-        var take = Math.Min(4, value.Length);
-        return value.Length.ToString(CultureInfo.InvariantCulture) + ":" + value[^take..];
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+    }
+
+    private sealed class Flight(string identity, int generation)
+    {
+        public string Identity { get; } = identity;
+        public int Generation { get; } = generation;
+        public CancellationTokenSource Cancellation { get; } = new();
+        public TaskCompletionSource<FetchBox> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int Waiters { get; set; }
+        public bool Background { get; set; }
     }
 
     private sealed class Snapshot

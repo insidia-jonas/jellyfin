@@ -355,3 +355,11 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
 - Demonstrating the UI requires the separate `jellyfin-web` client (Node >= 24): build its
   `dist` and start the server with `dotnet run --project Jellyfin.Server --webdir <dist>`
   instead of `--nowebclient`.
+
+### Search performance (2026-10)
+
+- Treasure-Maps live search starts with one movie and one TV page (at most 100 releases each). A second page is conditional on full first pages and insufficient matching titles. The shared deadline is six seconds; successful partial results survive a slow provider. Total provider failure must not be persisted as a successful empty listing.
+- Typeahead uses indexer artwork and cached metadata only. Browsing permits optional catalog enrichment for at most 24 cards within two seconds, with three concurrent HTTP requests. Both indexer and metadata work are coalesced; one cancelled waiter must not cancel other callers. Invalidated work cannot repopulate the cache.
+- ChannelManager briefly caches materialized search results by provider/version/user/limit/query. Check channel access before each cache lookup and propagate cancellation through external search.
+- API pages are capped at 100; the dashboard uses `offset` / `nextOffset` / `hasMore`. The Fire TV search preserves the typed year, aborts superseded work, and owns its result row so the plugin web script does not duplicate it.
+- Regression suites: `plugins/Jellyfin.Plugin.TreasureMaps.Tests`, `tests/Jellyfin.LiveTv.Tests`, and `npm test --prefix FireTV/tests/web`. The plugin's ffmpeg and POSIX-path tests require Linux with ffmpeg; run the portable test DLL there when developing on Windows.

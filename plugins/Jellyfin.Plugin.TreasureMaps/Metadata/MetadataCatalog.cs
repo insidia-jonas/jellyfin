@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.TreasureMaps.Channels;
+using Jellyfin.Plugin.TreasureMaps.Listing;
 using Jellyfin.Plugin.TreasureMaps.Search;
 using Microsoft.Extensions.Logging;
 
@@ -50,12 +51,13 @@ public sealed class CatalogHit
 /// </summary>
 public sealed class MetadataCatalog
 {
-    private static readonly ConcurrentDictionary<string, CatalogHit?> Cache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TreasureMapsListingCache Cache = new(identity: MetadataSettingsKey);
+    private static readonly SemaphoreSlim Slots = new(3, 3);
 
     /// <summary>
     /// Drops cached IMDb/iTunes hits (language / image settings changed).
     /// </summary>
-    public static void Clear() => Cache.Clear();
+    public static void Clear() => Cache.InvalidateAll();
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<MetadataCatalog> _logger;
@@ -76,16 +78,35 @@ public sealed class MetadataCatalog
     /// </summary>
     /// <param name="groups">The grouped titles.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
+    /// <param name="allowNetwork">Whether optional remote metadata may delay this listing.</param>
     /// <returns>A task that completes when the lookups finish.</returns>
-    public async Task FillAsync(IReadOnlyList<ReleaseGroup> groups, CancellationToken cancellationToken)
+    public async Task FillAsync(IReadOnlyList<ReleaseGroup> groups, CancellationToken cancellationToken, bool allowNetwork = true)
     {
-        var missing = groups.Where(NeedsFill).Take(80).ToList();
-        if (missing.Count == 0)
+        cancellationToken.ThrowIfCancellationRequested();
+        foreach (var group in groups)
         {
-            return;
+            ApplyPicbit(group);
+            if (Cache.TryGetFresh<CatalogEntry>(CatalogKey(group), out var entry, out _))
+            {
+                ApplyHit(group, entry?.Hit);
+            }
         }
 
-        await Task.WhenAll(missing.Select(g => FillOneAsync(g, cancellationToken))).ConfigureAwait(false);
+        if (allowNetwork)
+        {
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            budget.CancelAfter(TimeSpan.FromSeconds(2));
+            try
+            {
+                await Task.WhenAll(groups.Where(NeedsFill).Take(24).Select(g => FillOneAsync(g, budget.Token))).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // Optional metadata must not hold up an otherwise usable listing.
+            }
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
     /// <summary>
@@ -151,18 +172,38 @@ public sealed class MetadataCatalog
                 return;
             }
 
-            var key = CatalogKey(group);
-            if (!Cache.TryGetValue(key, out var hit))
-            {
-                hit = await LookupAsync(group, cancellationToken).ConfigureAwait(false);
-                Cache[key] = hit;
-            }
+            var entry = await Cache.GetOrFetchAsync<CatalogEntry>(
+                CatalogKey(group), TimeSpan.FromMinutes(5),
+                async (_, token) =>
+                {
+                    await Slots.WaitAsync(token).ConfigureAwait(false);
+                    try
+                    {
+                        return ListingFetch<CatalogEntry>.Store(new CatalogEntry(await LookupAsync(group, token).ConfigureAwait(false)));
+                    }
+                    finally
+                    {
+                        Slots.Release();
+                    }
+                }, cancellationToken).ConfigureAwait(false);
+            ApplyHit(group, entry?.Hit);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Metadata catalog fill failed for {Title}", group.Title);
+        }
+    }
 
-            if (hit is null)
-            {
-                return;
-            }
+    private sealed record CatalogEntry(CatalogHit? Hit);
 
+    private static void ApplyHit(ReleaseGroup group, CatalogHit? hit)
+    {
+        if (hit is not null)
+        {
             group.Cover ??= hit.Cover;
             group.Plot ??= hit.Plot;
             group.Year ??= hit.Year;
@@ -177,10 +218,6 @@ public sealed class MetadataCatalog
             {
                 group.Actors.AddRange(hit.Actors);
             }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Metadata catalog fill failed for {Title}", group.Title);
         }
     }
 
@@ -224,7 +261,7 @@ public sealed class MetadataCatalog
     {
         var c = Plugin.Instance?.Configuration;
         var lang = c?.PrimaryLanguage ?? string.Empty;
-        var omdb = string.IsNullOrWhiteSpace(c?.OmdbApiKey) ? "0" : "1";
+        var omdb = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(c?.OmdbApiKey ?? string.Empty)));
         return lang + "|" + omdb;
     }
 

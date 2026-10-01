@@ -971,7 +971,7 @@ public class TreasureMapsController : ControllerBase
     /// <returns>A lightweight list of releases for the UI.</returns>
     [HttpGet("Search")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<IActionResult> Search([FromQuery] string type, [FromQuery] string? q, [FromQuery] string? genre, CancellationToken cancellationToken)
+    public async Task<IActionResult> Search([FromQuery] string type, [FromQuery] string? q, [FromQuery] string? genre, CancellationToken cancellationToken, [FromQuery] int offset = 0)
     {
         if (!TreasureMapsApiClient.IsConfigured)
         {
@@ -984,14 +984,15 @@ public class TreasureMapsController : ControllerBase
         }
 
         var kind = (type ?? "movie").ToLowerInvariant();
-        var limit = Plugin.Instance?.Configuration.ResultLimit ?? 200;
+        var limit = Math.Clamp(Plugin.Instance?.Configuration.ResultLimit ?? 100, 1, 100);
+        offset = Math.Clamp(offset, 0, 10000);
         try
         {
             var response = kind switch
             {
                 "trending" => await _client.GetTrendingAsync(limit, cancellationToken).ConfigureAwait(false),
-                "tv" => await _client.SearchTvAsync(q, limit, cancellationToken).ConfigureAwait(false),
-                _ => await _client.SearchMoviesAsync(q, genre, limit, cancellationToken).ConfigureAwait(false)
+                "tv" => await _client.SearchTvAsync(q, null, limit, offset, cancellationToken).ConfigureAwait(false),
+                _ => await _client.SearchMoviesAsync(q, genre, null, limit, offset, cancellationToken).ConfigureAwait(false)
             };
 
             var items = (response?.Items ?? Enumerable.Empty<Release>())
@@ -1030,7 +1031,11 @@ public class TreasureMapsController : ControllerBase
                 })
                 .ToList();
 
-            return Ok(new { ok = true, items });
+            return Ok(new { ok = true, items, nextOffset = offset + (response?.Items?.Count ?? 0), hasMore = kind != "trending" && response?.Items?.Count == limit });
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -1060,7 +1065,12 @@ public class TreasureMapsController : ControllerBase
 
         try
         {
-            var items = await _channelManager.SearchChannelItemsAsync(term, null, 24, cancellationToken).ConfigureAwait(false);
+            var userId = Guid.TryParse(User.FindFirst("Jellyfin-UserId")?.Value, out var id) ? id : (Guid?)null;
+            if (!userId.HasValue && !string.Equals(User.FindFirst("Jellyfin-IsApiKey")?.Value, "True", StringComparison.OrdinalIgnoreCase))
+            {
+                return Unauthorized();
+            }
+            var items = await _channelManager.SearchChannelItemsAsync(term, userId, 40, cancellationToken).ConfigureAwait(false);
             var cards = items.Select(i => new
             {
                 id = i.Id.ToString("N"),
@@ -1070,6 +1080,10 @@ public class TreasureMapsController : ControllerBase
                 type = i.GetBaseItemKind().ToString()
             });
             return Ok(new { ok = true, items = cards });
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

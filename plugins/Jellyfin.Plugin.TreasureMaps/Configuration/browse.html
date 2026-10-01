@@ -81,12 +81,18 @@
 
                 <div class="tmStatus" id="tmStatus"></div>
                 <div class="tmGrid" id="tmGrid"></div>
+                <button class="tmBtn" id="tmMore" hidden>Load more</button>
             </div>
         </div>
 
         <script type="text/javascript">
             (function () {
                 var state = { type: 'trending', genre: '', q: '' };
+                var generation = 0, request = null, nextOffset = 0, seen = {};
+                function stopRequest() {
+                    generation++;
+                    if (request) { request.abort(); request = null; }
+                }
 
                 function esc(s) {
                     return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) {
@@ -112,6 +118,8 @@
 
                 function bindGrab() {
                     Array.prototype.forEach.call(document.querySelectorAll('#tmGrid .tmGrab'), function (btn) {
+                        if (btn.dataset.bound) { return; }
+                        btn.dataset.bound = '1';
                         btn.addEventListener('click', function () {
                             var el = btn.closest('.tmCard');
                             var guid = el.getAttribute('data-guid');
@@ -141,25 +149,40 @@
                     });
                 }
 
-                function load() {
+                function load(append) {
+                    stopRequest();
+                    var current = generation;
                     var status = document.querySelector('#tmStatus');
                     var grid = document.querySelector('#tmGrid');
-                    status.textContent = 'Loading…'; grid.innerHTML = '';
-                    Dashboard.showLoadingMsg();
-                    var url = 'TreasureMaps/Search?type=' + encodeURIComponent(state.type)
-                        + '&q=' + encodeURIComponent(state.q) + '&genre=' + encodeURIComponent(state.genre);
-                    ApiClient.fetch({ url: ApiClient.getUrl(url), type: 'GET', dataType: 'json', headers: { accept: 'application/json' } })
-                        .then(function (res) {
-                            Dashboard.hideLoadingMsg();
-                            if (res && res.ok) {
-                                var items = res.items || [];
-                                status.textContent = items.length + ' result(s).';
-                                grid.innerHTML = items.map(card).join('');
-                                bindGrab();
-                            } else {
-                                status.textContent = (res && res.message) || 'Failed to load.';
-                            }
-                        }, function () { Dashboard.hideLoadingMsg(); status.textContent = 'Request failed.'; });
+                    var more = document.querySelector('#tmMore');
+                    if (!append) { nextOffset = 0; seen = {}; grid.innerHTML = ''; }
+                    more.hidden = true;
+                    status.textContent = 'Loading…';
+                    var url = ApiClient.getUrl('TreasureMaps/Search', {
+                        type: state.type, q: state.q, genre: state.genre, offset: nextOffset
+                    });
+                    request = window.AbortController ? new AbortController() : null;
+                    var pending = window.fetch && ApiClient.accessToken
+                        ? window.fetch(url, { signal: request && request.signal, headers: { 'X-Emby-Token': ApiClient.accessToken() } })
+                            .then(function (response) { if (!response.ok) { throw new Error('Search failed'); } return response.json(); })
+                        : ApiClient.fetch({ url: url, type: 'GET', dataType: 'json', headers: { accept: 'application/json' } });
+                    pending.then(function (res) {
+                        if (current !== generation) { return; }
+                        request = null;
+                        if (res && res.ok) {
+                            var items = (res.items || []).filter(function (item) {
+                                if (seen[item.guid]) { return false; }
+                                seen[item.guid] = true; return true;
+                            });
+                            grid.insertAdjacentHTML('beforeend', items.map(card).join(''));
+                            nextOffset = res.nextOffset || 0;
+                            more.hidden = !res.hasMore;
+                            status.textContent = Object.keys(seen).length + ' result(s).';
+                            bindGrab();
+                        } else { status.textContent = (res && res.message) || 'Failed to load.'; }
+                    }).catch(function () {
+                        if (current === generation) { request = null; status.textContent = 'Request failed.'; }
+                    });
                 }
 
                 function loadGenres() {
@@ -167,6 +190,7 @@
                         .then(function (res) {
                             if (res && res.ok && res.genres && res.genres.length) {
                                 var sel = document.querySelector('#tmGenre');
+                                sel.innerHTML = '<option value="">All genres</option>';
                                 res.genres.forEach(function (g) {
                                     var o = document.createElement('option'); o.value = g; o.textContent = g; sel.appendChild(o);
                                 });
@@ -185,6 +209,8 @@
                 }
 
                 var page = document.querySelector('#TreasureMapsBrowsePage');
+                page.addEventListener('pagehide', stopRequest);
+                document.querySelector('#tmMore').addEventListener('click', function () { load(true); });
                 page.addEventListener('pageshow', function () {
                     loadGenres();
                     setType('trending');

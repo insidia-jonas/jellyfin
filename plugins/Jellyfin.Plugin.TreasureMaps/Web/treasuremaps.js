@@ -10,6 +10,7 @@
 
     var pollTimer = null;
     var lastHash = null;
+    var searchRequest = null;
 
     var style = document.createElement('style');
     style.textContent =
@@ -108,11 +109,13 @@
     function onNavigate() {
         if (!api()) { return; }
         var hash = location.hash || '';
+        if (searchRequest) { searchRequest.abort(); searchRequest = null; }
         var details = hash.match(/[#/]details\?id=([a-f0-9]{32})/i);
         var list = hash.match(/[#/]list\?parentId=([a-f0-9]{32})/i);
 
         if (details) {
             api().getItem(api().getCurrentUserId(), details[1]).then(function (item) {
+                if (location.hash !== hash) { return; }
                 if (isDownloadsFolder(item)) {
                     enhanceDownloadsList(item);
                 } else if (isDownloadItem(item)) {
@@ -130,6 +133,7 @@
             enhanceSearchPage(searchQueryFromHash(hash));
         } else if (list) {
             api().getItem(api().getCurrentUserId(), list[1]).then(function (item) {
+                if (location.hash !== hash) { return; }
                 if (isDownloadsFolder(item)) {
                     enhanceDownloadsList(item);
                     return;
@@ -151,13 +155,16 @@
         if (!item || !item.Id || isDownloadsFolder(item) || isDownloadItem(item)) {
             return;
         }
+        var route = location.hash;
         api().getItems(api().getCurrentUserId(), { ParentId: item.Id, Limit: 40 }).then(function (result) {
+            if (location.hash !== route) { return; }
             if (result && result.Items && result.Items.length) {
                 return;
             }
             window.setTimeout(function () {
+                if (location.hash !== route) { return; }
                 api().getItems(api().getCurrentUserId(), { ParentId: item.Id, Limit: 40 }).then(function (again) {
-                    if (again && again.Items && again.Items.length && /list\?parentId=/i.test(location.hash || '')) {
+                    if (again && again.Items && again.Items.length && location.hash === route) {
                         location.reload();
                     }
                 }).catch(function () { });
@@ -176,13 +183,26 @@
     }
 
     function enhanceSearchPage(query) {
-        if (!query || query.length < 2) { return; }
+        if (window.FireTvSmartSearch || !query || query.length < 2) { return; }
+        var route = location.hash;
+        var user = api().getCurrentUserId();
         whenReady('.searchResults,.padded-right,.verticalSection', 16, function (page) {
-            if (!page || page.getAttribute('data-tm-search') === query) { return; }
+            if (route !== location.hash || user !== api().getCurrentUserId() || !page || page.getAttribute('data-tm-search') === query) { return; }
             page.setAttribute('data-tm-search', query);
-            api().ajax({ url: api().getUrl('TreasureMaps/Search/Cards', { q: query }), type: 'GET' })
+            var url = api().getUrl('TreasureMaps/Search/Cards', { q: query });
+            searchRequest = window.AbortController ? new AbortController() : null;
+            var request = window.fetch && api().accessToken
+                ? window.fetch(url, { signal: searchRequest && searchRequest.signal, headers: { 'X-Emby-Token': api().accessToken() } }).then(function (response) {
+                    if (!response.ok) { throw new Error('Search failed'); }
+                    return response.json();
+                })
+                : api().ajax({ url: url, type: 'GET' });
+            request
                 .then(function (res) {
-                    var items = (res && res.items) || [];
+                    if (route !== location.hash || user !== api().getCurrentUserId()) { return; }
+                    searchRequest = null;
+                    if (!res || !res.ok) { page.removeAttribute('data-tm-search'); return; }
+                    var items = res.items || [];
                     var old = page.querySelector('#tmSearchHits');
                     if (old) { old.remove(); }
                     if (!items.length) { return; }
@@ -211,7 +231,11 @@
                     var anchor = page.querySelector('.searchResults, .verticalSection, .padded-right') || page;
                     anchor.insertBefore(box, anchor.firstChild);
                 })
-                .catch(function () { });
+                .catch(function () {
+                    if (route === location.hash && user === api().getCurrentUserId()) {
+                        searchRequest = null; page.removeAttribute('data-tm-search');
+                    }
+                });
         });
     }
 
@@ -424,11 +448,13 @@
         }).catch(function () { cb('de'); });
     }
 
-    function whenReady(selector, tries, callback) {
+    function whenReady(selector, tries, callback, route) {
+        route = route === undefined ? location.hash : route;
+        if (route !== location.hash) { return; }
         var page = visiblePage();
         var el = page && page.querySelector(selector);
         if (el) { callback(page, el); return; }
-        if (tries > 0) { setTimeout(function () { whenReady(selector, tries - 1, callback); }, 350); }
+        if (tries > 0) { setTimeout(function () { whenReady(selector, tries - 1, callback, route); }, 350); }
         else if (page) { callback(page, page); }
     }
 

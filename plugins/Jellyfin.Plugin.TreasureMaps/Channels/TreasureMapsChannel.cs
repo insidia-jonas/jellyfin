@@ -115,7 +115,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
             var c = Config;
             return string.Join(
                 '|',
-                "38",
+                "39",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
@@ -1082,7 +1082,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
                 keys.Add(ReleaseGrouper.KeyOf(item));
             }
 
-            if (ok && items.Count < PageSize)
+            if (!ok || items.Count < PageSize)
             {
                 break;
             }
@@ -1129,6 +1129,10 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
                 ? await _client.SearchTvAsync(query, categories, pageSize, offset, cancellationToken).ConfigureAwait(false)
                 : await _client.SearchMoviesAsync(query, genre, categories, pageSize, offset, cancellationToken).ConfigureAwait(false);
             return (response?.Items ?? Array.Empty<Release>(), true);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -1244,13 +1248,24 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         }
 
         var groups = ReleaseGrouper.Group(kept).ToList();
-        await _catalog.FillAsync(groups, cancellationToken).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(searchTerm))
+        {
+            foreach (var group in groups)
+            {
+                group.Title = Search.TreasureMapsSearch.BestDisplayTitle(group.Title, string.Equals(group.Kind, "tv", StringComparison.Ordinal) ? ReleaseGrouper.ShowNameFromScene(group.Releases[0].Title) : ReleaseGrouper.CleanSceneTitle(group.Releases[0].Title), searchTerm);
+            }
+
+            groups = groups.Where(g => Search.TreasureMapsSearch.ScoreTitle(g.Title, searchTerm, g.Year) > 0)
+                .OrderByDescending(g => Search.TreasureMapsSearch.ScoreTitle(g.Title, searchTerm, g.Year)).ToList();
+        }
         var cap = maxGroups > 0 ? maxGroups : Config.ResultLimit;
-        var ordered = (newestFirst
+        var ordered = (searchTerm is not null ? groups : newestFirst
                 ? CategoryBrowse.OrderNewest(groups, bestRank)
                 : groups.OrderBy(g => bestRank.TryGetValue(g.Key, out var r) ? r : int.MaxValue).ToList())
             .Take(cap)
             .ToList();
+
+        await _catalog.FillAsync(ordered, cancellationToken, allowNetwork: searchTerm is null).ConfigureAwait(false);
 
         var items = new List<ChannelItemInfo>(ordered.Count);
         foreach (var group in ordered)
@@ -1755,23 +1770,13 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
             return Array.Empty<ChannelItemInfo>();
         }
 
-        const int livePageSize = 100;
         var parsed = Search.TreasureMapsSearch.ParseQuery(term);
         var indexerQuery = parsed.Text.Length > 0 ? parsed.Text : term;
-        var pages = await Task.WhenAll(
-            FetchPageSafeAsync("movie", indexerQuery, null, null, 0, cancellationToken, livePageSize),
-            FetchPageSafeAsync("movie", indexerQuery, null, null, livePageSize, cancellationToken, livePageSize),
-            FetchPageSafeAsync("tv", indexerQuery, null, null, 0, cancellationToken, livePageSize),
-            FetchPageSafeAsync("tv", indexerQuery, null, null, livePageSize, cancellationToken, livePageSize)).ConfigureAwait(false);
-
-        if (pages.All(r => !r.Ok))
-        {
-            _logger.LogWarning("Treasure-Maps live search failed for '{Term}'", term);
-            return Array.Empty<ChannelItemInfo>();
-        }
-
-        var releases = pages.SelectMany(r => r.Items).ToList();
-        var cards = await BuildGroupCardsAsync(releases, "search:" + term.ToLowerInvariant(), 80, term, cancellationToken).ConfigureAwait(false);
+        var releases = await Search.LiveSearchPages.FetchAsync(
+            term, take,
+            (kind, offset, token) => FetchPageSafeAsync(kind, indexerQuery, null, null, offset, token, 100),
+            cancellationToken).ConfigureAwait(false);
+        var cards = await BuildGroupCardsAsync(releases, "search:" + term.ToLowerInvariant(), take, term, cancellationToken).ConfigureAwait(false);
         return cards.Items
             .Where(i => i.Type != ChannelItemType.Media && i.FolderType == ChannelFolderType.BoxSet)
             .Select(i => (Card: i, Score: Search.TreasureMapsSearch.ScoreTitle(i.Name, term, i.ProductionYear)))

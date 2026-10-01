@@ -54,6 +54,10 @@ public class TreasureMapsSearchProvider : IExternalSearchProvider
             items = await _channelManager.SearchChannelItemsAsync(term, query.UserId, query.Limit, cancellationToken)
                 .ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Treasure-Maps search failed for '{Term}'", term);
@@ -67,10 +71,10 @@ public class TreasureMapsSearchProvider : IExternalSearchProvider
                 continue;
             }
 
-            var score = TreasureMapsSearch.ScoreTitle(item.Name, term);
+            var score = TreasureMapsSearch.ScoreTitle(item.Name, term, item.ProductionYear);
             if (score <= 0f)
             {
-                score = TreasureMapsSearch.ContainsMatchScore;
+                continue;
             }
 
             yield return new SearchResult(item.Id, score);

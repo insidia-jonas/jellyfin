@@ -122,7 +122,7 @@ public static class TreasureMapsSearch
         {
             if (titleYear == wanted)
             {
-                score = score <= 0 ? PrefixMatchScore : Math.Min(99f, score + 8f);
+                score = score <= 0 ? 0 : Math.Min(99f, score + 8f);
             }
             else if (titleYear.HasValue)
             {
