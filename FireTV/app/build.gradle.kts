@@ -11,11 +11,10 @@ android {
 
     defaultConfig {
         applicationId = if (previewBuild) "org.jellyfin.firetvweb.preview" else "org.jellyfin.firetvweb"
-        manifestPlaceholders["appLabel"] = if (previewBuild) "Jellyfin IPTV Test" else "@string/app_name"
         minSdk = 25
         targetSdk = 34
-        versionCode = 22
-        versionName = "2.4.3"
+        versionCode = 23
+        versionName = "2.4.4"
     }
 
     buildTypes {

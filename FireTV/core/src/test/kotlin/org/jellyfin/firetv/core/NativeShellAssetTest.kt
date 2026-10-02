@@ -35,7 +35,7 @@ class NativeShellAssetTest {
         assertTrue(script.contains("VideoRotation"))
         assertTrue(script.contains("vobsub"))
         assertTrue(script.contains("dvdsub"))
-        assertTrue(script.contains("\"2.4.3\"") || script.contains("2.4.3"))
+        assertTrue(script.contains("\"2.4.4\"") || script.contains("2.4.4"))
         assertTrue(script.contains("/native/tvLive.js"))
         val plugin = locate("ExoPlayerPlugin.js")
         val pluginText = plugin.readText()

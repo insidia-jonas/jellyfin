@@ -8,6 +8,10 @@ Das ist bewusst **kein** API-only-Client wie [jellyfin-androidtv](https://github
 
 Fire TV client that hosts the full Jellyfin web UI (same architecture as the official iOS app: WebView + NativeShell). Video playback uses ExoPlayer so selecting a movie cannot freeze Amazon WebView. Downloads use Android DownloadManager. The 1920 CSS-pixel TV layout is scaled to the actual window, with automatic viewport height.
 
+## Änderungen in 2.4.4
+
+Die App heißt in beiden Paketvarianten **Jellyfin Fire TV**. Das vorhandene quadratische Jellyfin-Symbol wird für App-Icon und Logo verwendet; das breite Bild mit Schriftzug ausschließlich als TV-Banner. Dadurch wird im Launcher kein 16:9-Schriftzug in ein quadratisches Symbol gequetscht. Anmeldung und App-Daten bleiben beim Update der bereits installierten Variante erhalten. Die Versionsanzeige kommt aus der APK; der Verbindungsbildschirm enthält keine veraltete, fest eingetragene Versionsnummer mehr.
+
 ## Änderungen in 2.4.3
 
 - Live TV übernimmt die Gruppenordner und deren Sender vom Server. Gruppen öffnen eine eigene Liste; Ordner werden nicht in die Wiedergabe-Warteschlange aufgenommen. Sendernamen und Jetzt/Danach bleiben getrennt.
@@ -75,7 +79,7 @@ echo "sdk.dir=/path/to/Android/Sdk" > local.properties
 
 Die Debug-APK liegt unter `FireTV/app/build/outputs/apk/debug/app-debug.apk`.
 
-Für eine separate Testinstallation mit dem Namen **Jellyfin IPTV Test**:
+Für ein Update der früher als **Jellyfin IPTV Test** installierten Variante (nun ebenfalls **Jellyfin Fire TV**):
 
 ```bash
 ./gradlew :core:test :app:assembleDebug :app:lintDebug -PfiretvPreview=true
@@ -83,7 +87,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell am start -n org.jellyfin.firetvweb.preview/org.jellyfin.firetv.connect.ConnectActivity
 ```
 
-Diese Variante hat den Paketnamen `org.jellyfin.firetvweb.preview` und eigene App-Daten. Sie lässt eine bereits installierte, anders signierte Haupt-App bestehen. Ohne `-PfiretvPreview=true` entsteht die normale Variante. Beide Varianten verwenden denselben APK-Ausgabepfad; die gewünschte Datei vor dem nächsten Varianten-Build kopieren.
+Diese Variante behält den Paketnamen `org.jellyfin.firetvweb.preview`, damit bestehende Installationen samt Anmeldung aktualisiert werden können. Der Schalter bestimmt nur die Paketidentität, nicht den sichtbaren App-Namen. Eine bereits installierte, anders signierte Haupt-App bleibt bestehen. Ohne `-PfiretvPreview=true` entsteht die normale Variante. Beide Varianten verwenden denselben APK-Ausgabepfad; die gewünschte Datei vor dem nächsten Varianten-Build kopieren.
 
 Wiedergabe-Diagnose (Anfragedauer, erstes Bild, Pufferpausen, Wiederholungen und verworfene Frames, ohne Stream-URLs oder Tokens):
 
