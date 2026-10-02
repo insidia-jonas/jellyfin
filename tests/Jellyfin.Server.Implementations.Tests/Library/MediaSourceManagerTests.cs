@@ -1,12 +1,16 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using AutoFixture;
 using AutoFixture.AutoMoq;
 using Castle.Components.DictionaryAdapter;
 using Emby.Server.Implementations.IO;
 using Emby.Server.Implementations.Library;
 using Jellyfin.Database.Implementations.Entities;
+using MediaBrowser.Common.Extensions;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.LiveTv;
@@ -46,6 +50,33 @@ namespace Jellyfin.Server.Implementations.Tests.Library
             _item = new Video { Id = Guid.NewGuid(), OwnerId = Guid.Empty, ParentId = Guid.Empty };
 
             _user = fixture.Create<User>();
+        }
+
+        [Theory]
+        [InlineData(1, true)]
+        [InlineData(2, false)]
+        public async Task CancelledOpenReleasesOnlyItsOwnConsumer(int consumers, bool closesStream)
+        {
+            using var cancelled = new CancellationTokenSource();
+            var source = new MediaSourceInfo { Id = "source", LiveStreamId = "stream", SupportsProbing = false };
+            var stream = new Mock<ILiveStream>();
+            stream.SetupGet(s => s.MediaSource).Returns(source);
+            stream.SetupProperty(s => s.ConsumerCount, consumers);
+            stream.Setup(s => s.Close()).Returns(Task.CompletedTask);
+            var provider = new Mock<IMediaSourceProvider>();
+            provider.Setup(p => p.OpenMediaSource(It.IsAny<string>(), It.IsAny<List<ILiveStream>>(), It.IsAny<CancellationToken>()))
+                .Returns(async () =>
+                {
+                    await cancelled.CancelAsync();
+                    return stream.Object;
+                });
+            _mediaSourceManager.AddParts([provider.Object]);
+            var request = new LiveStreamRequest { OpenToken = provider.Object.GetType().FullName!.GetMD5().ToString("N", CultureInfo.InvariantCulture) + "_channel" };
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => _mediaSourceManager.OpenLiveStreamInternal(request, cancelled.Token));
+
+            Assert.Equal(consumers - 1, stream.Object.ConsumerCount);
+            stream.Verify(s => s.Close(), closesStream ? Times.Once() : Times.Never());
         }
 
         [Theory]

@@ -8,6 +8,18 @@ Das ist bewusst **kein** API-only-Client wie [jellyfin-androidtv](https://github
 
 Fire TV client that hosts the full Jellyfin web UI (same architecture as the official iOS app: WebView + NativeShell). Video playback uses ExoPlayer so selecting a movie cannot freeze Amazon WebView. Downloads use Android DownloadManager. The 1920 CSS-pixel TV layout is scaled to the actual window, with automatic viewport height.
 
+## Änderungen in 2.4.6
+
+- Sendernamen verwenden eine eigene CSS-Klasse statt der großen Seitenüberschrift. Name, Status und Jetzt/Danach passen in die neu bemessenen Senderzeilen; lange Texte werden mit Auslassungspunkten begrenzt.
+- Abgebrochene Stream-Aufrufe geben ihren Tuner-Verbraucher nach dem Probe-Abbruch frei. Andere Zuschauer desselben Streams bleiben verbunden.
+- Die App wartet bei Live-TV-Aufrufen bis zu 35 Sekunden auf die Serverantwort, damit ein konfigurierter Quellenwechsel abgeschlossen werden kann. Das gesamte Wiederherstellungsbudget bleibt auf 45 Sekunden begrenzt.
+
+- Netzwerkfehler aus FFmpeg (Timeout, Verbindungsablehnung oder DNS-Fehler) werden als Anbieterproblem erkannt und zählen nicht als ungültige Medien oder wiederholt ausgefallener Sender.
+
+Validierung am 02.10.2026: 231 Live-TV-Tests mit echtem FFmpeg auf dem Raspberry, 142 API-Tests, 34 Streamverwaltungs-Tests, 85 Kotlin-Tests und 59 Web-Tests erfolgreich. Server-Build, Formatprüfung und Android Lint ohne Fehler. Auf dem Cube passen alle gemessenen Textblöcke (114 px) in die Senderzeilen (135 px). Nach Abbruch von Sky Cinema Action wurde der Tuner sofort freigegeben; Warner TV Film zeigte anschließend nach 1.189 ms ein Bild. Sky Cinema Premieren kehrte nach 45 Sekunden zur Liste zurück, ohne offene Verbraucher zu hinterlassen.
+
+Die genannten Sky-Quellen lieferten auch im direkten FFmpeg-Test auf dem Raspberry keine Videobilder: Action und Premieren HD scheiterten über alle acht konfigurierten Hosts mit Netzwerk-Timeouts. Warner TV Film lieferte über drei davon dekodierbares Video. Diese externe Verfügbarkeit wird durch das Client-Update nicht behoben.
+
 ## Änderungen in 2.4.5
 
 - Der Server zeigt in Web und Fire TV pro Sender „Zuletzt erreichbar“, „Instabil“, „Mehrfach ausgefallen“ oder „Ungeprüft“ mit Prüfzeit an. Die Anzeige verwendet nur gespeicherte Beobachtungen; das Öffnen einer Senderliste stellt keine Anbieter-Verbindung her. Ergebnisse verfallen nach 30 Minuten.

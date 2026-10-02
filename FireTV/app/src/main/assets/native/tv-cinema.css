@@ -304,7 +304,7 @@ html.jf-livetv-list-on .busy {
     margin: 0 0 0.9em;
 }
 
-#firetv-live .firetv-live-title {
+#firetv-live .firetv-live-head > .firetv-live-title {
     font-size: 1.7em;
     font-weight: 750;
     color: #f4f7fb;
@@ -441,6 +441,23 @@ html.jf-livetv-list-on .busy {
 #firetv-live .firetv-live-name {
     font-size: 1.15em;
     font-weight: 750;
+    line-height: 1.2;
+}
+
+#firetv-live .firetv-live-channel-title {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font: inherit;
+}
+
+#firetv-live .jf-channel-health {
+    font-size: 0.7em;
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 #firetv-live .firetv-live-now {
@@ -448,6 +465,7 @@ html.jf-livetv-list-on .busy {
     color: #9aa6b6;
     font-weight: 600;
     font-size: 0.95em;
+    line-height: 1.2;
 }
 
 #firetv-live .firetv-live-bar {
@@ -472,6 +490,7 @@ html.jf-livetv-list-on .busy {
     color: #7f8b9b;
     font-weight: 550;
     font-size: 0.88em;
+    line-height: 1.2;
 }
 
 #firetv-live .firetv-live-empty {

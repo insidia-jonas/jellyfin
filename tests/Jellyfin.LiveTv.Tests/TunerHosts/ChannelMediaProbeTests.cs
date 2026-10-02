@@ -17,6 +17,23 @@ public class ChannelMediaProbeTests
 {
     public static bool HasFfmpeg => File.Exists(Environment.GetEnvironmentVariable("JELLYFIN_TEST_FFMPEG"));
 
+    [Theory]
+    [InlineData("Error opening input: Connection timed out", "ProviderNetwork", true)]
+    [InlineData("Connection refused", "ProviderNetwork", true)]
+    [InlineData("Network is unreachable", "ProviderNetwork", true)]
+    [InlineData("No route to host", "ProviderNetwork", true)]
+    [InlineData("Failed to resolve hostname", "ProviderNetwork", true)]
+    [InlineData("Temporary failure in name resolution", "ProviderNetwork", true)]
+    [InlineData("Server returned 403 Forbidden", "ProviderAuthentication", true)]
+    [InlineData("HTTP error 429 Too Many Requests", "ProviderBusy", true)]
+    [InlineData("Invalid data found when processing input", "InvalidMedia", false)]
+    public void DecoderErrorsDistinguishProviderProblemsFromInvalidMedia(string output, string reason, bool providerWide)
+    {
+        var failure = ChannelMediaProbe.FailureFromOutput(output, false);
+        Assert.Equal(reason, failure.Reason);
+        Assert.Equal(providerWide, failure.ProviderWide);
+    }
+
     [Fact(Skip = "Set JELLYFIN_TEST_FFMPEG to run the real decoder integration test.", SkipUnless = nameof(HasFfmpeg))]
     public async Task DecoderChecksMediaRatherThanHttpSuccess()
     {
@@ -31,6 +48,15 @@ public class ChannelMediaProbeTests
         Assert.False(denied.Success);
         Assert.Equal("ProviderAuthentication", denied.Failure?.Reason);
         Assert.True(denied.Failure?.ProviderWide);
+
+        using var refused = new TcpListener(IPAddress.Loopback, 0);
+        refused.Start();
+        var endpoint = (IPEndPoint)refused.LocalEndpoint;
+        refused.Stop();
+        var unavailable = await probe.ProbeAsync(Source("http://" + endpoint + "/"), TestContext.Current.CancellationToken);
+        Assert.False(unavailable.Success);
+        Assert.Equal("ProviderNetwork", unavailable.Failure?.Reason);
+        Assert.True(unavailable.Failure?.ProviderWide);
     }
 
     [Fact(Skip = "Set JELLYFIN_TEST_FFMPEG to run the real decoder integration test.", SkipUnless = nameof(HasFfmpeg))]

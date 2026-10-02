@@ -225,7 +225,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                 }
             }
             resolveDeadline = deadline
-            mainHandler.postDelayed(deadline, if (liveHint) tune.attemptTimeoutMs(25_000) else 30_000)
+            mainHandler.postDelayed(deadline, if (liveHint) tune.attemptTimeoutMs(40_000) else 30_000)
             resolverExecutor.execute {
                 val result = runCatching {
                     // Release the old tuner slot before opening another stream.

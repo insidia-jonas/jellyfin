@@ -90,7 +90,7 @@
             deviceId: device.deviceId || "",
             deviceName: device.deviceName || "Fire TV",
             appName: device.appName || "Jellyfin Fire TV",
-            appVersion: device.appVersion || "2.4.5"
+            appVersion: device.appVersion || "2.4.6"
         };
     }
 
@@ -475,7 +475,8 @@
         var bottom = header ? header.getBoundingClientRect().bottom : 100;
         viewport.parentNode.style.top = Math.max(0, Math.min(bottom, window.innerHeight * 0.35)) + 12 + "px";
         var size = parseFloat(getComputedStyle(viewport).fontSize) || 24;
-        rowHeight = Math.round(size * 6.5);
+        // Reserve space for name, health, now/next and progress including padding.
+        rowHeight = Math.round(size * 7.2);
         viewport.style.height = Math.max(180, window.innerHeight - viewport.getBoundingClientRect().top - 36) + "px";
     }
 
@@ -541,7 +542,7 @@
         var copy = document.createElement("div"); copy.className = "firetv-live-copy";
         ["name", "now", "bar", "next"].forEach(function (kind) {
             var node = document.createElement("div"); node.className = "firetv-live-" + kind;
-            if (kind === "name") { var title = document.createElement("span"); title.className = "firetv-live-title"; node.appendChild(title); }
+            if (kind === "name") { var title = document.createElement("span"); title.className = "firetv-live-channel-title"; node.appendChild(title); }
             if (kind === "bar") { node.appendChild(document.createElement("span")); node.setAttribute("role", "progressbar"); node.setAttribute("aria-valuemin", "0"); node.setAttribute("aria-valuemax", "100"); node.setAttribute("aria-label", german() ? "Sendungsfortschritt" : "Program progress"); }
             copy.appendChild(node);
         });
@@ -570,7 +571,7 @@
 
     function updateRow(entry, item) {
         var number = item.Number || item.ChannelNumber;
-        setText(entry.querySelector(".firetv-live-title"), (number ? number + "  " : "") + String(item.Name || "").split(/ {2}· {2}/)[0]);
+        setText(entry.querySelector(".firetv-live-channel-title"), (number ? number + "  " : "") + String(item.Name || "").split(/ {2}· {2}/)[0]);
         setText(entry.querySelector(".firetv-live-now"), isGroup(item) ? (item.Overview || "Gruppe öffnen") : nowLine(item) || (german() ? "Keine EPG-Daten" : "No guide data"));
         setText(entry.querySelector(".firetv-live-next"), nextLine(item));
         var percent = progressOf(item, Date.now());

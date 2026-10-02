@@ -60,10 +60,10 @@ object StreamResolver {
 
         val body = buildPlaybackInfoBody(userId, startTicks, mediaSourceId, audioIndex, subtitleIndex)
         var itemId = requestedId
-        var response = playbackInfo(server, itemId, userId, body, token, ignoreSslErrors, deviceId, deviceName, appName, appVersion, cancellation)
+        var response = playbackInfo(server, itemId, userId, body, token, ignoreSslErrors, deviceId, deviceName, appName, appVersion, liveHint, cancellation)
         if (response.code !in 200..299 && !tunerId.isNullOrBlank() && tunerId != itemId) {
             itemId = tunerId
-            response = playbackInfo(server, itemId, userId, body, token, ignoreSslErrors, deviceId, deviceName, appName, appVersion, cancellation)
+            response = playbackInfo(server, itemId, userId, body, token, ignoreSslErrors, deviceId, deviceName, appName, appVersion, liveHint, cancellation)
         }
         require(response.code in 200..299) {
             "PlaybackInfo failed HTTP ${response.code} ${response.body.take(240)}"
@@ -208,7 +208,7 @@ object StreamResolver {
             appName = appName,
             appVersion = appVersion,
             connectTimeoutMs = 8_000,
-            readTimeoutMs = 12_000,
+            readTimeoutMs = 35_000,
             cancellation = cancellation,
         )
         if (response.code !in 200..299) {
@@ -228,6 +228,7 @@ object StreamResolver {
         deviceName: String,
         appName: String,
         appVersion: String,
+        live: Boolean,
         cancellation: HttpCancellation?,
     ): JellyfinHttp.Response {
         return JellyfinHttp.post(
@@ -240,7 +241,7 @@ object StreamResolver {
             appName = appName,
             appVersion = appVersion,
             connectTimeoutMs = 8_000,
-            readTimeoutMs = 12_000,
+            readTimeoutMs = if (live) 35_000 else 12_000,
             cancellation = cancellation,
         )
     }

@@ -675,6 +675,15 @@ namespace Emby.Server.Implementations.Library
                         .AddMediaInfoWithProbe(mediaSource, false, cacheKey, true, cancellationToken)
                         .ConfigureAwait(false);
                 }
+
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+            catch (Exception ex) when (cancellationToken.IsCancellationRequested)
+            {
+                // An abandoned open has no client that can later close its tuner.
+                // Release this consumer before the next tune consumes provider capacity.
+                await CloseLiveStream(mediaSource.LiveStreamId).ConfigureAwait(false);
+                throw new OperationCanceledException("Live stream opening was canceled.", ex, cancellationToken);
             }
             catch (Exception ex)
             {

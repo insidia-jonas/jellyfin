@@ -115,7 +115,7 @@ test('large channel lists remain bounded when scrolling and navigating past 800 
     assert.ok(count > 0 && count <= 48, 'render at most 48 channels until more are requested, got ' + count);
     assert.equal(calls.channels, 6);
     const viewport = w.document.querySelector('.firetv-live-viewport');
-    viewport.scrollTop = 130000;
+    viewport.scrollTop = parseFloat(w.document.querySelector('.firetv-live-list').style.height) * 0.8;
     viewport.dispatchEvent(new w.Event('scroll'));
     await clock.tickAsync(200);
     const rows = w.document.querySelectorAll('.firetv-live-row');

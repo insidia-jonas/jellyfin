@@ -62,6 +62,23 @@ namespace Jellyfin.Api.Tests.Helpers
         }
 
         [Fact]
+        public async Task OpenMediaSource_ClientDisconnectCancelsPendingOpen()
+        {
+            using var disconnect = new CancellationTokenSource();
+            var context = new DefaultHttpContext { RequestAborted = disconnect.Token };
+            var manager = new Mock<IMediaSourceManager>();
+            manager.Setup(x => x.OpenLiveStream(It.IsAny<LiveStreamRequest>(), It.IsAny<CancellationToken>()))
+                .Returns(async (LiveStreamRequest _, CancellationToken token) =>
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                    return new LiveStreamResponse(new MediaSourceInfo());
+                });
+            var pending = CreateHelper(manager.Object).OpenMediaSource(context, new LiveStreamRequest());
+            await disconnect.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken));
+        }
+
+        [Fact]
         public void SortMediaSources_PreferredItemExceedsBitrate_StaysDefault()
         {
             // The version the user was watching (the queried item) must stay the default

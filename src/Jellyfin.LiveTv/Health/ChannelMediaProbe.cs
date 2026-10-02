@@ -97,11 +97,26 @@ public sealed partial class ChannelMediaProbe
             return new ProbeResult(true, null, watch.ElapsedMilliseconds);
         }
 
+        return new ProbeResult(false, FailureFromOutput(stderr, timedOut), watch.ElapsedMilliseconds);
+    }
+
+    internal static ChannelFailure FailureFromOutput(string stderr, bool timedOut)
+    {
         var match = HttpError().Match(stderr);
-        var failure = match.Success
-            ? ChannelFailure.FromStatus(int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture))
-            : new ChannelFailure(timedOut ? "ProbeTimeout" : "InvalidMedia", false, false);
-        return new ProbeResult(false, failure, watch.ElapsedMilliseconds);
+        if (match.Success)
+        {
+            return ChannelFailure.FromStatus(int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture));
+        }
+
+        // FFmpeg can exit on a socket timeout before our process deadline expires.
+        // That does not prove that this channel contains invalid media.
+        if (new[] { "Connection timed out", "Connection refused", "Network is unreachable", "No route to host", "Failed to resolve", "Temporary failure in name resolution" }
+            .Any(message => stderr.Contains(message, StringComparison.OrdinalIgnoreCase)))
+        {
+            return new ChannelFailure("ProviderNetwork", true, false);
+        }
+
+        return new ChannelFailure(timedOut ? "ProbeTimeout" : "InvalidMedia", false, false);
     }
 
     internal static bool HasDecodedMedia(string progress, bool requireVideo = false) => progress.Split('\n').Any(line =>

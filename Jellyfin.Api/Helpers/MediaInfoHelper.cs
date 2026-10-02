@@ -425,7 +425,7 @@ public class MediaInfoHelper
     /// <returns>A <see cref="Task"/> containing the <see cref="LiveStreamResponse"/>.</returns>
     public async Task<LiveStreamResponse> OpenMediaSource(HttpContext httpContext, LiveStreamRequest request)
     {
-        var result = await _mediaSourceManager.OpenLiveStream(request, CancellationToken.None).ConfigureAwait(false);
+        var result = await _mediaSourceManager.OpenLiveStream(request, httpContext.RequestAborted).ConfigureAwait(false);
 
         RewritePublishedLiveStreamPath(result.MediaSource, httpContext.Request);
 
