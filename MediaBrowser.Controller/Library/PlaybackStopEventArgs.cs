@@ -9,5 +9,10 @@ namespace MediaBrowser.Controller.Library
         /// </summary>
         /// <value><c>true</c> if [played to completion]; otherwise, <c>false</c>.</value>
         public bool PlayedToCompletion { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the client stopped because playback failed.
+        /// </summary>
+        public bool Failed { get; set; }
     }
 }

@@ -12,6 +12,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Extensions;
+using Jellyfin.LiveTv.Health;
 using MediaBrowser.Common.Extensions;
 using MediaBrowser.Common.Net;
 using MediaBrowser.Controller;
@@ -37,6 +38,8 @@ namespace Jellyfin.LiveTv.TunerHosts
         private readonly INetworkManager _networkManager;
         private readonly IMediaSourceManager _mediaSourceManager;
         private readonly IStreamHelper _streamHelper;
+        private readonly ChannelProbeCoordinator _probeCoordinator;
+        private readonly ChannelHealthStore _health;
         private (string PlaylistUrl, M3uListingFetchResult Result)? _lastValidated;
 
         public M3UTunerHost(
@@ -47,7 +50,9 @@ namespace Jellyfin.LiveTv.TunerHosts
             IHttpClientFactory httpClientFactory,
             IServerApplicationHost appHost,
             INetworkManager networkManager,
-            IStreamHelper streamHelper)
+            IStreamHelper streamHelper,
+            ChannelProbeCoordinator probeCoordinator = null,
+            ChannelHealthStore health = null)
             : base(config, logger, fileSystem)
         {
             _httpClientFactory = httpClientFactory;
@@ -55,6 +60,8 @@ namespace Jellyfin.LiveTv.TunerHosts
             _networkManager = networkManager;
             _mediaSourceManager = mediaSourceManager;
             _streamHelper = streamHelper;
+            _probeCoordinator = probeCoordinator;
+            _health = health;
         }
 
         public override string Type => "m3u";
@@ -129,6 +136,7 @@ namespace Jellyfin.LiveTv.TunerHosts
             var sources = await GetChannelStreamMediaSources(tunerHost, channel, cancellationToken).ConfigureAwait(false);
 
             var mediaSource = sources[0];
+            var reservation = _probeCoordinator is null ? null : await _probeCoordinator.AcquirePlayback(cancellationToken).ConfigureAwait(false);
 
             // MPEG-TS IPTV must go through the HTTP proxy so hang detection can fail over ingest hosts.
             // HLS playlists stay on ffmpeg, which already has HTTP reconnect flags.
@@ -136,10 +144,11 @@ namespace Jellyfin.LiveTv.TunerHosts
                 && !mediaSource.RequiresLooping
                 && !M3uUrlFailover.IsHls(mediaSource.Path, mediaSource.Container))
             {
-                return new SharedHttpStream(mediaSource, tunerHost, streamId, FileSystem, _httpClientFactory, Logger, Config, _appHost, _streamHelper);
+                return new SharedHttpStream(mediaSource, tunerHost, streamId, FileSystem, _httpClientFactory, Logger, Config, _appHost, _streamHelper, _health, channel.Id, reservation);
             }
 
-            return new LiveStream(mediaSource, tunerHost, FileSystem, Logger, Config, _streamHelper);
+            _health?.BeginPlayback(channel.Id, tunerHost.Id);
+            return new LiveStream(mediaSource, tunerHost, FileSystem, Logger, Config, _streamHelper, reservation);
         }
 
         public async Task Validate(TunerHostInfo info)
@@ -302,6 +311,8 @@ namespace Jellyfin.LiveTv.TunerHosts
 
             return mediaSource;
         }
+
+        internal MediaSourceInfo CreateProbeSource(TunerHostInfo info, ChannelInfo channel) => CreateMediaSourceInfo(info, channel);
 
         /// <summary>
         /// Determines whether a channel path points at an HLS or DASH manifest rather than at a byte stream.

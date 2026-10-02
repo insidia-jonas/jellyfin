@@ -5,6 +5,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Include="..\..\plugins\Jellyfin.Plugin.TreasureMaps\Media\download_started.mp4" Link="Test Data\health-video.mp4" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Test Data\**\*.*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

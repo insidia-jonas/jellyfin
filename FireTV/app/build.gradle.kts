@@ -5,6 +5,15 @@ plugins {
 
 val previewBuild = providers.gradleProperty("firetvPreview").orNull == "true"
 
+// The WebView replaces the server's Live TV script, so ship the shared health UI
+// as a native asset too. Generate it from the server source to keep both in sync.
+val channelHealthAssets = layout.buildDirectory.dir("generated/channelHealthAssets")
+val generateChannelHealthAssets by tasks.registering(Sync::class) {
+    from(rootProject.file("../src/Jellyfin.LiveTv/Web/channel-health.js"))
+    into(channelHealthAssets.map { it.dir("native") })
+    rename { "channelHealth.js" }
+}
+
 android {
     namespace = "org.jellyfin.firetv"
     compileSdk = 35
@@ -13,8 +22,8 @@ android {
         applicationId = if (previewBuild) "org.jellyfin.firetvweb.preview" else "org.jellyfin.firetvweb"
         minSdk = 25
         targetSdk = 34
-        versionCode = 23
-        versionName = "2.4.4"
+        versionCode = 24
+        versionName = "2.4.5"
     }
 
     buildTypes {
@@ -41,7 +50,11 @@ android {
         viewBinding = true
         buildConfig = true
     }
+
+    sourceSets.getByName("main").assets.srcDir(channelHealthAssets)
 }
+
+tasks.named("preBuild").configure { dependsOn(generateChannelHealthAssets) }
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.3")

@@ -104,6 +104,12 @@
             script.async = true;
             parent.appendChild(script);
         }
+        if (document.body && !document.querySelector('script[src="/native/channelHealth.js"]')) {
+            var health = document.createElement("script");
+            health.src = "/native/channelHealth.js";
+            health.async = true;
+            parent.appendChild(health);
+        }
         function loadLive() {
             if (document.querySelector('script[src="/native/tvLive.js"]')) { return; }
             var live = document.createElement("script");
@@ -212,7 +218,7 @@
             deviceId: "firetv-web",
             deviceName: "Fire TV",
             appName: "Jellyfin Fire TV",
-            appVersion: "2.4.4"
+            appVersion: "2.4.5"
         };
     }
 

@@ -7,6 +7,9 @@ namespace MediaBrowser.Model.LiveTv
 {
     public class LiveTvOptions
     {
+        /// <summary>Gets or sets a value indicating whether idle checks may decode favorite and recent channels.</summary>
+        public bool EnableChannelHealthProbes { get; set; } = true;
+
         public LiveTvOptions()
         {
             TunerHosts = Array.Empty<TunerHostInfo>();

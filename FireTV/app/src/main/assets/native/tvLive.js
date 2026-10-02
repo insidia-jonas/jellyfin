@@ -90,7 +90,7 @@
             deviceId: device.deviceId || "",
             deviceName: device.deviceName || "Fire TV",
             appName: device.appName || "Jellyfin Fire TV",
-            appVersion: device.appVersion || "2.4.4"
+            appVersion: device.appVersion || "2.4.5"
         };
     }
 
@@ -300,6 +300,7 @@
         stateKey = key;
         try { saved = JSON.parse(localStorage.getItem("firetv-live-v2:" + key) || "{}"); } catch (e) { saved = {}; }
         saved.favorites = saved.favorites || {};
+        saved.favoriteMigrationPending = false;
         saved.recent = saved.recent || [];
         saved.mode = saved.mode || "all";
         saved.group = saved.group || "";
@@ -311,6 +312,35 @@
     function persist() {
         saved.filter = filter;
         try { localStorage.setItem("firetv-live-v2:" + stateKey, JSON.stringify(saved)); } catch (e) { /* storage full */ }
+    }
+
+    function saveServerFavorite(id, enabled) {
+        var client = window.ApiClient;
+        if (!client || !client.ajax) { return Promise.reject(new Error("Favorite API unavailable")); }
+        return client.ajax({ type: enabled ? "POST" : "DELETE", url: client.getUrl("UserFavoriteItems/" + encodeURIComponent(id), { userId: client.getCurrentUserId() }), dataType: "json" });
+    }
+
+    function synchronizeFavorites(items) {
+        var key = stateKey;
+        if (!saved.serverFavoritesMigrated && !saved.favoriteMigrationPending) {
+            var legacy = Object.keys(saved.favorites).filter(function (id) { return saved.favorites[id]; });
+            saved.favoriteMigrationPending = true;
+            var work = Promise.resolve();
+            legacy.forEach(function (id) { work = work.then(function () {
+                if (stateKey !== key) { throw new Error("Favorite account changed"); }
+                return saveServerFavorite(id, true);
+            }); });
+            work.then(function () {
+                if (stateKey !== key) { return; }
+                saved.serverFavoritesMigrated = true; saved.favoriteMigrationPending = false; persist();
+            }).catch(function () { if (stateKey === key) { saved.favoriteMigrationPending = false; } });
+        }
+        items.forEach(function (item) {
+            if (!item.UserData) { return; }
+            if (item.UserData.IsFavorite) { saved.favorites[item.Id] = true; }
+            else if (saved.serverFavoritesMigrated) { delete saved.favorites[item.Id]; }
+        });
+        persist();
     }
 
     function rememberPlayed(id) {
@@ -511,6 +541,7 @@
         var copy = document.createElement("div"); copy.className = "firetv-live-copy";
         ["name", "now", "bar", "next"].forEach(function (kind) {
             var node = document.createElement("div"); node.className = "firetv-live-" + kind;
+            if (kind === "name") { var title = document.createElement("span"); title.className = "firetv-live-title"; node.appendChild(title); }
             if (kind === "bar") { node.appendChild(document.createElement("span")); node.setAttribute("role", "progressbar"); node.setAttribute("aria-valuemin", "0"); node.setAttribute("aria-valuemax", "100"); node.setAttribute("aria-label", german() ? "Sendungsfortschritt" : "Program progress"); }
             copy.appendChild(node);
         });
@@ -519,10 +550,19 @@
         row.addEventListener("click", function (event) { event.preventDefault(); event.stopPropagation(); saved.lastId = item.Id; saved.scroll = viewport.scrollTop; persist(); play(byId[item.Id], shown); });
         var favorite = document.createElement("button"); favorite.type = "button"; favorite.className = "firetv-live-favorite";
         favorite.addEventListener("click", function () {
-            if (saved.favorites[item.Id]) { delete saved.favorites[item.Id]; } else { saved.favorites[item.Id] = true; }
-            persist();
-            if (saved.mode === "favorites") { var index = Number(entry.getAttribute("data-index")); render(false); focusIndex(Math.min(index, shown.length - 1), true); }
-            else { updateRow(entry, byId[item.Id]); }
+            if (favorite.disabled) { return; }
+            var enabled = !saved.favorites[item.Id];
+            var key = stateKey;
+            favorite.disabled = true;
+            saveServerFavorite(item.Id, enabled).then(function () {
+                if (stateKey !== key) { return; }
+                if (enabled) { saved.favorites[item.Id] = true; } else { delete saved.favorites[item.Id]; }
+                persist();
+                if (saved.mode === "favorites") { var index = Number(entry.getAttribute("data-index")); render(false); focusIndex(Math.min(index, shown.length - 1), true); }
+                else if (byId[item.Id]) { updateRow(entry, byId[item.Id]); }
+            }).catch(function () {
+                if (stateKey === key) { statusText = german() ? "Favorit konnte nicht gespeichert werden." : "Could not save favorite."; render(false); }
+            }).then(function () { favorite.disabled = false; });
         });
         entry.appendChild(row); entry.appendChild(favorite);
         return entry;
@@ -530,7 +570,7 @@
 
     function updateRow(entry, item) {
         var number = item.Number || item.ChannelNumber;
-        setText(entry.querySelector(".firetv-live-name"), (number ? number + "  " : "") + String(item.Name || "").split(/ {2}· {2}/)[0]);
+        setText(entry.querySelector(".firetv-live-title"), (number ? number + "  " : "") + String(item.Name || "").split(/ {2}· {2}/)[0]);
         setText(entry.querySelector(".firetv-live-now"), isGroup(item) ? (item.Overview || "Gruppe öffnen") : nowLine(item) || (german() ? "Keine EPG-Daten" : "No guide data"));
         setText(entry.querySelector(".firetv-live-next"), nextLine(item));
         var percent = progressOf(item, Date.now());
@@ -641,6 +681,7 @@
         if (initial) { render(false); }
         fetchChannels(token).then(function (items) {
             if (token !== requestToken || !viewport) { return; }
+            synchronizeFavorites(items);
             channels = items; byId = {};
             channels.forEach(function (item) { byId[item.Id] = item; });
             statusText = "";

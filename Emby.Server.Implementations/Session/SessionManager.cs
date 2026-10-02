@@ -1148,6 +1148,7 @@ namespace Emby.Server.Implementations.Session
                 Users = users,
                 PlaybackPositionTicks = info.PositionTicks,
                 PlayedToCompletion = playedToCompletion,
+                Failed = info.Failed,
                 MediaSourceId = info.MediaSourceId,
                 MediaInfo = info.Item,
                 DeviceName = session.DeviceName,

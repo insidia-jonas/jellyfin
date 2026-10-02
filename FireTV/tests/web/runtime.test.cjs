@@ -19,9 +19,10 @@ function setup(t, { hash = '#/livetv', items = 4, pending = false } = {}) {
     const clock = FakeTimers.withGlobal(w).install({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'requestAnimationFrame', 'cancelAnimationFrame', 'Date'] });
     const channels = Array.from({ length: items }, (_, i) => ({ Id: 'ch' + i, Name: 'Sender ' + i, Type: 'TvChannel', ImageTags: { Primary: 'tag' } }));
     let resolve;
-    const calls = { channels: 0, search: 0, guide: 0 };
+    const calls = { channels: 0, search: 0, guide: 0, favorites: [] };
     w.ApiClient = {
         getCurrentUserId: () => 'user', getUrl: (p, params) => p + '?' + new URLSearchParams(params), getImageUrl: id => '/Items/' + id + '/Images/Primary',
+        ajax: request => { calls.favorites.push(request); return Promise.resolve({}); },
         getJSON: url => {
             if (url.startsWith('LiveTv/Programs')) { calls.guide++; return Promise.resolve({ Items: [] }); }
             calls.channels++;
@@ -34,6 +35,18 @@ function setup(t, { hash = '#/livetv', items = 4, pending = false } = {}) {
     t.after(() => { observers.forEach(o => o.disconnect()); clock.uninstall(); w.close(); });
     return { w, clock, calls, channels, load, resolve: () => resolve({ Items: channels }) };
 }
+
+test('native bootstrap loads shared channel health after the body exists, only once', async t => {
+    const { w, load } = setup(t);
+    const body = w.document.body;
+    body.remove();
+    load('nativeshell.js');
+    assert.equal(w.document.querySelectorAll('script[src="/native/channelHealth.js"]').length, 0);
+    w.document.documentElement.appendChild(body);
+    w.FireTvGuard();
+    w.FireTvGuard();
+    assert.equal(w.document.querySelectorAll('script[src="/native/channelHealth.js"]').length, 1);
+});
 
 test('Live TV settles without replacing rows or stealing focus', async t => {
     const { w, clock, calls, load } = setup(t);
@@ -50,6 +63,21 @@ test('Live TV settles without replacing rows or stealing focus', async t => {
     assert.equal(w.document.activeElement, rows[2]);
     assert.equal(changes, 0);
     assert.equal(calls.channels, 1);
+});
+
+test('EPG refresh preserves the shared health badge and keyboard focus', async t => {
+    const { w, clock, load } = setup(t);
+    w.ApiClient.serverAddress = () => 'http://jellyfin.test';
+    load('tvLive.js');
+    w.eval(fs.readFileSync(path.resolve(__dirname, '../../../src/Jellyfin.LiveTv/Web/channel-health.js'), 'utf8'));
+    await clock.tickAsync(600);
+    const row = w.document.querySelector('.firetv-live-row');
+    const badge = row.querySelector('.jf-channel-health');
+    assert.ok(badge);
+    row.focus();
+    await clock.tickAsync(16000);
+    assert.equal(row.querySelector('.jf-channel-health'), badge);
+    assert.equal(w.document.activeElement, row);
 });
 
 test('sender filtering keeps the input and does not search all libraries', async t => {
@@ -243,6 +271,7 @@ test('favorites groups recents and position survive navigation and stay account 
     let user = 'first'; w.ApiClient.getCurrentUserId = () => user;
     load('tvLive.js'); await clock.tickAsync(1000);
     w.document.querySelector('.firetv-live-favorite').click();
+    await clock.tickAsync(1);
     w.document.querySelector('[data-mode="favorites"]').click();
     assert.equal(w.document.querySelectorAll('.firetv-live-row').length, 1);
     w.FireTvLive.onPlaybackState({ event: 'playing', isLive: true, itemId: 'ch1' });

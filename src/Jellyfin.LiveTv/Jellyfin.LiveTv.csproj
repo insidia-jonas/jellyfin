@@ -24,5 +24,6 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Web\livetv-overview.js" />
+    <EmbeddedResource Include="Web\channel-health.js" />
   </ItemGroup>
 </Project>

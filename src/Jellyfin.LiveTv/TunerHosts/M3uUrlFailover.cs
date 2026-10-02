@@ -102,7 +102,8 @@ internal static class M3uUrlFailover
             }
         }
 
-        return !string.IsNullOrWhiteSpace(info.Url) ? SplitUrls(info.Url).FirstOrDefault() ?? info.Url : info.Url;
+        var configured = SplitUrls(info.Url);
+        return configured.Count > 0 ? configured[0] : info.Url;
     }
 
     /// <summary>

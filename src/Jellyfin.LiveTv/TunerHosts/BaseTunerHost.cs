@@ -599,7 +599,16 @@ namespace Jellyfin.LiveTv.TunerHosts
                 {
                     var liveStream = await GetChannelStream(host, channelInfo, streamId, currentLiveStreams, cancellationToken).ConfigureAwait(false);
                     var startTime = DateTime.UtcNow;
-                    await liveStream.Open(cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        await liveStream.Open(cancellationToken).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        await liveStream.Close().ConfigureAwait(false);
+                        liveStream.Dispose();
+                        throw;
+                    }
                     var endTime = DateTime.UtcNow;
                     Logger.LogInformation("Live stream opened after {0}ms", (endTime - startTime).TotalMilliseconds);
                     return liveStream;

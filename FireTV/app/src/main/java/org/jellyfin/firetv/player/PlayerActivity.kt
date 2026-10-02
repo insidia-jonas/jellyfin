@@ -31,6 +31,8 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import androidx.media3.ui.CaptionStyleCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -223,7 +225,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                 }
             }
             resolveDeadline = deadline
-            mainHandler.postDelayed(deadline, if (liveHint) 25_000 else 30_000)
+            mainHandler.postDelayed(deadline, if (liveHint) tune.attemptTimeoutMs(25_000) else 30_000)
             resolverExecutor.execute {
                 val result = runCatching {
                     // Release the old tuner slot before opening another stream.
@@ -306,7 +308,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         val dataSourceFactory = DefaultHttpDataSource.Factory()
             .setUserAgent("${resolved.appName}/${resolved.appVersion}")
             .setConnectTimeoutMs(if (resolved.isLive) 8_000 else 12_000)
-            .setReadTimeoutMs(if (resolved.isLive) 10_000 else 20_000)
+            .setReadTimeoutMs(if (resolved.isLive) 30_000 else 20_000)
             .setAllowCrossProtocolRedirects(true)
             .setDefaultRequestProperties(headers)
         val reused = player != null && playerIsLive == resolved.isLive
@@ -317,8 +319,15 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                 buffers.minMs, buffers.maxMs, buffers.startMs, buffers.rebufferMs,
             )
             .build()
+        val extractors = DefaultExtractorsFactory()
+        if (resolved.isLive) {
+            // Some IPTV H.264 streams (including Das Erste) use non-IDR I slices.
+            // Waiting exclusively for IDRs leaves ExoPlayer buffering forever.
+            extractors.setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES)
+        }
+        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory, extractors)
         val exo = player ?: ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
             .build()
             .also { player = it }
@@ -361,7 +370,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                     binding.loading.isVisible = true
                     binding.loadingHint.setText(if (resolved.isLive) R.string.live_buffering else R.string.preparing_playback)
                     Log.i("FireTvPlayback", "buffer_start request=$requestGeneration")
-                    mainHandler.postDelayed(stallWatchdog, if (resolved.isLive) 15_000 else 45_000)
+                    mainHandler.postDelayed(stallWatchdog, if (resolved.isLive) tune.attemptTimeoutMs(30_000) else 45_000)
                 }
                 if (playbackState == Player.STATE_ENDED) {
                     emitSync("ended")
@@ -403,7 +412,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                 }
             })
         }
-        exo.setMediaSource(DefaultMediaSourceFactory(dataSourceFactory).createMediaSource(mediaItemFor(resolved)))
+        exo.setMediaSource(mediaSourceFactory.createMediaSource(mediaItemFor(resolved)))
         exo.prepare()
         if (!resolved.isLive && keepPosition > 0) {
             exo.seekTo(keepPosition)
@@ -459,6 +468,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private fun retryLive(message: String) {
         val payload = originalPayload
         val delay = tune.retryDelayMs()
+        retirePlayback(keepPlayer = delay != null, failed = true)
         if (delay != null && !payload.isNullOrBlank()) {
             Log.i("FireTvPlayback", "retry attempt=${tune.retries} delay_ms=$delay")
             beginResolve(payload, resetQueue = false, resetRetries = false, delayMs = delay)
@@ -1066,7 +1076,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         finish()
     }
 
-    private fun retirePlayback(keepPlayer: Boolean) {
+    private fun retirePlayback(keepPlayer: Boolean, failed: Boolean = false) {
         guideJob?.cancel()
         val exo = player
         val position = exo?.currentPosition ?: 0L
@@ -1089,7 +1099,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             // Outlives the Activity so Back cannot cancel tuner cleanup.
             cleanupFuture = cleanupExecutor.submit {
                 StreamResolver.closeLiveStream(closing, ssl)
-                cleanupExecutor.execute { closingReporter?.stopped(position) }
+                cleanupExecutor.execute { closingReporter?.stopped(position, failed) }
             }
         }
     }

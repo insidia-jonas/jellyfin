@@ -14,8 +14,8 @@ class PlaybackReporter(
         post("/Sessions/Playing/Progress", snapshot(isPaused = isPaused, positionMs = positionMs))
     }
 
-    fun stopped(positionMs: Long) {
-        post("/Sessions/Playing/Stopped", snapshot(isPaused = true, positionMs = positionMs))
+    fun stopped(positionMs: Long, failed: Boolean = false) {
+        post("/Sessions/Playing/Stopped", snapshot(isPaused = true, positionMs = positionMs).put("Failed", failed))
     }
 
     private fun snapshot(isPaused: Boolean, positionMs: Long = playback.startPositionMs): JSONObject {

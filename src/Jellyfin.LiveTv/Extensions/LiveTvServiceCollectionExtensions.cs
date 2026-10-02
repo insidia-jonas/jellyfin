@@ -1,5 +1,6 @@
 using Jellyfin.LiveTv.Channels;
 using Jellyfin.LiveTv.Guide;
+using Jellyfin.LiveTv.Health;
 using Jellyfin.LiveTv.IO;
 using Jellyfin.LiveTv.Listings;
 using Jellyfin.LiveTv.Recordings;
@@ -43,6 +44,11 @@ public static class LiveTvServiceCollectionExtensions
         services.AddSingleton<ITunerHost, HdHomerunHost>();
         services.AddSingleton<ITunerHost, M3UTunerHost>();
         services.AddSingleton<M3uPlaylistHealthChecker>();
+        services.AddSingleton<ChannelHealthStore>();
+        services.AddSingleton<ILiveTvChannelHealth>(s => s.GetRequiredService<ChannelHealthStore>());
+        services.AddSingleton<ChannelProbeCoordinator>();
+        services.AddSingleton<ChannelMediaProbe>();
+        services.AddHostedService<ChannelHealthWorker>();
         services.AddHostedService<M3uListingWarmupHost>();
         services.AddSingleton<SchedulesDirect>();
         services.AddSingleton<IListingsProvider>(s => s.GetRequiredService<SchedulesDirect>());

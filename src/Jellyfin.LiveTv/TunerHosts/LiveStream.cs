@@ -22,6 +22,8 @@ namespace Jellyfin.LiveTv.TunerHosts
         private readonly IConfigurationManager _configurationManager;
         private int _activeReaders;
         private DateTime _lastReaderReleasedUtc;
+        private readonly IDisposable _playbackReservation;
+        private int _disposed;
 
         public LiveStream(
             MediaSourceInfo mediaSource,
@@ -29,7 +31,8 @@ namespace Jellyfin.LiveTv.TunerHosts
             IFileSystem fileSystem,
             ILogger logger,
             IConfigurationManager configurationManager,
-            IStreamHelper streamHelper)
+            IStreamHelper streamHelper,
+            IDisposable playbackReservation = null)
         {
             OriginalMediaSource = mediaSource;
             FileSystem = fileSystem;
@@ -45,6 +48,7 @@ namespace Jellyfin.LiveTv.TunerHosts
 
             _configurationManager = configurationManager;
             StreamHelper = streamHelper;
+            _playbackReservation = playbackReservation;
 
             ConsumerCount = 1;
             SetTempFilePath("ts");
@@ -59,6 +63,8 @@ namespace Jellyfin.LiveTv.TunerHosts
         protected CancellationTokenSource LiveStreamCancellationTokenSource { get; } = new CancellationTokenSource();
 
         protected string TempFilePath { get; set; }
+
+        protected Task StreamingTask { get; set; } = Task.CompletedTask;
 
         public MediaSourceInfo OriginalMediaSource { get; set; }
 
@@ -103,6 +109,7 @@ namespace Jellyfin.LiveTv.TunerHosts
             Logger.LogInformation("Closing {Type}", GetType().Name);
 
             await LiveStreamCancellationTokenSource.CancelAsync().ConfigureAwait(false);
+            await ReleaseReservationAsync().ConfigureAwait(false);
         }
 
         public virtual Stream GetStream()
@@ -140,9 +147,23 @@ namespace Jellyfin.LiveTv.TunerHosts
 
         protected virtual void Dispose(bool dispose)
         {
-            if (dispose)
+            if (dispose && Interlocked.Exchange(ref _disposed, 1) == 0)
             {
+                LiveStreamCancellationTokenSource.Cancel();
+                _ = ReleaseReservationAsync();
                 LiveStreamCancellationTokenSource?.Dispose();
+            }
+        }
+
+        private async Task ReleaseReservationAsync()
+        {
+            try
+            {
+                await StreamingTask.ConfigureAwait(false);
+            }
+            finally
+            {
+                _playbackReservation?.Dispose();
             }
         }
 

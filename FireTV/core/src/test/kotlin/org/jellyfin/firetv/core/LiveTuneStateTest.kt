@@ -6,6 +6,23 @@ import java.time.ZoneId
 
 class LiveTuneStateTest {
     @Test
+    fun `recovery has a total deadline across slow tune attempts`() {
+        var now = 0L
+        val state = LiveTuneState { now }
+        state.select("one")
+        now = 25_000
+        assertEquals(1_000L, state.retryDelayMs())
+        state.select("one", resetRetries = false)
+        assertEquals(20_000L, state.attemptTimeoutMs(25_000))
+        now = 45_000
+        assertNull(state.retryDelayMs())
+        state.stablePlayback()
+        now += 600_000
+        assertEquals(1_000L, state.retryDelayMs())
+        assertEquals(30_000L, state.attemptTimeoutMs(30_000))
+    }
+
+    @Test
     fun `guide rollover selects current and next from the requested channel only`() {
         val channel = LiveTvChannel("one", "Channel One", nowTitle = "Old")
         val programs = """{"Items":[
