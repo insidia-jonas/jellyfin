@@ -44,3 +44,82 @@ test('failed detail query offers a working retry', async t => {
     e.w.document.querySelector('.tmRetry').click(); await e.clock.tickAsync(1);
     assert.equal(calls, 2);
 });
+
+test('versions are grouped by language with German first and other languages collapsed', async t => {
+    const e = setup(t);
+    e.api.getItems = () => Promise.resolve({ Items: [
+        { Id: 'en', Name: 'English', ProviderIds: { TreasureMaps: 'en', TreasureMapsLanguages: 'en' } },
+        { Id: 'multi', Name: 'Dual', ProviderIds: { TreasureMaps: 'multi', TreasureMapsLanguages: 'en,de' } },
+        { Id: 'unknown', Name: '1080p', ProviderIds: { TreasureMaps: 'unknown' } },
+        { Id: 'de', Name: 'German', ProviderIds: { TreasureMaps: 'de', TreasureMapsLanguages: 'de' } }
+    ] });
+    e.w.ApiClient = e.api; e.load(); await e.clock.tickAsync(1200);
+    const groups = [...e.w.document.querySelectorAll('.tmLanguageGroup')];
+    assert.equal(groups.length, 4);
+    assert.match(groups[0].textContent, /Deutsch/);
+    assert.equal(groups[0].open, true);
+    assert.equal(groups.slice(1).some(x => x.open), false);
+    assert.equal(e.w.document.querySelectorAll('.tmRelRow').length, 4, 'multilingual releases appear once');
+    assert.equal(groups[1].querySelector('summary').tabIndex, 0);
+});
+
+test('leaving a download page releases styles before the category reuses its DOM', async t => {
+    const e = setup(t); e.w.ApiClient = e.api; e.load(); await e.clock.tickAsync(1200);
+    const page = e.w.document.querySelector('.page');
+    page.classList.add('tmDownloadsPage');
+    const downloads = e.w.document.createElement('div'); downloads.id = 'tmDownloads'; page.appendChild(downloads);
+    e.w.history.pushState({}, '', '#/list?parentId=' + 'b'.repeat(32));
+    assert.equal(page.classList.contains('tmDownloadsPage'), false);
+    assert.equal(e.w.document.getElementById('tmDownloads'), null);
+    assert.equal(page.querySelector('.tmNativeChildren'), null);
+    await e.clock.tickAsync(1000);
+    assert.equal(page.classList.contains('tmTitlePage'), false, 'old observers cannot reapply title styles');
+});
+
+test('late successful grab cannot resume polling or overwrite the next category', async t => {
+    const e = setup(t); let finish; let statusCalls = 0;
+    e.api.fetch = options => {
+        if (options.type === 'POST') { return new Promise(r => { finish = r; }); }
+        statusCalls++; return Promise.resolve({ ok: true, items: [] });
+    };
+    e.w.ApiClient = e.api; e.load(); await e.clock.tickAsync(1200);
+    e.w.document.querySelector('.tmDl').click();
+    e.w.history.pushState({}, '', '#/home');
+    const before = statusCalls;
+    finish({ ok: true, nzoIds: ['job'] }); await e.clock.tickAsync(7000);
+    assert.equal(statusCalls, before);
+    assert.equal(e.w.document.querySelector('#tmReleases'), null);
+});
+
+test('downloads load status rows and release their page when navigating to a category', async t => {
+    const e = setup(t);
+    e.api.getItem = () => Promise.resolve({ Id: id, Name: 'Downloads', ChannelId: 'channel' });
+    e.api.getItems = () => Promise.resolve({ Items: [{ Id: 'download', Name: 'Movie' }] });
+    e.api.fetch = () => Promise.resolve({ items: [{ id: 'job', title: 'Movie', percent: 25, status: 'Downloading' }] });
+    e.w.ApiClient = e.api; e.load(); await e.clock.tickAsync(1200);
+    assert.equal(e.w.document.querySelectorAll('#tmDownloads .tmDlRow').length, 1);
+    assert.match(e.w.document.querySelector('#tmDownloads').textContent, /Movie/);
+    e.api.getItem = () => Promise.resolve({ Id: 'b'.repeat(32), Name: 'Filme', ChannelId: 'channel' });
+    e.w.history.pushState({}, '', '#/list?parentId=' + 'b'.repeat(32));
+    await e.clock.tickAsync(1200);
+    assert.equal(e.w.document.querySelector('.tmDownloadsPage'), null);
+    assert.equal(e.w.document.querySelector('#tmDownloads'), null);
+});
+
+test('automatic requests use the title endpoint and clean up reused library detail pages', async t => {
+    const e = setup(t); const calls = [];
+    e.w.document.querySelector('.page').insertAdjacentHTML('afterbegin', '<div class="detailSectionContent"></div>');
+    e.api.getItem = () => Promise.resolve({ Id: id, Name: 'Series', Type: 'Series' });
+    e.api.fetch = options => {
+        calls.push(options);
+        return Promise.resolve({ Enabled: true, Service: 'Sonarr', Monitored: options.type === 'POST', Message: 'Status' });
+    };
+    e.w.ApiClient = e.api; e.load(); await e.clock.tickAsync(1200);
+    const button = e.w.document.querySelector('#tmArrRequest button');
+    assert.match(button.textContent, /Serie anfordern.*Sonarr/);
+    button.click(); await e.clock.tickAsync(1);
+    assert.equal(button.disabled, true);
+    assert.equal(calls.filter(x => x.type === 'POST')[0].url, 'TreasureMaps/Requests/' + id);
+    e.w.history.pushState({}, '', '#/home');
+    assert.equal(e.w.document.querySelector('#tmArrRequest'), null);
+});

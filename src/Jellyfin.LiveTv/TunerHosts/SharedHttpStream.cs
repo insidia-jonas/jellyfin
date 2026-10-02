@@ -66,6 +66,10 @@ namespace Jellyfin.LiveTv.TunerHosts
             // when focusing a tile; connecting now would steal the provider slot.
             MediaSource.Path = _appHost.GetApiUrlForLocalAccess() + "/LiveTv/LiveStreamFiles/" + UniqueId + "/stream.ts";
             MediaSource.Protocol = MediaProtocol.Http;
+            // Direct playback is safe only after replacing the provider URL with our
+            // shared authenticated proxy. The subsequent codec probe/profile check
+            // still selects transcoding for formats the client cannot decode.
+            MediaSource.SupportsDirectPlay = !MediaSource.RequiresLooping;
             DateOpened = DateTime.UtcNow;
 
             Logger.LogInformation(

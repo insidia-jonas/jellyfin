@@ -21,6 +21,8 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<Recommendations.AiRecommender>();
         serviceCollection.AddSingleton<Metadata.MetadataCatalog>();
         serviceCollection.AddSingleton<GrabService>();
+        serviceCollection.AddHttpClient("TreasureMaps.Arr");
+        serviceCollection.AddSingleton<Arr.ArrClient>();
         serviceCollection.AddSingleton<Xrel.XrelClient>();
         serviceCollection.AddSingleton<Subtitles.OpenSubtitlesClient>();
         serviceCollection.AddSingleton<Subtitles.OpenSubtitlesProvider>();

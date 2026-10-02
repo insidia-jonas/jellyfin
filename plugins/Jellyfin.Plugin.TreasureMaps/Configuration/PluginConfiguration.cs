@@ -7,6 +7,23 @@ namespace Jellyfin.Plugin.TreasureMaps.Configuration;
 /// </summary>
 public class PluginConfiguration : BasePluginConfiguration
 {
+    /// <summary>Gets or sets Radarr's API base address.</summary>
+    public string RadarrUrl { get; set; } = string.Empty;
+    /// <summary>Gets or sets Radarr's server-side API credential.</summary>
+    public string RadarrApiKey { get; set; } = string.Empty;
+    /// <summary>Gets or sets the quality profile used for new movie requests.</summary>
+    public int RadarrQualityProfileId { get; set; }
+    /// <summary>Gets or sets the final movie library folder managed by Radarr.</summary>
+    public string RadarrRootFolder { get; set; } = string.Empty;
+    /// <summary>Gets or sets Sonarr's API base address.</summary>
+    public string SonarrUrl { get; set; } = string.Empty;
+    /// <summary>Gets or sets Sonarr's server-side API credential.</summary>
+    public string SonarrApiKey { get; set; } = string.Empty;
+    /// <summary>Gets or sets the quality profile used for new series requests.</summary>
+    public int SonarrQualityProfileId { get; set; }
+    /// <summary>Gets or sets the final series library folder managed by Sonarr.</summary>
+    public string SonarrRootFolder { get; set; } = string.Empty;
+
     /// <summary>
     /// Gets or sets the base URL of the Treasure-Maps API (for example <c>https://treasure-maps.example</c>).
     /// The <c>/api/v1</c> prefix is appended automatically.

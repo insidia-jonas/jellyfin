@@ -140,6 +140,33 @@ test('search results containing channels do not become a Live TV page', async t 
     assert.equal(w.document.getElementById('firetv-live'), null);
 });
 
+test('Live TV folders keep the server groups and only play channels within the selected group', async t => {
+    const { w, clock, load, calls } = setup(t);
+    const root = 'a'.repeat(32), group = 'b'.repeat(32);
+    w.history.replaceState({}, '', '#/list?parentId=' + root);
+    w.ApiClient.getItem = (user, id) => Promise.resolve({ Id: id, Name: id === root ? 'Live TV' : 'DE Germany', Type: id === root ? 'Channel' : 'ChannelFolderItem', ProviderIds: { LiveTv: '1' } });
+    const requests = [];
+    w.ApiClient.getItems = (user, options) => {
+        requests.push(options.ParentId);
+        return Promise.resolve({ Items: options.ParentId === root
+            ? [{ Id: group, Name: 'DE Germany', Type: 'ChannelFolderItem', IsFolder: true, Overview: '2 Sender' }]
+            : [{ Id: 'one', Name: 'Das Erste', Type: 'TvChannel' }, { Id: 'two', Name: 'ZDF', Type: 'TvChannel' }] });
+    };
+    let payload;
+    w.NativePlayer = { loadPlayer: json => { payload = JSON.parse(json); } };
+    load('tvLive.js'); await clock.tickAsync(1000);
+    assert.equal(w.document.querySelector('.firetv-live-count').textContent, '1 Gruppen');
+    w.document.querySelector('.firetv-live-row').click(); await clock.tickAsync(1000);
+    assert.equal(payload, undefined, 'folders do not open the player');
+    assert.equal(w.document.querySelector('.firetv-live-title').textContent, 'DE Germany');
+    assert.equal(w.document.querySelectorAll('.firetv-live-row').length, 2);
+    w.document.querySelectorAll('.firetv-live-row')[1].click();
+    assert.equal(payload.items[0].Id, 'two');
+    assert.equal(payload.items.length, 2);
+    assert.equal(calls.channels, 0, 'never replace a group with the global channel list');
+    assert.deepEqual(requests, [root, group]);
+});
+
 test('empty filter cancels the remaining render chunks', async t => {
     const { w, clock, load } = setup(t, { items: 800 });
     load('tvLive.js');

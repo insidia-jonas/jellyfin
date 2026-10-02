@@ -27,7 +27,7 @@ namespace Jellyfin.LiveTv.Tests
         [InlineData("http://example.com/live/1234.mpd")]
         [InlineData("http://example.com/live/1234.ts")]
         [InlineData("http://example.com/live/1234")]
-        public async Task GetChannelStreamMediaSources_NeverAdvertisesDirectPlayOrProbe(string path)
+        public async Task GetChannelStreamMediaSources_ProbesCodecsWithoutExposingProviderDirectPlay(string path)
         {
             var mediaSourceManager = new Mock<IMediaSourceManager>();
             mediaSourceManager.Setup(x => x.GetPathProtocol(It.IsAny<string>())).Returns(MediaProtocol.Http);
@@ -47,7 +47,7 @@ namespace Jellyfin.LiveTv.Tests
                 new ChannelInfo { Path = path });
 
             Assert.False(sources[0].SupportsDirectPlay);
-            Assert.False(sources[0].SupportsProbing);
+            Assert.True(sources[0].SupportsProbing);
             Assert.True(sources[0].RequiresOpening);
         }
 

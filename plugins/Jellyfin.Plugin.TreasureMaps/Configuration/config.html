@@ -228,6 +228,16 @@
                             Used only when SABnzbd is not configured. Point a Usenet client's watched folder here.
                         </div>
                     </div>
+                    <h2>Film- und Serienanforderungen</h2>
+                    <p>Neue Titel verwenden das hier gewählte Qualitätsprofil und den fertigen Medienordner. Bestehende Einträge behalten ihre Einstellungen.</p>
+                    <div class="inputContainer"><label class="inputLabel" for="RadarrUrl">Radarr: Server-URL</label><input is="emby-input" id="RadarrUrl" type="url" /></div>
+                    <div class="inputContainer"><label class="inputLabel" for="RadarrApiKey">Radarr: API-Schlüssel</label><input is="emby-input" id="RadarrApiKey" type="password" /></div>
+                    <div class="inputContainer"><label class="inputLabel" for="RadarrQualityProfileId">Radarr: Qualitätsprofil-ID</label><input is="emby-input" id="RadarrQualityProfileId" type="number" /></div>
+                    <div class="inputContainer"><label class="inputLabel" for="RadarrRootFolder">Radarr: Medienordner (absoluter Pfad)</label><input is="emby-input" id="RadarrRootFolder" type="text" /></div>
+                    <div class="inputContainer"><label class="inputLabel" for="SonarrUrl">Sonarr: Server-URL</label><input is="emby-input" id="SonarrUrl" type="url" /></div>
+                    <div class="inputContainer"><label class="inputLabel" for="SonarrApiKey">Sonarr: API-Schlüssel</label><input is="emby-input" id="SonarrApiKey" type="password" /></div>
+                    <div class="inputContainer"><label class="inputLabel" for="SonarrQualityProfileId">Sonarr: Qualitätsprofil-ID</label><input is="emby-input" id="SonarrQualityProfileId" type="number" /></div>
+                    <div class="inputContainer"><label class="inputLabel" for="SonarrRootFolder">Sonarr: Medienordner (absoluter Pfad)</label><input is="emby-input" id="SonarrRootFolder" type="text" /></div>
                     <div style="margin-top:1em;">
                         <button is="emby-button" type="submit" class="raised button-submit block"><span>Save</span></button>
                         <button is="emby-button" type="button" id="testConnection" class="raised block"><span>Save &amp; test connection</span></button>
@@ -242,6 +252,7 @@
             };
 
             function readFormInto(config) {
+                ['RadarrUrl', 'RadarrApiKey', 'RadarrQualityProfileId', 'RadarrRootFolder', 'SonarrUrl', 'SonarrApiKey', 'SonarrQualityProfileId', 'SonarrRootFolder'].forEach(function (key) { var value = document.getElementById(key).value; config[key] = /Id$/.test(key) ? (parseInt(value, 10) || 0) : value; });
                 config.BaseUrl = document.querySelector('#baseUrl').value;
                 config.ApiKey = document.querySelector('#apiKey').value;
                 config.ResultLimit = parseInt(document.querySelector('#resultLimit').value, 10) || 200;
@@ -320,6 +331,7 @@
                         document.querySelector('#sabnzbdMovieFolder').value = config.SabnzbdMovieFolder || 'movies';
                         document.querySelector('#sabnzbdTvFolder').value = config.SabnzbdTvFolder || 'tv';
                         document.querySelector('#grabOnFavorite').checked = config.GrabOnFavorite !== false;
+                        ['RadarrUrl', 'RadarrApiKey', 'RadarrQualityProfileId', 'RadarrRootFolder', 'SonarrUrl', 'SonarrApiKey', 'SonarrQualityProfileId', 'SonarrRootFolder'].forEach(function (key) { document.getElementById(key).value = config[key] || ''; });
                         Dashboard.hideLoadingMsg();
                     });
                 });

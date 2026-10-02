@@ -83,11 +83,32 @@ internal fun jsonEscape(value: String): String {
 }
 
 private fun unescapeJsonString(raw: String): String {
-    return raw.replace("\\\"", "\"")
-        .replace("\\\\", "\\")
-        .replace("\\/", "/")
-        .replace("\\n", "\n")
-        .replace("\\t", "\t")
+    // System.Text.Json escapes URL query separators as \u0026. Decode one
+    // escape at a time so literal backslashes are not decoded a second time.
+    return buildString {
+        var i = 0
+        while (i < raw.length) {
+            val value = raw[i++]
+            if (value != '\\' || i >= raw.length) {
+                append(value)
+                continue
+            }
+            when (val escaped = raw[i++]) {
+                '"', '\\', '/' -> append(escaped)
+                'b' -> append('\b')
+                'f' -> append('\u000C')
+                'n' -> append('\n')
+                'r' -> append('\r')
+                't' -> append('\t')
+                'u' -> {
+                    require(i + 4 <= raw.length) { "Incomplete JSON unicode escape" }
+                    append(raw.substring(i, i + 4).toInt(16).toChar())
+                    i += 4
+                }
+                else -> error("Invalid JSON escape")
+            }
+        }
+    }
 }
 
 private fun findMatchingBracket(source: String, openIndex: Int): Int? {

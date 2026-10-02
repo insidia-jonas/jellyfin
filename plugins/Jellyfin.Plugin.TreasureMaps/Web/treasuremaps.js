@@ -21,6 +21,12 @@
         '.tmCategoryPage .cardPadder{padding-bottom:60%!important}' +
         '.tmChannelPage .cardText-first{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.35;min-height:2.7em}' +
         '.tmChannelPage .cardImageContainer{background-size:cover}' +
+        '#tmArrRequest{margin:1em 0;display:flex;flex-wrap:wrap;gap:.75em;align-items:center}' +
+        '#tmArrRequest[hidden]{display:none}' +
+        '#tmArrRequest button:focus{outline:3px solid #fff;outline-offset:3px}' +
+        '.tmLanguageGroup{margin:.65em 0;border:1px solid rgba(255,255,255,.2);border-radius:10px;padding:.4em .8em}' +
+        '.tmLanguageGroup>summary{cursor:pointer;padding:.65em .2em;font-size:1.1em;font-weight:650;min-height:1.5em}' +
+        '.tmLanguageGroup>summary:focus{outline:3px solid #00a4dc;outline-offset:3px}' +
         '.tmTitlePage .emby-scroller{max-width:100%;overflow:hidden}' +
         '.tmBrowseHeading{margin:1em 0 .6em;font-size:1.7em;font-weight:650}' +
         '.tmBrowsePages{display:flex;flex-wrap:wrap;gap:.6em;margin:0 0 1.2em}' +
@@ -40,9 +46,9 @@
         'margin-left:auto;max-width:100%}' +
         '#tmReleases .tmRelStatus{flex:1 1 auto;font-size:.9em;opacity:.9;min-width:0;text-align:right}' +
         '#tmReleases .tmRelStatus:empty{display:none}' +
-        '#tmReleases .tmDl{flex:0 0 auto;border:none;border-radius:999px;padding:.45em 1.1em;cursor:pointer;' +
+        '#tmReleases .tmDl,#tmArrRequest .tmDl{flex:0 0 auto;border:none;border-radius:999px;padding:.6em 1.1em;cursor:pointer;min-height:2.5em;' +
         'background:#0a84ff;color:#fff;font-weight:600;font-family:inherit;white-space:nowrap}' +
-        '#tmReleases .tmDl:disabled{background:rgba(255,255,255,.18);cursor:default}' +
+        '#tmReleases .tmDl:disabled,#tmArrRequest .tmDl:disabled{background:rgba(255,255,255,.18);cursor:default}' +
         '@media (max-width:700px){' +
         '#tmReleases .tmRelRow{flex-direction:column;align-items:stretch}' +
         '#tmReleases .tmRelName{flex:1 1 auto}' +
@@ -110,13 +116,32 @@
         '}';
     document.head.appendChild(style);
 
-    setInterval(function () {
-        if (location.hash !== lastHash) {
-            lastHash = location.hash;
-            stopPoll();
-            setTimeout(onNavigate, 350);
-        }
-    }, 350);
+    function releasePage() {
+        stopPoll();
+        document.querySelectorAll('#tmArrRequest').forEach(function (el) { el.remove(); });
+        document.querySelectorAll('.tmChannelPage,.tmDownloadsPage,.tmTitlePage,.tmCategoryPage').forEach(function (page) {
+            page.classList.remove('tmChannelPage', 'tmDownloadsPage', 'tmTitlePage', 'tmCategoryPage');
+            page.querySelectorAll('.tmNativeChildren').forEach(function (el) { el.style.display = el.dataset.tmDisplay || ''; el.classList.remove('tmNativeChildren'); });
+            page.querySelectorAll('#tmReleases,#tmDownloads,#tmDownloadHero,.tmLoadMessage,.tmBrowseHeading,.tmBrowsePages,#tmArrRequest').forEach(function (el) { el.remove(); });
+            page.querySelectorAll('[data-tm-page-link]').forEach(function (el) { el.style.display = ''; el.removeAttribute('data-tm-page-link'); });
+        });
+    }
+
+    function routeChanged() {
+        if (location.hash === lastHash) { return; }
+        lastHash = location.hash;
+        releasePage();
+        var route = lastHash;
+        setTimeout(function () { if (route === location.hash) { onNavigate(); } }, 350);
+    }
+    ['pushState', 'replaceState'].forEach(function (name) {
+        var original = history[name];
+        history[name] = function () { var value = original.apply(this, arguments); routeChanged(); return value; };
+    });
+    window.addEventListener('hashchange', routeChanged);
+    window.addEventListener('popstate', routeChanged);
+    setInterval(routeChanged, 350);
+    routeChanged();
 
     function api() { return window.ApiClient; }
 
@@ -142,6 +167,7 @@
                 } else if (item.ProviderIds && item.ProviderIds.TreasureMaps) {
                     enhanceReleasePage(item);
                 }
+                if (item.Type === 'Movie' || item.Type === 'Series' || (item.ProviderIds && item.ProviderIds.TreasureMapsKind && item.Type === 'BoxSet')) { enhanceArrRequest(item); }
                 if (item.Type === 'Movie' || item.Type === 'Episode') {
                     enhanceSubtitles(item);
                 }
@@ -199,7 +225,7 @@
                         container.parentNode.insertBefore(nav, container);
                         whenReady('.card', 16, function () {
                             pages.forEach(function (child) {
-                                page.querySelectorAll('.card[data-id="' + child.Id + '"]').forEach(function (card) { card.style.display = 'none'; });
+                                page.querySelectorAll('.card[data-id="' + child.Id + '"]').forEach(function (card) { card.setAttribute('data-tm-page-link', '1'); card.style.display = 'none'; });
                             });
                         }, route);
                     }
@@ -609,6 +635,7 @@
         page.classList.add('tmTitlePage', 'tmChannelPage');
         page.querySelectorAll(childrenSelectors()).forEach(function (el) {
             if (el.closest('#tmReleases') || el.closest('#tmDownloads')) { return; }
+            if (!el.classList.contains('tmNativeChildren')) { el.dataset.tmDisplay = el.style.display; }
             el.classList.add('tmNativeChildren');
             el.style.display = 'none';
         });
@@ -617,6 +644,7 @@
             var heading = sec.querySelector('.sectionTitle, h2, h1');
             var text = heading ? (heading.textContent || '') : '';
             if (/andere inhalte|other items|items in this|more from|in this collection|weitere inhalte/i.test(text)) {
+                if (!sec.classList.contains('tmNativeChildren')) { sec.dataset.tmDisplay = sec.style.display; }
                 sec.classList.add('tmNativeChildren');
                 sec.style.display = 'none';
             }
@@ -638,9 +666,8 @@
             ? (episodeLike.every(function (r) { return r.Type === 'Season' || /^Season\s+\d/i.test(r.Name || ''); }) ? 'Seasons' : 'Episodes')
             : 'Verfügbare Versionen';
         host.appendChild(title);
-        list.forEach(function (release) {
-            host.appendChild(episodeLike.length ? buildEpisodeRow(release) : buildRow(release, item.Name));
-        });
+        if (episodeLike.length) { list.forEach(function (release) { host.appendChild(buildEpisodeRow(release)); }); }
+        else { appendLanguageGroups(host, list, item.Name); }
 
         var children = findChildrenHost(page);
         var anchor = (children && (children.closest('#childrenCollapsible,#listChildrenCollapsible,.verticalSection,.detailVerticalSection') || children))
@@ -654,7 +681,11 @@
         }
 
         hideNativeChildren(page);
-        var observer = new MutationObserver(function () { hideNativeChildren(page); });
+        var route = location.hash;
+        var observer = new MutationObserver(function () {
+            if (route !== location.hash) { observer.disconnect(); return; }
+            hideNativeChildren(page);
+        });
         observer.observe(page, { childList: true, subtree: true });
         setTimeout(function () { observer.disconnect(); }, 15000);
 
@@ -742,6 +773,74 @@
         return row;
     }
 
+    function enhanceArrRequest(item) {
+        var route = location.hash;
+        var endpoint = 'TreasureMaps/Requests/' + item.Id;
+        whenReady('.detailSectionContent,.detailPageSecondaryContainer', 20, function (page, anchor) {
+            if (route !== location.hash || page.querySelector('#tmArrRequest')) { return; }
+            var box = document.createElement('div'); box.id = 'tmArrRequest';
+            var button = document.createElement('button'); button.type = 'button'; button.className = 'tmDl'; button.disabled = true;
+            var status = document.createElement('div'); status.setAttribute('role', 'status');
+            box.appendChild(button); box.appendChild(status);
+            var releases = anchor.querySelector('#tmReleases');
+            if (releases) { releases.parentNode.insertBefore(box, releases); }
+            else { anchor.appendChild(box); }
+            function paint(raw) {
+                if (route !== location.hash || !box.isConnected) { return; }
+                var res = {}; Object.keys(raw || {}).forEach(function (key) { res[key.toLowerCase()] = raw[key]; });
+                box.hidden = !res.enabled;
+                button.textContent = (res.service === 'Sonarr' ? 'Serie anfordern · ' : 'Film anfordern · ') + res.service;
+                button.disabled = !!(res.monitored || res.available);
+                status.textContent = res.message || '';
+                if (res.enabled && res.id && !res.available) { setTimeout(refresh, 15000); }
+            }
+            function refresh() {
+                if (route !== location.hash || !box.isConnected) { return; }
+                api().fetch({ url: api().getUrl(endpoint), type: 'GET', dataType: 'json' }).then(paint, function () { box.hidden = true; });
+            }
+            button.addEventListener('click', function () {
+                button.disabled = true; status.textContent = 'Anforderung wird übergeben …';
+                api().fetch({ url: api().getUrl(endpoint), type: 'POST', dataType: 'json' }).then(paint, function () {
+                    if (route !== location.hash || !box.isConnected) { return; }
+                    button.disabled = false; status.textContent = 'Anforderung fehlgeschlagen. Bitte erneut versuchen.';
+                });
+            });
+            refresh();
+        }, route);
+    }
+
+    function releaseLanguages(release) {
+        var known = { de: 'Deutsch', en: 'Englisch', fr: 'Französisch', es: 'Spanisch', it: 'Italienisch', tr: 'Türkisch', ru: 'Russisch', ja: 'Japanisch', ko: 'Koreanisch', zh: 'Chinesisch', nl: 'Niederländisch', pl: 'Polnisch', pt: 'Portugiesisch' };
+        var codes = ((release.ProviderIds || {}).TreasureMapsLanguages || '').split(',').filter(Boolean);
+        var name = release.Name || '';
+        if (!codes.length) {
+            [['de', /🇩🇪|\bGerman\b|\bDeutsch\b/i], ['en', /🇬🇧|🇺🇸|\bEnglish\b/i], ['fr', /🇫🇷|\bFrench\b/i], ['es', /🇪🇸|\bSpanish\b/i], ['it', /🇮🇹|\bItalian\b/i], ['tr', /🇹🇷|\bTurkish\b/i], ['ja', /🇯🇵|\bJapanese\b/i]].forEach(function (entry) { if (entry[1].test(name)) { codes.push(entry[0]); } });
+        }
+        codes = codes.filter(function (code, i) { return codes.indexOf(code) === i; }).sort(function (a, b) { return (a === 'de' ? -1 : b === 'de' ? 1 : a.localeCompare(b)); });
+        return { key: codes.join(','), label: codes.map(function (code) { return known[code] || code; }).join(' + ') || 'Sprache unbekannt' };
+    }
+
+    function appendLanguageGroups(host, releases, title) {
+        var groups = {};
+        releases.forEach(function (release) {
+            var language = releaseLanguages(release);
+            if (!groups[language.key]) { groups[language.key] = { language: language, items: [] }; }
+            groups[language.key].items.push(release);
+        });
+        Object.keys(groups).sort(function (a, b) {
+            var rank = function (key) { return key.indexOf('de') === 0 ? 0 : key.indexOf('en') === 0 ? 1 : key ? 2 : 3; };
+            return rank(a) - rank(b) || groups[a].language.label.localeCompare(groups[b].language.label);
+        }).forEach(function (key, index) {
+            var group = groups[key];
+            var details = document.createElement('details'); details.className = 'tmLanguageGroup'; details.open = index === 0;
+            var summary = document.createElement('summary'); summary.tabIndex = 0;
+            summary.textContent = group.language.label + ' · ' + group.items.length + (group.items.length === 1 ? ' Version' : ' Versionen');
+            details.appendChild(summary);
+            group.items.forEach(function (release) { details.appendChild(buildRow(release, title)); });
+            host.appendChild(details);
+        });
+    }
+
     function buildRow(release, movieTitle) {
         var row = document.createElement('div');
         row.className = 'tmRelRow';
@@ -779,6 +878,7 @@
     }
 
     function grab(guid, kind, name, btn, statusEl, row, itemId, imageTag, movieTitle) {
+        var route = location.hash;
         btn.disabled = true;
         statusEl.textContent = 'Starting\u2026';
         var params = { type: kind, name: name };
@@ -791,6 +891,7 @@
             type: 'POST',
             dataType: 'json'
         }).then(function (res) {
+            if (route !== location.hash || !btn.isConnected) { return; }
             if (res && res.ok) {
                 if (row) { row.dataset.nzo = (res.nzoIds || []).join(','); }
                 statusEl.textContent = 'Queued\u2026';
@@ -807,6 +908,7 @@
 
     /* ---- Downloads folder: title list instead of a poster grid of quality strings ---- */
     function enhanceDownloadsList(folder) {
+        var route = location.hash;
         whenReady('.itemsContainer, .padded-left, .pageTitle', 18, function (page) {
             page.classList.add('tmDownloadsPage', 'tmChannelPage');
             var old = page.querySelector('#tmDownloads');
@@ -836,6 +938,7 @@
                 api().getItems(api().getCurrentUserId(), { ParentId: folder.Id, Fields: 'ProviderIds,Overview,PrimaryImageAspectRatio' }),
                 fetchStatus()
             ]).then(function (pair) {
+                if (route !== location.hash || !host.isConnected) { return; }
                 var children = (pair[0] && pair[0].Items) || [];
                 var status = pair[1];
                 renderDownloadRows(host, children, status);
@@ -1101,14 +1204,18 @@
     }
 
     function refreshStatus() {
-        var rows = document.querySelectorAll('.tmRelRow');
-        var dlHost = document.getElementById('tmDownloads');
+        var page = visiblePage();
+        if (!page) { return Promise.resolve(false); }
+        var route = location.hash;
+        var parent = currentParentId();
+        var rows = page.querySelectorAll('.tmRelRow');
+        var dlHost = page.querySelector('#tmDownloads');
         if ((!rows.length && !dlHost && !document.getElementById('tmDownloadHero')) || !api()) {
             return Promise.resolve(false);
         }
 
         return fetchStatus().then(function (res) {
-            if (!res || !res.ok) { return false; }
+            if (route !== location.hash || !res || !res.ok) { return false; }
             var anyActive = false;
             rows.forEach(function (row) {
                 var entry = matchEntry(row, res.items || []);
@@ -1133,10 +1240,10 @@
             });
 
             if (dlHost) {
-                api().getItems(api().getCurrentUserId(), { ParentId: currentParentId(), Fields: 'ProviderIds' }).then(function (result) {
-                    renderDownloadRows(dlHost, (result && result.Items) || [], res);
+                api().getItems(api().getCurrentUserId(), { ParentId: parent, Fields: 'ProviderIds' }).then(function (result) {
+                    if (route === location.hash && dlHost.isConnected) { renderDownloadRows(dlHost, (result && result.Items) || [], res); }
                 }).catch(function () {
-                    renderDownloadRows(dlHost, [], res);
+                    if (route === location.hash && dlHost.isConnected) { renderDownloadRows(dlHost, [], res); }
                 });
                 anyActive = anyActive || (res.items || []).some(function (i) {
                     return i.status !== 'Completed' && i.status !== 'Failed';

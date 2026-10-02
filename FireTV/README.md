@@ -8,6 +8,18 @@ Das ist bewusst **kein** API-only-Client wie [jellyfin-androidtv](https://github
 
 Fire TV client that hosts the full Jellyfin web UI (same architecture as the official iOS app: WebView + NativeShell). Video playback uses ExoPlayer so selecting a movie cannot freeze Amazon WebView. Downloads use Android DownloadManager. The 1920 CSS-pixel TV layout is scaled to the actual window, with automatic viewport height.
 
+## Änderungen in 2.4.3
+
+- Live TV übernimmt die Gruppenordner und deren Sender vom Server. Gruppen öffnen eine eigene Liste; Ordner werden nicht in die Wiedergabe-Warteschlange aufgenommen. Sendernamen und Jetzt/Danach bleiben getrennt.
+- Die native JSON-Auswertung dekodiert Unicode-Escapes korrekt. Insbesondere `\u0026` in Jellyfins Wiedergabe-URLs darf nicht als wörtliche Zeichenfolge an den Player gelangen; das führte zu fehlgeschlagenen Stream-Aufrufen und drei Wiederholungen.
+- Der Server prüft beim Öffnen von M3U-Sendern die tatsächlichen Codecs und verwendet den vorhandenen Probe-Cache. Erst nach der Umstellung auf Jellyfins gemeinsamen Stream darf Direct Play angeboten werden. Kompatible Sender benötigen dadurch keine Software-Transkodierung auf dem Raspberry; unbekannte oder inkompatible Formate behalten den Ausweichweg.
+- Treasure Maps räumt beim Seitenwechsel Download-Ansichten, ausgeblendete Elemente und Statusabfragen auf. Verfügbare Versionen sind nach Sprache aufklappbar; Deutsch steht zuerst, mehrsprachige Versionen erscheinen nur einmal.
+- Mit Plugin 1.0.3 lassen sich Filme über Radarr und Serien über Sonarr anfordern. Konfigurierte Qualitätsprofile, Medienordner und Indexer bestimmen die automatische Auswahl. Vorhandene überwachte Titel werden nicht erneut angelegt oder gesucht. Die Auswahl einer konkreten Version bleibt ein direkter Treasure-Maps-Download.
+
+Validierung: 84 Kotlin-Tests, 50 Web-Regressionstests, 201 Live-TV-Server-Tests, 198 Plugin-Tests unter Linux sowie APK-Build und Android Lint. Die Tests prüfen unter anderem Gruppenwechsel, JSON-URLs, Navigation nach Downloads, Sprachgruppen und idempotente Anforderungen.
+
+Gerätetest am 02.10.2026 auf dem Cube: neun Gruppen, darunter 68 Sender in „DE Germany“. Nach der Serverkorrektur kam das erste Bild bei bereits geprüften Sendern nach 1.230 ms („Das Erste“) und 714 ms („3Sat“); der Player wurde beim Wechsel wiederverwendet. Ein weiterer Sender ohne Probe-Cache benötigte 6.017 ms. In dieser kurzen Stichprobe gab es nach dem ersten Bild keine weiteren Pufferpausen oder Wiederholungen. Das ersetzt keinen Langzeittest aller Anbieterstreams.
+
 ## Änderungen in 2.4.2
 
 Beim Wechsel von Live TV zu Filmen, Serien oder Treasure Maps wird die Senderliste sofort entfernt. Die Erweiterung berücksichtigt auch die Navigation über die History API des Webclients und Zurück/Vorwärts. Zwischengespeicherte Überschriften oder Senderkarten einer alten Seite können keine fremde Seite mehr als Live TV einstufen; Listen werden anhand ihres aktuellen API-Elternelements erkannt. Verspätete Antworten bleiben an die ursprüngliche Seite gebunden.

@@ -275,7 +275,10 @@ namespace Jellyfin.LiveTv.TunerHosts
                 RequiresOpening = true,
                 RequiresClosing = true,
                 RequiresLooping = info.EnableStreamLooping,
-                SupportsProbing = false,
+                // Discover the codecs when opening the shared server stream. Unknown codec
+                // placeholders force even H.264/AAC through software transcoding on the Pi.
+                // MediaSourceManager caches the probe per tuner/channel for subsequent tunes.
+                SupportsProbing = true,
 
                 ReadAtNativeFramerate = info.ReadAtNativeFramerate,
 

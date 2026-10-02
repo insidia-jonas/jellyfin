@@ -22,6 +22,7 @@
     var routeKey = "";
     var parentKey = "";
     var parentLive = false;
+    var parentItem = null;
     var parentPending = false;
     var parentToken = 0;
 
@@ -89,7 +90,7 @@
             deviceId: device.deviceId || "",
             deviceName: device.deviceName || "Fire TV",
             appName: device.appName || "Jellyfin Fire TV",
-            appVersion: device.appVersion || "2.4.2"
+            appVersion: device.appVersion || "2.4.3"
         };
     }
 
@@ -106,7 +107,7 @@
         var program = item.CurrentProgram;
         if (!program || !program.Name) {
             var overview = String(item.OriginalTitle || item.Overview || "");
-            var hit = overview.split(/\r?\n/).filter(function (line) {
+            var hit = overview.split(/\r?\n| {2}· {2}/).filter(function (line) {
                 return /Jetzt:|Now:/i.test(line);
             })[0];
             return hit ? hit.trim() : "";
@@ -211,10 +212,15 @@
         return copy;
     }
 
+    function isGroup(item) {
+        return !!(item && (item.IsFolder || item.Type === "ChannelFolderItem" || item.Type === "Folder"));
+    }
+
     function play(item, list) {
         if (!item) { return; }
+        if (isGroup(item)) { location.hash = "#/list?parentId=" + item.Id + "&ltvgroup=1"; return; }
         var creds = auth();
-        var queue = (list && list.length ? list : channels).slice();
+        var queue = (list && list.length ? list : channels).filter(function (entry) { return !isGroup(entry); });
         var payload = {
             ids: queue.map(function (channel) { return channel.Id; }),
             items: queue.map(function (channel) {
@@ -319,12 +325,17 @@
         if (!client || typeof client.getJSON !== "function") { return Promise.reject(new Error("No server")); }
         var out = [];
         var seen = {};
+        var parent = parentLive && parentItem && parentItem.Id;
         function page(offset) {
             if (token !== requestToken) { return Promise.resolve([]); }
-            return client.getJSON(client.getUrl("LiveTv/Channels", {
+            var request = parent ? client.getItems(client.getCurrentUserId(), {
+                ParentId: parent, Fields: "ChannelNumber,Overview,Tags,ProviderIds,ExternalId,OriginalTitle,StartDate,EndDate",
+                SortBy: "SortName", SortOrder: "Ascending", StartIndex: offset, Limit: 200
+            }) : client.getJSON(client.getUrl("LiveTv/Channels", {
                 userId: client.getCurrentUserId(), addCurrentProgram: true, enableImages: true,
                 fields: "ChannelNumber,Overview,Tags", startIndex: offset, limit: 200
-            })).then(function (result) {
+            }));
+            return request.then(function (result) {
                 var batch = (result && result.Items) || [];
                 var added = 0;
                 batch.forEach(function (item) {
@@ -342,6 +353,7 @@
 
     function visibleChannels() {
         var q = filter.replace(/\s+/g, " ").trim().toLowerCase();
+        if (channels.length && channels.every(isGroup)) { return channels.filter(function (item) { return !q || item.Name.toLowerCase().indexOf(q) !== -1; }); }
         var source = saved.mode === "recent" ? saved.recent.map(function (id) { return byId[id]; }).filter(Boolean) : channels;
         return source.filter(function (item) {
             if (saved.mode === "favorites" && !saved.favorites[item.Id]) { return false; }
@@ -441,7 +453,9 @@
         var box = ensure();
         updateGroups(box);
         shown = visibleChannels();
-        setText(box.querySelector(".firetv-live-count"), shown.length + (german() ? " Sender" : " channels"));
+        var grouped = shown.length && shown.every(isGroup);
+        setText(box.querySelector(".firetv-live-title"), parentItem && parentItem.Name || "Live TV");
+        setText(box.querySelector(".firetv-live-count"), shown.length + (grouped ? (german() ? " Gruppen" : " groups") : (german() ? " Sender" : " channels")));
         setText(box.querySelector(".firetv-live-status"), statusText || (loading ? (german() ? "Sender werden geladen…" : "Loading channels…") : ""));
         Array.prototype.forEach.call(box.querySelectorAll("[data-mode]"), function (button) {
             button.setAttribute("aria-pressed", String(button.getAttribute("data-mode") === saved.mode));
@@ -490,7 +504,7 @@
         var entry = document.createElement("div"); entry.className = "firetv-live-entry";
         entry.setAttribute("role", "listitem"); entry.setAttribute("data-id", item.Id);
         var row = document.createElement("button"); row.type = "button"; row.className = "firetv-live-row";
-        row.setAttribute("data-id", item.Id); row.setAttribute("data-type", "TvChannel");
+        row.setAttribute("data-id", item.Id); row.setAttribute("data-type", isGroup(item) ? "Folder" : "TvChannel");
         var logo = document.createElement("div"); logo.className = "firetv-live-logo"; logo.setAttribute("aria-hidden", "true");
         logo.textContent = String(item.Name || "TV").slice(0, 2).toUpperCase();
         row.appendChild(logo);
@@ -516,14 +530,15 @@
 
     function updateRow(entry, item) {
         var number = item.Number || item.ChannelNumber;
-        setText(entry.querySelector(".firetv-live-name"), (number ? number + "  " : "") + (item.Name || ""));
-        setText(entry.querySelector(".firetv-live-now"), nowLine(item) || (german() ? "Keine EPG-Daten" : "No guide data"));
+        setText(entry.querySelector(".firetv-live-name"), (number ? number + "  " : "") + String(item.Name || "").split(/ {2}· {2}/)[0]);
+        setText(entry.querySelector(".firetv-live-now"), isGroup(item) ? (item.Overview || "Gruppe öffnen") : nowLine(item) || (german() ? "Keine EPG-Daten" : "No guide data"));
         setText(entry.querySelector(".firetv-live-next"), nextLine(item));
         var percent = progressOf(item, Date.now());
         var bar = entry.querySelector(".firetv-live-bar");
         bar.style.visibility = percent == null ? "hidden" : "visible";
         if (percent != null) { bar.firstChild.style.width = percent + "%"; bar.setAttribute("aria-valuenow", Math.round(percent)); }
         var favorite = entry.querySelector(".firetv-live-favorite");
+        favorite.hidden = isGroup(item);
         setText(favorite, saved.favorites[item.Id] ? "★" : "☆");
         favorite.setAttribute("aria-pressed", String(!!saved.favorites[item.Id]));
         favorite.setAttribute("aria-label", (saved.favorites[item.Id] ? (german() ? "Favorit entfernen: " : "Remove favorite: ") : (german() ? "Als Favorit speichern: " : "Add favorite: ")) + item.Name);
@@ -547,7 +562,7 @@
         else if ((index + 1) * rowHeight > viewport.scrollTop + height) { viewport.scrollTop = (index + 1) * rowHeight - height; }
         paintWindow();
         var entry = rows[shown[index].Id];
-        if (entry) { entry.querySelector(favorite ? ".firetv-live-favorite" : ".firetv-live-row").focus({ preventScroll: true }); }
+        if (entry) { entry.querySelector(favorite && !isGroup(shown[index]) ? ".firetv-live-favorite" : ".firetv-live-row").focus({ preventScroll: true }); }
     }
 
     function navigate(event) {
@@ -579,7 +594,7 @@
         if (!viewport || loading || guideLoading || document.hidden || paused) { return; }
         var ids = Object.keys(rows);
         var now = Date.now();
-        ids = ids.filter(function (id) { return !programs[id] || programs[id].expires <= now; });
+        ids = ids.filter(function (id) { return !isGroup(byId[id]) && (!programs[id] || programs[id].expires <= now); });
         if (!ids.length) { return; }
         var client = window.ApiClient;
         if (!client || !client.getJSON) { return; }
@@ -669,7 +684,8 @@
         var key = scopeKey() + "|" + hash();
         if (routeKey !== key) {
             routeKey = key;
-            parentKey = ""; parentLive = false; parentPending = false; parentToken++;
+            parentKey = ""; parentLive = false; parentItem = null; parentPending = false; parentToken++;
+            channels = []; byId = {};
             hide();
         }
         // A previous page's heading and cards can stay mounted while the router
@@ -681,7 +697,7 @@
             var token = ++parentToken;
             client.getItem(client.getCurrentUserId(), match[1]).then(function (item) {
                 if (token !== parentToken || key !== scopeKey() + "|" + hash()) { return; }
-                parentKey = key; parentLive = liveParent(item); parentPending = false;
+                parentKey = key; parentItem = item; parentLive = liveParent(item); parentPending = false;
                 sync();
             }).catch(function () {
                 if (token !== parentToken || key !== scopeKey() + "|" + hash()) { return; }

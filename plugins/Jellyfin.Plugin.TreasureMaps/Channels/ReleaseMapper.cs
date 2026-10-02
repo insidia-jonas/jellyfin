@@ -120,6 +120,7 @@ public static class ReleaseMapper
         // Tag with the release id + kind so favouriting the item in the normal UI can trigger a grab.
         item.ProviderIds["TreasureMaps"] = release.Guid;
         item.ProviderIds["TreasureMapsKind"] = isTv ? "tv" : "movie";
+        item.ProviderIds["TreasureMapsLanguages"] = string.Join(",", releaseLanguages.Select(LanguageMatcher.Normalize).Where(x => !string.IsNullOrEmpty(x)).Distinct());
 
         var imdb = release.Ids?.Imdb ?? tv?.Imdb;
         if (!string.IsNullOrWhiteSpace(imdb))
