@@ -395,3 +395,8 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
 
 - Fire TV channel names use `firetv-live-channel-title`, distinct from the page heading `firetv-live-title`. Size virtual rows for name, health, now/next and padding together; verify actual WebView bounds after CSS changes.
 - LiveStreams/Open propagates RequestAborted through probing. A cancelled opening must release its own consumer via CloseLiveStream, while preserving other consumers. Fire TV allows 35 seconds for live resolution so server source failover can finish, within the existing 45-second recovery deadline.
+
+### Channel discovery and category navigation
+
+- Latest/search materialization must not attach cards to the browsable channel root. Pass no browse parent, retain ChannelId for access/detail resolution, and preserve an existing browse parent. Otherwise opening Treasure Maps deletes and recreates home/search title cards; two concurrent root requests produced a 39-second deletion storm on the Pi.
+- Serialize folder reconciliation through the final stored-row lookup, not just provider fetching. Stale overlay BoxSets (including legacy root cards and rotating category results) are detached while retaining their IDs, child details and user data. Reconcile all direct children, without the requesting page limit. Do not recursively delete those discovery cards while opening categories. `ChannelNavigationTests` covers discovery, existing parents and concurrent migration.

@@ -8,6 +8,12 @@ Das ist bewusst **kein** API-only-Client wie [jellyfin-androidtv](https://github
 
 Fire TV client that hosts the full Jellyfin web UI (same architecture as the official iOS app: WebView + NativeShell). Video playback uses ExoPlayer so selecting a movie cannot freeze Amazon WebView. Downloads use Android DownloadManager. The 1920 CSS-pixel TV layout is scaled to the actual window, with automatic viewport height.
 
+## Serverkorrektur für Treasure-Maps-Navigation (02.10.2026)
+
+Startseiten-Empfehlungen und Suchtreffer werden nicht mehr als Kinder des Kategorie-Hauptordners gespeichert. Dadurch löst das Öffnen von Treasure Maps keine rekursive Löschung dieser Titelkarten aus. Gleichzeitige Listenaufrufe führen die Ordnerabstimmung nacheinander aus; alte Titelkarten behalten ihre IDs, Details und Benutzerdaten. Dasselbe gilt für Titel, die aus einer wechselnden Kategorie-Liste herausfallen: Deren Bereinigung öffnet keine entfernten Detailordner mehr. Die Ordnerabstimmung berücksichtigt alle gespeicherten Kinder, unabhängig von der angefragten Seitengröße. Die installierte APK 2.4.6 nutzt die Serverkorrektur ohne weiteres App-Update.
+
+Validierung: 236 Live-TV-/Channel-Tests auf dem Raspberry erfolgreich, einschließlich fünf neuer Navigationstests. Vier abschließende Öffnungen auf dem Cube dauerten 277 / 270 / 253 / 265 ms; beim ersten Test nach Serverneustart 2.081 ms. Im Browser wurden 1.941 / 490 / 152 / 192 ms gemessen. Jeweils zehn Kategorien, keine Skriptfehler. Drei zusätzliche Zyklen mit je 24 Empfehlungen ließen die Kategorien unverändert und die Titel-Details erreichbar; die Kategorie-API antwortete dabei in 48–50 ms. Zuvor wurden auf dem Cube zwei parallele Kategorieanfragen mit etwa 39 Sekunden und gleichzeitiger mehrfacher Löschung derselben Titelkarten protokolliert. Diese Messungen betreffen den Kategorie-Einstieg. Das erstmalige Befüllen der Filmkategorie benötigte in einer weiteren Stichprobe noch etwa 26 Sekunden; externe Katalogabfragen und die Materialisierung neuer Titel sind damit nicht generell beschleunigt.
+
 ## Änderungen in 2.4.6
 
 - Sendernamen verwenden eine eigene CSS-Klasse statt der großen Seitenüberschrift. Name, Status und Jetzt/Danach passen in die neu bemessenen Senderzeilen; lange Texte werden mit Auslassungspunkten begrenzt.

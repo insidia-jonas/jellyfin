@@ -648,7 +648,8 @@ namespace Jellyfin.LiveTv.Channels
 
                 try
                 {
-                    var internalChannel = await GetChannel(channel, cancellationToken).ConfigureAwait(false);
+                    var internalChannel = GetChannel(GetInternalChannelId(channel.Name))
+                        ?? await GetChannel(channel, cancellationToken).ConfigureAwait(false);
                     var infos = await latestProvider.GetLatestMedia(
                         new ChannelLatestMediaSearch
                         {
@@ -667,7 +668,7 @@ namespace Jellyfin.LiveTv.Channels
                             info,
                             channel,
                             internalChannel.Id,
-                            internalChannel,
+                            null,
                             cancellationToken).ConfigureAwait(false));
                     }
                 }
@@ -765,7 +766,8 @@ namespace Jellyfin.LiveTv.Channels
                         async token =>
                         {
                             var channelResults = new List<BaseItem>();
-                            var internalChannel = await GetChannel(channel, token).ConfigureAwait(false);
+                            var internalChannel = GetChannel(GetInternalChannelId(channel.Name))
+                                ?? await GetChannel(channel, token).ConfigureAwait(false);
                             var infos = await searchable.GetSearchResults(
                                 new ChannelSearchInfo
                                 {
@@ -787,7 +789,7 @@ namespace Jellyfin.LiveTv.Channels
                                     info,
                                     channel,
                                     internalChannel.Id,
-                                    internalChannel,
+                                    null,
                                     token).ConfigureAwait(false));
                                 if (channelResults.Count >= take)
                                 {
@@ -887,6 +889,11 @@ namespace Jellyfin.LiveTv.Channels
                 }
             }
 
+            // Provider lookup alone is not the critical section: concurrent list and
+            // presentation requests must also share reconciliation of the stored rows.
+            using var folderLock = await _folderLocks.LockAsync(
+                "browse:" + parentItem.Id.ToString("N", CultureInfo.InvariantCulture), cancellationToken).ConfigureAwait(false);
+
             var itemsResult = await GetChannelItems(
                 channelProvider,
                 query.User,
@@ -968,7 +975,6 @@ namespace Jellyfin.LiveTv.Channels
                         channelProvider,
                         channel.Id,
                         parentItem,
-                        query,
                         cancellationToken).ConfigureAwait(false);
                 }
             }
@@ -1236,7 +1242,6 @@ namespace Jellyfin.LiveTv.Channels
                         channelProvider,
                         channelId,
                         parent,
-                        new InternalItemsQuery { Parent = parent },
                         cts.Token).ConfigureAwait(false);
                 }
                 catch (Exception ex)
@@ -1317,7 +1322,6 @@ namespace Jellyfin.LiveTv.Channels
             IChannel channelProvider,
             Guid channelId,
             BaseItem parentItem,
-            InternalItemsQuery query,
             CancellationToken cancellationToken)
         {
             var itemsLen = items.Count;
@@ -1332,7 +1336,13 @@ namespace Jellyfin.LiveTv.Channels
                     cancellationToken).ConfigureAwait(false)).Id;
             }
 
-            var existingIds = _libraryManager.GetItemIds(query);
+            // Reconcile the whole folder, independently of client paging and filters.
+            var existingIds = _libraryManager.GetItemIds(new InternalItemsQuery
+            {
+                Parent = parentItem,
+                Recursive = false,
+                EnableTotalRecordCount = false
+            });
             var deadIds = existingIds.Except(internalItems)
                 .ToArray();
 
@@ -1341,6 +1351,19 @@ namespace Jellyfin.LiveTv.Channels
                 var deadItem = _libraryManager.GetItemById(deadId);
                 if (deadItem is not null)
                 {
+                    if (channelProvider is IChannelPresentationOverlay
+                        && (channelProvider is ISupportsLatestMedia || channelProvider is ISupportsSearch)
+                        && deadItem is MediaBrowser.Controller.Entities.Movies.BoxSet)
+                    {
+                        // Rotating title lists and old latest/search results can leave
+                        // cards outside the current listing. Recursive deletion browses
+                        // their remote children. Detach locally instead, preserving IDs,
+                        // details and user data without contacting the provider again.
+                        deadItem.ParentId = Guid.Empty;
+                        await _libraryManager.UpdateItemAsync(deadItem, null, ItemUpdateType.None, cancellationToken).ConfigureAwait(false);
+                        continue;
+                    }
+
                     _libraryManager.DeleteItem(
                         deadItem,
                         new DeleteOptions
@@ -1356,8 +1379,6 @@ namespace Jellyfin.LiveTv.Channels
 
         private async Task<BaseItem> GetChannelItemEntityAsync(ChannelItemInfo info, IChannel channelProvider, Guid internalChannelId, BaseItem parentFolder, CancellationToken cancellationToken)
         {
-            var parentFolderId = parentFolder.Id;
-
             BaseItem item;
             bool isNew;
             bool forceUpdate = false;
@@ -1393,6 +1414,9 @@ namespace Jellyfin.LiveTv.Channels
                 };
             }
 
+            // Latest/search results are discoverable through ChannelId without being
+            // children of the category root. Preserve an existing browse parent.
+            var parentFolderId = parentFolder?.Id ?? item.ParentId;
             var enableMediaProbe = channelProvider is ISupportsMediaProbe;
 
             if (info.IsLiveStream)
