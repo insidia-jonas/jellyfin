@@ -1,0 +1,72 @@
+/* Evolution Live TV: readable programming, bounded cards and an accessible programme drawer. */
+html.jf-livetv-list-on { --live-bg:#111315; --live-panel:#1b1e21; --live-text:#f4f1e9; --live-muted:#b2b4b6; --live-accent:#efc16b; background:var(--live-bg); }
+html.jf-livetv-list-on .libraryPage, html.jf-livetv-list-on .liveTvPage { background:var(--live-bg); }
+#jf-livetv-overview { max-width:1480px; margin:20px auto 64px; padding:0 32px; color:var(--live-text); }
+#jf-livetv-overview *, #jf-livetv-guide * { box-sizing:border-box; }
+.jf-live-eyebrow { font-size:11px; letter-spacing:.2em; font-weight:750; color:#efc16b; margin:0 0 10px; }
+#jf-livetv-overview .jf-livetv-head { gap:14px; margin-bottom:10px; }
+#jf-livetv-overview .jf-livetv-title { font-size:clamp(28px,3vw,42px); font-weight:750; letter-spacing:-.04em; line-height:1.15; }
+#jf-livetv-overview .jf-livetv-count { color:var(--live-muted); font-size:13px; font-weight:500; opacity:1; }
+#jf-livetv-overview .jf-livetv-search { margin-left:auto; min-width:0; width:260px; border:1px solid #383b3e; border-radius:9px; padding:12px 16px; background:#1b1e21; font-size:14px; outline:none; }
+#jf-livetv-overview .jf-livetv-search:focus { border-color:var(--live-accent); }
+#jf-livetv-overview .jf-live-intro { color:var(--live-muted); font-size:15px; margin:0 0 28px; line-height:1.6; }
+#jf-livetv-overview .jf-livetv-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
+#jf-livetv-overview .jf-livetv-list.is-groups { grid-template-columns:repeat(3,minmax(0,1fr)); }
+#jf-livetv-overview .jf-livetv-card { display:flex; flex-direction:column; min-width:0; overflow:hidden; background:var(--live-panel); border:1px solid #303438; border-radius:14px; transition:border-color .15s; }
+#jf-livetv-overview .jf-livetv-card:hover { border-color:#666052; }
+#jf-livetv-overview .jf-livetv-card:focus-within { border-color:var(--live-accent); }
+#jf-livetv-overview .jf-livetv-row { display:grid; grid-template-columns:62px minmax(0,1fr); grid-template-areas:"logo sender" "now now" "next next"; align-items:center; gap:18px; flex:1; padding:22px 24px 16px; border:0; border-radius:0; background:transparent; min-height:0; text-align:left; color:inherit; }
+#jf-livetv-overview .jf-livetv-row:hover { background:#ffffff03; }
+#jf-livetv-overview .jf-livetv-row:focus-visible { outline:2px solid var(--live-accent); outline-offset:-3px; background:#efc16b0b; }
+#jf-livetv-overview .jf-livetv-logo { grid-area:logo; width:62px; height:56px; background-color:#f7f7f0; border-radius:8px; background-size:85% auto; color:#33383e; display:grid; place-items:center; font-size:24px; font-weight:700; }
+#jf-livetv-overview .jf-livetv-sender { grid-area:sender; font-size:16px; line-height:1.4; font-weight:700; min-width:0; }
+#jf-livetv-overview .jf-livetv-now { grid-area:now; min-width:0; }
+#jf-livetv-overview .jf-livetv-show { font-size:20px; font-weight:650; line-height:1.35; letter-spacing:-.02em; }
+#jf-livetv-overview .jf-livetv-times { color:var(--live-accent); opacity:1; font-size:12px; margin:8px 0 12px; letter-spacing:.03em; font-variant-numeric:tabular-nums; }
+#jf-livetv-overview .jf-livetv-plot { font-size:14px; line-height:1.65; color:#c4c6c8; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; min-height:4.95em; }
+#jf-livetv-overview .jf-livetv-bar { margin-top:18px; height:3px; background:#ffffff15; }
+#jf-livetv-overview .jf-livetv-bar>span { background:var(--live-accent); }
+#jf-livetv-overview .jf-livetv-next { grid-area:next; border-top:1px solid #ffffff0d; padding-top:12px; color:var(--live-muted); opacity:1; font-size:12px; line-height:1.6; min-height:32px; }
+#jf-livetv-overview .jf-live-actions { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 24px 18px; font-size:12px; color:var(--live-muted); }
+#jf-livetv-overview .jf-live-play-label { color:var(--live-accent); font-weight:650; pointer-events:none; }
+#jf-livetv-overview .jf-live-info, .jf-live-pill, .jf-live-icon-button { appearance:none; padding:9px 13px; border:1px solid #414549; border-radius:8px; color:#ebe8e1; background:transparent; font:inherit; font-size:13px; cursor:pointer; }
+#jf-livetv-overview button:focus-visible, #jf-livetv-guide button:focus-visible, #jf-livetv-guide [tabindex]:focus-visible { outline:2px solid #efc16b; outline-offset:3px; }
+#jf-livetv-overview .jf-live-info:hover, .jf-live-pill:hover { background:#ffffff0a; border-color:#af966a; }
+.jf-live-pill.active { color:#17191b; background:#efc16b; border-color:#efc16b; }
+.jf-live-pill:disabled { opacity:.35; cursor:default; }
+#jf-livetv-overview .is-folder .jf-livetv-row { grid-template-areas:"logo sender" "now now"; padding-bottom:8px; gap:18px 14px; }
+#jf-livetv-overview .is-folder .jf-livetv-logo { background:#efc16b14!important; color:var(--live-accent); font-size:32px; }
+#jf-livetv-overview .is-folder .jf-livetv-show { font-size:14px; color:var(--live-muted); font-weight:400; }
+#jf-livetv-overview .is-folder .jf-livetv-times, #jf-livetv-overview .is-folder .jf-livetv-plot, #jf-livetv-overview .is-folder .jf-livetv-next { display:none; }
+#jf-livetv-overview .is-folder .jf-live-actions { justify-content:flex-end; color:var(--live-accent); }
+#jf-livetv-overview .jf-live-pages { margin-top:28px; display:flex; justify-content:center; align-items:center; gap:24px; font-size:13px; color:var(--live-muted); }
+#jf-livetv-overview .jf-livetv-empty { grid-column:1/-1; padding:42px 24px; border:1px dashed #414549; border-radius:14px; font-size:16px; text-align:center; }
+html.jf-guide-open { overflow:hidden; }
+#jf-livetv-guide { position:fixed; inset:0; z-index:2147482000; display:flex; justify-content:flex-end; background:#06080ba8; color:#f4f1e9; }
+#jf-livetv-guide .jf-guide-panel { width:min(660px,100%); height:100%; background:#171a1d; border-left:1px solid #454545; display:flex; flex-direction:column; box-shadow:-24px 0 80px #0005; }
+#jf-livetv-guide .jf-guide-head { padding:32px 30px 20px; display:flex; align-items:center; justify-content:space-between; gap:20px; }
+#jf-livetv-guide h2 { font-size:28px; line-height:1.2; letter-spacing:-.03em; margin:0; }
+#jf-livetv-guide .jf-live-icon-button { font-size:28px; line-height:1; width:42px; height:42px; padding:0; flex-shrink:0; }
+#jf-livetv-guide .jf-guide-tools { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:0 30px 22px; border-bottom:1px solid #ffffff12; }
+#jf-livetv-guide .jf-live-watch { border:0; border-radius:8px; font-size:13px; padding:11px 14px; background:#efc16b; color:#17191b; font-weight:700; cursor:pointer; margin-left:auto; }
+#jf-livetv-guide .jf-guide-programs { padding:20px 30px 40px; flex:1; overflow:auto; overscroll-behavior:contain; }
+#jf-livetv-guide .jf-guide-program { padding:22px 0; border-bottom:1px solid #ffffff10; }
+#jf-livetv-guide .jf-guide-program.is-running { padding:22px; margin:0 -12px 12px; background:#efc16b09; border:1px solid #efc16b55; border-radius:12px; }
+#jf-livetv-guide .jf-guide-time { color:#efc16b; font-size:12px; letter-spacing:.03em; font-weight:650; margin:0 0 10px; }
+#jf-livetv-guide h3 { font-size:21px; line-height:1.4; margin:0 0 10px; }
+#jf-livetv-guide .jf-guide-meta { color:#b2b4b6; font-size:12px; line-height:1.6; margin:0 0 12px; }
+#jf-livetv-guide .jf-guide-description, #jf-livetv-guide .jf-guide-note { color:#d2d3d4; font-size:15px; line-height:1.75; margin:0; white-space:pre-line; }
+@media(max-width:1050px) { #jf-livetv-overview .jf-livetv-list.is-groups { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:720px) {
+ #jf-livetv-overview { padding:0 16px; margin-top:16px; }
+ #jf-livetv-overview .jf-livetv-list, #jf-livetv-overview .jf-livetv-list.is-groups { grid-template-columns:1fr; }
+ #jf-livetv-overview .jf-livetv-search { order:3; flex:1 1 100%; width:100%; margin:0; }
+ #jf-livetv-overview .jf-livetv-head>.jf-live-pill { margin-left:auto; }
+ #jf-livetv-overview .jf-livetv-row { padding:20px; }
+ #jf-livetv-overview .jf-live-pages { gap:10px; }
+ #jf-livetv-overview .jf-live-pages button { padding:9px; }
+ #jf-livetv-guide .jf-guide-head { padding:24px 20px 16px; }
+ #jf-livetv-guide .jf-guide-tools { padding:0 20px 18px; }
+ #jf-livetv-guide .jf-guide-programs { padding:12px 20px 30px; }
+}
+@media(prefers-reduced-motion:reduce) { #jf-livetv-overview .jf-livetv-card { transition:none; } }

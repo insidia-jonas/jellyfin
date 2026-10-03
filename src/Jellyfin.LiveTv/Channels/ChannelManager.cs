@@ -108,7 +108,7 @@ namespace Jellyfin.LiveTv.Channels
         public bool EnableMediaSourceDisplay(BaseItem item)
         {
             var internalChannel = _libraryManager.GetItemById(item.ChannelId);
-            var channel = Channels.FirstOrDefault(i => GetInternalChannelId(i.Name).Equals(internalChannel.Id));
+            var channel = Channels.FirstOrDefault(i => GetInternalChannelId(i.DataKey).Equals(internalChannel.Id));
 
             return channel is not IDisableMediaSourceDisplay;
         }
@@ -117,7 +117,7 @@ namespace Jellyfin.LiveTv.Channels
         public bool CanDelete(BaseItem item)
         {
             var internalChannel = _libraryManager.GetItemById(item.ChannelId);
-            var channel = Channels.FirstOrDefault(i => GetInternalChannelId(i.Name).Equals(internalChannel.Id));
+            var channel = Channels.FirstOrDefault(i => GetInternalChannelId(i.DataKey).Equals(internalChannel.Id));
 
             return channel is ISupportsDelete supportsDelete && supportsDelete.CanDelete(item);
         }
@@ -131,7 +131,7 @@ namespace Jellyfin.LiveTv.Channels
                 throw new ArgumentException(nameof(item.ChannelId));
             }
 
-            var channel = Channels.FirstOrDefault(i => GetInternalChannelId(i.Name).Equals(internalChannel.Id));
+            var channel = Channels.FirstOrDefault(i => GetInternalChannelId(i.DataKey).Equals(internalChannel.Id));
 
             if (channel is not ISupportsDelete supportsDelete)
             {
@@ -153,7 +153,7 @@ namespace Jellyfin.LiveTv.Channels
         /// <returns>An <see cref="IEnumerable{T}"/> containing installed channel IDs.</returns>
         public IEnumerable<Guid> GetInstalledChannelIds()
         {
-            return GetAllChannels().Select(i => GetInternalChannelId(i.Name));
+            return GetAllChannels().Select(i => GetInternalChannelId(i.DataKey));
         }
 
         /// <inheritdoc />
@@ -329,7 +329,7 @@ namespace Jellyfin.LiveTv.Channels
         {
             foreach (IChannel channel in GetAllChannels())
             {
-                yield return GetChannel(GetInternalChannelId(channel.Name)) ?? await GetChannel(channel, CancellationToken.None).ConfigureAwait(false);
+                yield return GetChannel(GetInternalChannelId(channel.DataKey)) ?? await GetChannel(channel, CancellationToken.None).ConfigureAwait(false);
             }
         }
 
@@ -444,7 +444,7 @@ namespace Jellyfin.LiveTv.Channels
         {
             var parentFolderId = Guid.Empty;
 
-            var id = GetInternalChannelId(channelInfo.Name);
+            var id = GetInternalChannelId(channelInfo.DataKey);
 
             var path = Channel.GetInternalMetadataPath(_config.ApplicationPaths.InternalMetadataPath, id);
 
@@ -491,9 +491,12 @@ namespace Jellyfin.LiveTv.Channels
             item.OfficialRating = GetOfficialRating(channelInfo.ParentalRating);
             item.Overview = channelInfo.Description;
 
-            if (string.IsNullOrWhiteSpace(item.Name))
+            if (string.IsNullOrWhiteSpace(item.Name)
+                || (!string.Equals(channelInfo.DataKey, channelInfo.Name, StringComparison.Ordinal)
+                    && string.Equals(item.Name, channelInfo.DataKey, StringComparison.Ordinal)))
             {
                 item.Name = channelInfo.Name;
+                forceUpdate = true;
             }
 
             if (isNew)
@@ -628,7 +631,7 @@ namespace Jellyfin.LiveTv.Channels
                 // Avoid implicitly captured closure
                 var ids = query.ChannelIds;
                 channels = channels
-                    .Where(i => ids.Contains(GetInternalChannelId(i.Name)))
+                    .Where(i => ids.Contains(GetInternalChannelId(i.DataKey)))
                     .ToArray();
             }
 
@@ -648,7 +651,7 @@ namespace Jellyfin.LiveTv.Channels
 
                 try
                 {
-                    var internalChannel = GetChannel(GetInternalChannelId(channel.Name))
+                    var internalChannel = GetChannel(GetInternalChannelId(channel.DataKey))
                         ?? await GetChannel(channel, cancellationToken).ConfigureAwait(false);
                     var infos = await latestProvider.GetLatestMedia(
                         new ChannelLatestMediaSearch
@@ -766,7 +769,7 @@ namespace Jellyfin.LiveTv.Channels
                         async token =>
                         {
                             var channelResults = new List<BaseItem>();
-                            var internalChannel = GetChannel(GetInternalChannelId(channel.Name))
+                            var internalChannel = GetChannel(GetInternalChannelId(channel.DataKey))
                                 ?? await GetChannel(channel, token).ConfigureAwait(false);
                             var infos = await searchable.GetSearchResults(
                                 new ChannelSearchInfo
@@ -966,7 +969,7 @@ namespace Jellyfin.LiveTv.Channels
                         ScheduleLiveTvFolderSync(channelProvider, channel.Id, parentItem, itemsResult.Items);
                     }
 
-                    _logger.LogDebug("Reusing {Count} channel items without rewrite for {Channel}", existingChildren.Count, channelProvider.Name);
+                    _logger.LogDebug("Reusing {Count} channel items without rewrite for {Channel}", existingChildren.Count, channelProvider.DataKey);
                 }
                 else
                 {
@@ -1117,7 +1120,7 @@ namespace Jellyfin.LiveTv.Channels
             ChannelItemSortField? sortField,
             bool sortDescending)
         {
-            var channelId = GetInternalChannelId(channel.Name).ToString("N", CultureInfo.InvariantCulture);
+            var channelId = GetInternalChannelId(channel.DataKey).ToString("N", CultureInfo.InvariantCulture);
 
             var userCacheKey = string.Empty;
 
@@ -1200,13 +1203,13 @@ namespace Jellyfin.LiveTv.Channels
             var match = ChannelManagerBrowse.FindLiveTvGroupByLibraryId(
                 parentId,
                 liveTv.PeekSnapshotItems(null),
-                externalId => _libraryManager.GetNewItemId(GetIdToHash(externalId, channelProvider.Name), typeof(Folder)));
+                externalId => _libraryManager.GetNewItemId(GetIdToHash(externalId, channelProvider.DataKey), typeof(Folder)));
             if (match is null)
             {
                 return null;
             }
 
-            var folder = GetItemById<Folder>(match.Id, channelProvider.Name, out _);
+            var folder = GetItemById<Folder>(match.Id, channelProvider.DataKey, out _);
             folder.Name = match.Name;
             folder.ExternalId = match.Id;
             folder.ChannelId = channel.Id;
@@ -1246,7 +1249,7 @@ namespace Jellyfin.LiveTv.Channels
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogDebug(ex, "Background Live TV folder sync failed for {Channel}", channelProvider.Name);
+                    _logger.LogDebug(ex, "Background Live TV folder sync failed for {Channel}", channelProvider.DataKey);
                 }
                 finally
                 {
@@ -1271,8 +1274,8 @@ namespace Jellyfin.LiveTv.Channels
                 }
 
                 BaseItem item = info.Type == ChannelItemType.Folder
-                    ? GetItemById<Folder>(info.Id, channelProvider.Name, out _)
-                    : GetItemById<Video>(info.Id, channelProvider.Name, out _);
+                    ? GetItemById<Folder>(info.Id, channelProvider.DataKey, out _)
+                    : GetItemById<Video>(info.Id, channelProvider.DataKey, out _);
                 item.Name = info.Name;
                 item.ForcedSortName = info.SortName;
                 item.OriginalTitle = info.OriginalTitle;
@@ -1387,30 +1390,30 @@ namespace Jellyfin.LiveTv.Channels
             {
                 item = info.FolderType switch
                 {
-                    ChannelFolderType.MusicAlbum => GetItemById<MusicAlbum>(info.Id, channelProvider.Name, out isNew),
-                    ChannelFolderType.MusicArtist => GetItemById<MusicArtist>(info.Id, channelProvider.Name, out isNew),
-                    ChannelFolderType.PhotoAlbum => GetItemById<PhotoAlbum>(info.Id, channelProvider.Name, out isNew),
-                    ChannelFolderType.Series => GetItemById<Series>(info.Id, channelProvider.Name, out isNew),
-                    ChannelFolderType.Season => GetItemById<Season>(info.Id, channelProvider.Name, out isNew),
-                    ChannelFolderType.BoxSet => GetItemById<MediaBrowser.Controller.Entities.Movies.BoxSet>(info.Id, channelProvider.Name, out isNew),
-                    _ => GetItemById<Folder>(info.Id, channelProvider.Name, out isNew)
+                    ChannelFolderType.MusicAlbum => GetItemById<MusicAlbum>(info.Id, channelProvider.DataKey, out isNew),
+                    ChannelFolderType.MusicArtist => GetItemById<MusicArtist>(info.Id, channelProvider.DataKey, out isNew),
+                    ChannelFolderType.PhotoAlbum => GetItemById<PhotoAlbum>(info.Id, channelProvider.DataKey, out isNew),
+                    ChannelFolderType.Series => GetItemById<Series>(info.Id, channelProvider.DataKey, out isNew),
+                    ChannelFolderType.Season => GetItemById<Season>(info.Id, channelProvider.DataKey, out isNew),
+                    ChannelFolderType.BoxSet => GetItemById<MediaBrowser.Controller.Entities.Movies.BoxSet>(info.Id, channelProvider.DataKey, out isNew),
+                    _ => GetItemById<Folder>(info.Id, channelProvider.DataKey, out isNew)
                 };
             }
             else if (info.MediaType == ChannelMediaType.Audio)
             {
                 item = info.ContentType == ChannelMediaContentType.Podcast
-                    ? GetItemById<AudioBook>(info.Id, channelProvider.Name, out isNew)
-                    : GetItemById<Audio>(info.Id, channelProvider.Name, out isNew);
+                    ? GetItemById<AudioBook>(info.Id, channelProvider.DataKey, out isNew)
+                    : GetItemById<Audio>(info.Id, channelProvider.DataKey, out isNew);
             }
             else
             {
                 item = info.ContentType switch
                 {
-                    ChannelMediaContentType.Episode => GetItemById<Episode>(info.Id, channelProvider.Name, out isNew),
-                    ChannelMediaContentType.Movie => GetItemById<Movie>(info.Id, channelProvider.Name, out isNew),
+                    ChannelMediaContentType.Episode => GetItemById<Episode>(info.Id, channelProvider.DataKey, out isNew),
+                    ChannelMediaContentType.Movie => GetItemById<Movie>(info.Id, channelProvider.DataKey, out isNew),
                     var x when x == ChannelMediaContentType.Trailer || info.ExtraType == ExtraType.Trailer
-                    => GetItemById<Trailer>(info.Id, channelProvider.Name, out isNew),
-                    _ => GetItemById<Video>(info.Id, channelProvider.Name, out isNew)
+                    => GetItemById<Trailer>(info.Id, channelProvider.DataKey, out isNew),
+                    _ => GetItemById<Video>(info.Id, channelProvider.DataKey, out isNew)
                 };
             }
 
@@ -1715,7 +1718,7 @@ namespace Jellyfin.LiveTv.Channels
             ArgumentNullException.ThrowIfNull(channel);
 
             var result = GetAllChannels()
-                .FirstOrDefault(i => GetInternalChannelId(i.Name).Equals(channel.ChannelId) || string.Equals(i.Name, channel.Name, StringComparison.OrdinalIgnoreCase));
+                .FirstOrDefault(i => GetInternalChannelId(i.DataKey).Equals(channel.ChannelId) || string.Equals(i.Name, channel.Name, StringComparison.OrdinalIgnoreCase));
 
             if (result is null)
             {

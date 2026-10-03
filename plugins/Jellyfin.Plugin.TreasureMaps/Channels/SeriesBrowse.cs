@@ -442,6 +442,14 @@ public static class SeriesBrowse
         }
 
         var kind = ReleaseGrouper.KindOf(release);
+        if (key.StartsWith("movie:", StringComparison.OrdinalIgnoreCase) && kind != "movie"
+            || key.StartsWith("tv:", StringComparison.OrdinalIgnoreCase) && kind != "tv") { return false; }
+        var identity = key.Split(':');
+        if (identity.Length == 3 && identity[1] is "imdb" or "tmdb")
+        {
+            var value = identity[1] == "imdb" ? release.Ids?.Imdb ?? release.Tv?.Imdb : release.Ids?.Tmdb ?? release.Tv?.Tmdb;
+            if (!string.IsNullOrWhiteSpace(value)) { return string.Equals(value, identity[2], StringComparison.OrdinalIgnoreCase); }
+        }
         var resolved = ReleaseGrouper.TitleOf(release, kind);
         return ReleaseGrouper.SameTitle(resolved, title)
                || ReleaseGrouper.SameTitle(ReleaseGrouper.ShowNameFromScene(release.Title), title);

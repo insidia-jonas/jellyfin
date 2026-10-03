@@ -135,6 +135,7 @@ public sealed class TreasureMapsListingCache
             '|',
             (c.BaseUrl ?? string.Empty).Trim().TrimEnd('/'),
             ShortSecret(c.ApiKey),
+            ShortSecret(JsonSerializer.Serialize(c.Indexers)),
             c.PrimaryLanguage ?? string.Empty,
             string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
             c.FilterByLanguage ? "1" : "0",

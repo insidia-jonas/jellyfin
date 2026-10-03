@@ -1,16 +1,16 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Treasure-Maps</title>
+    <title>Evolution</title>
 </head>
 <body>
     <div id="TreasureMapsConfigPage" data-role="page" class="page type-interior pluginConfigurationPage configPage" data-require="emby-input,emby-button,emby-checkbox">
         <div data-role="content">
             <div class="content-primary">
-                <h1>Treasure-Maps</h1>
+                <h1>Evolution</h1>
                 <p class="fieldDescription" style="margin-bottom:1em;">
-                    Connect Jellyfin to your Treasure-Maps indexer. Enter the server address and your API key,
-                    then browse movie releases from the <strong>Treasure-Maps</strong> channel on the home screen.
+                    Filme und Serien aus mehreren Anbietern gemeinsam durchsuchen: im Kanal <strong>Indexer</strong>.
+                    <a href="#/configurationpage?name=TreasureMapsManagement">Indexer und Dienste in der Medienzentrale verwalten ↗</a>
                 </p>
                 <div style="margin-bottom:1.5em;">
                     <a href="#/configurationpage?name=TreasureMapsBrowse" is="emby-linkbutton" class="raised button-submit" style="text-decoration:none;">
@@ -19,11 +19,11 @@
                     <div class="fieldDescription" style="margin-top:.35em;">Search the indexer and grab movies/series with one click — the plugin routes each to the right SABnzbd category automatically.</div>
                 </div>
                 <form class="treasureMapsConfigForm">
-                    <div class="inputContainer inputContainer-withDescription">
+                    <div class="inputContainer inputContainer-withDescription" hidden>
                         <input is="emby-input" type="text" id="baseUrl" label="Base URL" />
                         <div class="fieldDescription">The Treasure-Maps server address, e.g. <code>https://treasure-maps.example</code>. The <code>/api/v1</code> path is added automatically.</div>
                     </div>
-                    <div class="inputContainer inputContainer-withDescription">
+                    <div class="inputContainer inputContainer-withDescription" hidden>
                         <input is="emby-input" type="password" id="apiKey" label="API key" />
                         <div class="fieldDescription">Sent as the <code>X-API-Key</code> header. Find it in your Treasure-Maps account settings.</div>
                     </div>

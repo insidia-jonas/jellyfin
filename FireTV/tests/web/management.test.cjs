@@ -40,3 +40,24 @@ test('management settings preserve existing keys and clear newly entered credent
         assert.equal(input.value,'');
     } finally { ui.dom.window.close(); }
 });
+
+test('indexer settings keep multiple sources and submit blank keys for preservation', async () => {
+    let saved;
+    const items=[{id:'legacy',name:'First',protocol:'treasuremaps',url:'https://one.test',enabled:true,keyPresent:true,movieCategories:'2000',tvCategories:'5000'},
+        {id:'second',name:'<script>second</script>',protocol:'newznab',url:'https://two.test/api',enabled:false,keyPresent:true,movieCategories:'2040',tvCategories:'5040'}];
+    const ui=open((route,request)=>{
+        if(route==='Indexers' && request.type==='POST'){ saved=JSON.parse(request.data);return {ok:true}; }
+        if(route==='Indexers')return {items};
+        if(route==='Settings')return {connections:[],callbackUrl:'http://localhost:8096'};
+        return {services:[],libraries:[],features:[],checkedAt:new Date()};
+    });
+    try{
+        ui.document.querySelector('[data-view=settings]').click();await tick();await tick();
+        assert.equal(ui.document.querySelectorAll('.mc-indexers form').length,2);
+        assert.equal(ui.document.querySelectorAll('.mc-indexers script').length,0);
+        const form=ui.document.querySelector('[data-service=indexer-second]');
+        assert.equal(form.elements.enabled.value,'false');assert.equal(form.elements.apiKey.value,'');
+        form.elements.enabled.value='true';form.dispatchEvent(new ui.dom.window.Event('submit',{bubbles:true,cancelable:true}));await tick();
+        assert.equal(saved.id,'second');assert.equal(saved.enabled,true);assert.equal(saved.apiKey,'');assert.equal(saved.movieCategories,'2040');
+    }finally{ui.dom.window.close();}
+});

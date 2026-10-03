@@ -229,7 +229,7 @@ def deploy(args, account, bundle):
             swapped = True
             plugin.mkdir(parents=True, exist_ok=True)
             shutil.copy2(stage / 'plugin/Jellyfin.Plugin.TreasureMaps.dll', plugin)
-            meta = {'category': 'General', 'name': 'Treasure-Maps', 'guid': PLUGIN_ID, 'targetAbi': '12.0.0.0',
+            meta = {'category': 'General', 'name': 'Evolution', 'guid': PLUGIN_ID, 'targetAbi': '12.0.0.0',
                     'version': manifest['pluginVersion'], 'status': 0, 'autoUpdate': False,
                     'description': 'Media management, targeted search, download imports and AI subtitles.',
                     'assemblies': ['Jellyfin.Plugin.TreasureMaps.dll']}
@@ -364,6 +364,14 @@ def reconcile(args, home, choices=None, setup=None):
     known = {s['service']: s for s in settings['connections']}
     if setup.get('indexer') and not known['treasuremaps']['keyPresent']:
         request(args.url, 'TreasureMaps/Management/Settings', token, 'POST', {'service': 'treasuremaps', **setup['indexer']})
+    if setup.get('indexers'):
+        existing = request(args.url, 'TreasureMaps/Management/Indexers', token)['items']
+        for source in setup['indexers']:
+            # Preserve existing credentials and choices on repeated installs.
+            if any(s['url'].rstrip('/') == source['url'].rstrip('/') for s in existing):
+                continue
+            request(args.url, 'TreasureMaps/Management/Indexers', token, 'POST', source)
+            existing = request(args.url, 'TreasureMaps/Management/Indexers', token)['items']
     detected = {s['service']: s for s in discover(args, home)}
     for found in detected.values():
         current = known[found['service']]

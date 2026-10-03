@@ -16,7 +16,7 @@ namespace Jellyfin.LiveTv.Web;
 /// </summary>
 public sealed class LiveTvWebScriptInjector : IHostedService
 {
-    internal const string ScriptVersion = "9";
+    internal const string ScriptVersion = "10";
 
     private const string ScriptMarker = "plugin=\"LiveTvOverview\"";
 
@@ -124,6 +124,11 @@ public sealed class LiveTvWebScriptInjector : IHostedService
         using var healthStream = assembly.GetManifestResourceStream("Jellyfin.LiveTv.Web.channel-health.js")
             ?? throw new InvalidOperationException("Embedded channel health script is missing.");
         using var healthReader = new StreamReader(healthStream);
-        return reader.ReadToEnd() + "\n" + healthReader.ReadToEnd();
+        using var cssStream = assembly.GetManifestResourceStream("Jellyfin.LiveTv.Web.livetv-guide.css")
+            ?? throw new InvalidOperationException("Embedded Live TV guide stylesheet is missing.");
+        using var cssReader = new StreamReader(cssStream);
+        return reader.ReadToEnd() + "\n" + healthReader.ReadToEnd()
+            + "\n(function(){var s=document.createElement('style');s.textContent="
+            + System.Text.Json.JsonSerializer.Serialize(cssReader.ReadToEnd()) + ";document.head.appendChild(s);})();";
     }
 }

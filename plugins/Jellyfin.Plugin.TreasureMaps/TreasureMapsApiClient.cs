@@ -19,7 +19,7 @@ namespace Jellyfin.Plugin.TreasureMaps;
 /// <summary>
 /// Thin typed client for the Treasure-Maps REST API.
 /// </summary>
-public sealed class TreasureMapsApiClient : IDisposable
+public sealed partial class TreasureMapsApiClient : IDisposable
 {
     private static readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -56,7 +56,9 @@ public sealed class TreasureMapsApiClient : IDisposable
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly TreasureMapsListingCache _listingCache;
     private readonly ILogger<TreasureMapsApiClient> _logger;
-    private readonly IndexerRequestGate _requests = new();
+    private readonly Func<PluginConfiguration>? _configuration;
+    private PluginConfiguration CurrentConfig => _configuration?.Invoke() ?? Config;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, IndexerRequestGate> _requests = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TreasureMapsApiClient"/> class.
@@ -67,15 +69,17 @@ public sealed class TreasureMapsApiClient : IDisposable
     public TreasureMapsApiClient(
         IHttpClientFactory httpClientFactory,
         TreasureMapsListingCache listingCache,
-        ILogger<TreasureMapsApiClient> logger)
+        ILogger<TreasureMapsApiClient> logger,
+        Func<PluginConfiguration>? configuration = null)
     {
         _httpClientFactory = httpClientFactory;
         _listingCache = listingCache;
         _logger = logger;
+        _configuration = configuration;
     }
 
     /// <inheritdoc />
-    public void Dispose() => _requests.Dispose();
+    public void Dispose() { foreach (var gate in _requests.Values) { gate.Dispose(); } }
 
     private static PluginConfiguration Config =>
         Plugin.Instance?.Configuration ?? new PluginConfiguration();
@@ -83,8 +87,7 @@ public sealed class TreasureMapsApiClient : IDisposable
     /// <summary>
     /// Gets a value indicating whether the plugin has enough configuration to talk to the API.
     /// </summary>
-    public static bool IsConfigured =>
-        !string.IsNullOrWhiteSpace(Config.BaseUrl) && !string.IsNullOrWhiteSpace(Config.ApiKey);
+    public static bool IsConfigured => IndexerSource.Sources(Config).Count > 0;
 
     /// <summary>
     /// Searches for movie releases.
@@ -231,34 +234,50 @@ public sealed class TreasureMapsApiClient : IDisposable
     /// <returns>The NZB payload.</returns>
     public async Task<byte[]> DownloadNzbAsync(string guid, CancellationToken cancellationToken)
     {
-        using var client = CreateClient();
-        var url = BuildUrl($"releases/{Uri.EscapeDataString(guid)}/download", null);
-        using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        return await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+        var (id, rawGuid) = IndexerSource.Unscope(guid);
+        var source = System.Linq.Enumerable.FirstOrDefault(IndexerSource.Sources(CurrentConfig, true), s => s.Id == id)
+            ?? throw new InvalidOperationException("Der ursprüngliche Indexer ist nicht mehr eingerichtet.");
+        using var client = CreateClient(source);
+        var url = source.Protocol == "newznab" ? NewznabUrl(source, new() { ["t"] = "get", ["id"] = rawGuid })
+            : BuildUrl(source, $"releases/{Uri.EscapeDataString(rawGuid)}/download", null);
+        var address = new Uri(url);
+        var original = address;
+        // A provider can redirect an NZB to a signed CDN URL. Never forward its REST key there.
+        for (var redirects = 0; redirects < 5; redirects++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, address);
+            if (source.Protocol == "treasuremaps" && address.Authority == original.Authority && address.Scheme == original.Scheme)
+            { request.Headers.Add("X-API-Key", source.ApiKey); }
+            using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if ((int)response.StatusCode is >= 300 and < 400 && response.Headers.Location != null)
+            {
+                address = new Uri(address, response.Headers.Location);
+                if (address.Scheme is not ("http" or "https") || original.Scheme == "https" && address.Scheme != "https")
+                { throw new InvalidOperationException("Ungültige Download-Weiterleitung."); }
+                continue;
+            }
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+        }
+        throw new HttpRequestException("Zu viele Download-Weiterleitungen.");
     }
 
-    private async Task<T?> GetJsonAsync<T>(string path, Dictionary<string, string?>? parameters, TimeSpan cacheTtl, CancellationToken cancellationToken)
+    private async Task<T?> FetchRestAsync<T>(IndexerSource source, string path, Dictionary<string, string?>? parameters, TimeSpan cacheTtl, CancellationToken cancellationToken)
         where T : class
     {
-        if (!IsConfigured)
-        {
-            throw new InvalidOperationException("Treasure-Maps plugin is not configured (missing Base URL or API key).");
-        }
-
-        var url = BuildUrl(path, parameters);
+        var url = BuildUrl(source, path, parameters);
         if (cacheTtl <= TimeSpan.Zero)
         {
-            var (value, _, notModified) = await SendJsonAsync<T>(url, null, cancellationToken).ConfigureAwait(false);
+            var (value, _, notModified) = await SendJsonAsync<T>(source, url, null, cancellationToken).ConfigureAwait(false);
             return notModified ? null : value;
         }
 
         return await _listingCache.GetOrFetchAsync<T>(
-            url,
+            SourceIdentity(source) + url,
             cacheTtl,
             async (validator, token) =>
             {
-                var (value, etag, notModified) = await SendJsonAsync<T>(url, validator, token).ConfigureAwait(false);
+                var (value, etag, notModified) = await SendJsonAsync<T>(source, url, validator, token).ConfigureAwait(false);
                 if (notModified)
                 {
                     return ListingFetch<T>.Validated(etag);
@@ -275,15 +294,18 @@ public sealed class TreasureMapsApiClient : IDisposable
     }
 
     private async Task<(T? Value, string? ETag, bool NotModified)> SendJsonAsync<T>(
+        IndexerSource source,
         string url,
         string? validator,
         CancellationToken cancellationToken)
         where T : class
     {
-        using var slot = await _requests.EnterAsync(cancellationToken).ConfigureAwait(false);
+        var gate = _requests.GetOrAdd(source.Id, _ => new IndexerRequestGate());
+        using var slot = await gate.EnterAsync(cancellationToken).ConfigureAwait(false);
         var started = Stopwatch.GetTimestamp();
-        using var client = CreateClient();
+        using var client = CreateClient(source);
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Add("X-API-Key", source.ApiKey);
         if (!string.IsNullOrEmpty(validator))
         {
             request.Headers.TryAddWithoutValidation("If-None-Match", validator);
@@ -295,11 +317,11 @@ public sealed class TreasureMapsApiClient : IDisposable
         if (response.StatusCode == HttpStatusCode.TooManyRequests)
         {
             var retry = response.Headers.RetryAfter;
-            _requests.BackOff(retry?.Delta ?? (retry?.Date - DateTimeOffset.UtcNow) ?? TimeSpan.FromSeconds(5));
+            gate.BackOff(retry?.Delta ?? (retry?.Date - DateTimeOffset.UtcNow) ?? TimeSpan.FromSeconds(5));
         }
         else if (response.StatusCode is HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout)
         {
-            _requests.BackOff(TimeSpan.FromSeconds(3));
+            gate.BackOff(TimeSpan.FromSeconds(3));
         }
         if (response.StatusCode == HttpStatusCode.NotModified)
         {
@@ -308,15 +330,15 @@ public sealed class TreasureMapsApiClient : IDisposable
 
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<T>(_jsonOptions, cancellationToken).ConfigureAwait(false);
+        if (result is ReleaseListResponse releases) { SetOrigin(releases, source); }
         var etag = response.Headers.ETag?.Tag;
         return (result, etag, false);
     }
 
-    private HttpClient CreateClient()
+    private HttpClient CreateClient(IndexerSource source)
     {
-        var client = _httpClientFactory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-API-Key", Config.ApiKey);
-        client.DefaultRequestHeaders.Add("Accept", "application/json");
+        var client = _httpClientFactory.CreateClient("Evolution.Indexers");
+        client.DefaultRequestHeaders.Add("Accept", source.Protocol == "newznab" ? "application/xml" : "application/json");
 
         // Cold indexer queries can hang until the gateway 504s (~55s); give up earlier so a slow
         // page is dropped quickly and the rest of the (paged) view still renders.
@@ -324,9 +346,9 @@ public sealed class TreasureMapsApiClient : IDisposable
         return client;
     }
 
-    private static string BuildUrl(string path, Dictionary<string, string?>? parameters)
+    private static string BuildUrl(IndexerSource source, string path, Dictionary<string, string?>? parameters)
     {
-        var baseUrl = Config.BaseUrl.TrimEnd('/');
+        var baseUrl = source.Url.TrimEnd('/');
         if (!baseUrl.EndsWith("/api/v1", StringComparison.OrdinalIgnoreCase))
         {
             baseUrl += "/api/v1";

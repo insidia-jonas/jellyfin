@@ -27,6 +27,21 @@ namespace Jellyfin.LiveTv.Tests.Channels;
 
 public class ChannelNavigationTests
 {
+    [Fact]
+    public async Task DisplayRenamePreservesChannelAndExistingItemIdentity()
+    {
+        using var fixture = new Fixture();
+        var title = fixture.Seed<BoxSet>("title", fixture.Root.Id);
+        fixture.Provider.SetupGet(x => x.Name).Returns("Indexer");
+        var discovered = await fixture.Manager.SearchChannelItemsAsync("Title", null, 10, TestContext.Current.CancellationToken);
+        Assert.Same(title, Assert.Single(discovered));
+        Assert.Equal(fixture.Root.Id, title.ChannelId);
+        Assert.Contains(fixture.Root.Id, fixture.Manager.GetInstalledChannelIds());
+        var root = await fixture.Browse();
+        Assert.Equal("Categories", Assert.Single(root.Items).Name);
+        fixture.VerifyNoDeletes();
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -116,6 +131,7 @@ public class ChannelNavigationTests
         public Fixture()
         {
             Provider.SetupGet(x => x.Name).Returns("Navigation test");
+            Provider.SetupGet(x => x.DataKey).Returns("Navigation test");
             Provider.SetupGet(x => x.DataVersion).Returns("1");
             Provider.As<IChannelPresentationOverlay>();
             var title = new ChannelItemInfo { Id = "title", Name = "Title", Type = ChannelItemType.Folder, FolderType = ChannelFolderType.BoxSet };

@@ -280,7 +280,7 @@
                     var box = document.createElement('div');
                     box.id = 'tmSearchHits';
                     var h = document.createElement('h2');
-                    h.textContent = 'Treasure-Maps';
+                    h.textContent = 'Indexer';
                     box.appendChild(h);
                     var row = document.createElement('div');
                     row.className = 'tmSearchRow';
@@ -556,7 +556,7 @@
         var ext = String(item.ExternalId || item.Path || '');
         if (/DL::|dl::|dlinfo/i.test(ext)) { return true; }
         var overview = item.Overview || '';
-        return item.Type === 'BoxSet' && /Download complete|Download failed|Downloading|SABnzbd|Treasure-Maps download/i.test(overview);
+        return item.Type === 'BoxSet' && /Download complete|Download failed|Downloading|SABnzbd|Treasure-Maps download|Indexer download/i.test(overview);
     }
 
     /* ---- Movie/show title page: replace the generic children POSTER GRID with a release LIST ----
@@ -872,6 +872,8 @@
 
         var meta = document.createElement('div');
         meta.className = 'tmRelMeta';
+        var origin = (release.ProviderIds || {}).EvolutionIndexer;
+        if (origin) { var source = document.createElement('span'); source.className = 'tmIndexer'; source.textContent = origin; meta.appendChild(source); }
         meta.appendChild(status);
         meta.appendChild(btn);
 
@@ -927,7 +929,7 @@
             var hint = document.createElement('div');
             hint.className = 'tmDlMeta';
             hint.style.margin = '0 0 .8em';
-            hint.textContent = 'Only titles grabbed from Treasure-Maps. Tap a row to open it.';
+            hint.textContent = 'Downloads aus deinen Indexern. Eintrag auswählen, um Details zu öffnen.';
             host.appendChild(hint);
 
             var anchor = page.querySelector('.itemsContainer') || page.querySelector('.padded-left') || page;
@@ -981,7 +983,7 @@
         if (!rows.length) {
             var empty = document.createElement('div');
             empty.className = 'tmDlMeta tmDlEmpty';
-            empty.textContent = (status && status.message) || 'No Treasure-Maps downloads yet.';
+            empty.textContent = (status && status.message) || 'Noch keine Indexer-Downloads.';
             host.appendChild(empty);
             return;
         }
@@ -1113,7 +1115,7 @@
             if (host && !host.querySelector('.tmDlRow')) {
                 var empty = document.createElement('div');
                 empty.className = 'tmDlMeta tmDlEmpty';
-                empty.textContent = 'No Treasure-Maps downloads yet.';
+                empty.textContent = 'Noch keine Indexer-Downloads.';
                 host.appendChild(empty);
             }
         }, function () {

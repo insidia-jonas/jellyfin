@@ -32,7 +32,7 @@
   </section>
   <section data-panel="downloads" hidden><p class="mc-eyebrow">VOM DOWNLOAD IN DIE MEDIATHEK</p><h1>Was gerade ankommt.</h1><p class="mc-lead">SABnzbd zeigt alle Downloads. Sonarr und Radarr zeigen ihre Verarbeitung und Importe.</p><div class="mc-tabs"><button class="mc-btn active" data-queue="sabnzbd">SABnzbd</button><button class="mc-btn" data-queue="radarr">Filme · Radarr</button><button class="mc-btn" data-queue="sonarr">Serien · Sonarr</button></div><div id="mcQueue" class="mc-jobs"></div><div class="mc-actions"><button class="mc-btn" data-action="sabnzbd/pause">SABnzbd pausieren</button><button class="mc-btn" data-action="sabnzbd/resume">Fortsetzen</button></div></section>
   <section data-panel="connections" hidden><p class="mc-eyebrow">DAS ZUSAMMENSPIEL DER DIENSTE</p><h1>Alles verbunden.</h1><p class="mc-lead">Vorhandene Einstellungen werden erkannt. Fehlende Verbindungen lassen sich ergänzen und direkt beim jeweiligen Dienst testen.</p><div class="mc-actions"><button id="mcCheckLinks" class="mc-btn">Konfiguration prüfen</button><button id="mcApplyLinks" class="mc-btn primary">Verbindungen ergänzen &amp; testen</button></div><p class="mc-note">Vorhandene Downloadkategorien, Qualitätsprofile und weitere Indexer bleiben erhalten. Der Test kann kurz dauern.</p><div id="mcLinks" class="mc-links"><div class="mc-empty">„Konfiguration prüfen“ zeigt den aktuellen Stand.</div></div></section>
-  <section data-panel="settings" hidden><p class="mc-eyebrow">DEINE VERBINDUNGEN</p><h1>Einmal einrichten.</h1><p class="mc-lead">Die Adressen müssen vom Jellyfin-Server erreichbar sein. Gespeicherte API-Schlüssel bleiben auf dem Server; leere Schlüsselfelder behalten den bisherigen Wert.</p><div class="mc-settings" id="mcSettings" style="margin-top:25px"></div><div class="mc-actions"><a class="mc-btn" href="#/configurationpage?name=Treasure-Maps">Treasure Maps &amp; KI-Untertitel konfigurieren ↗</a></div></section>
+  <section data-panel="settings" hidden><p class="mc-eyebrow">DEINE VERBINDUNGEN</p><h1>Einmal einrichten.</h1><p class="mc-lead">Die Adressen müssen vom Jellyfin-Server erreichbar sein. Gespeicherte API-Schlüssel bleiben auf dem Server; leere Schlüsselfelder behalten den bisherigen Wert.</p><div class="mc-settings" id="mcSettings" style="margin-top:25px"></div><div class="mc-actions"><a class="mc-btn" href="#/configurationpage?name=Evolution">Evolution &amp; KI-Untertitel konfigurieren ↗</a></div></section>
   <footer class="mc-footer"><span>Jellyfin Medienzentrale <span id="mcVersion"></span></span><span>Mit deiner bestehenden Jellyfin-Anmeldung geschützt.</span></footer>
  </main>
 </div>
@@ -40,7 +40,7 @@
 (function () {
  'use strict';
  var page = document.getElementById('TreasureMapsManagementPage');
- var names = {treasuremaps:'Treasure Maps',radarr:'Radarr',sonarr:'Sonarr',sabnzbd:'SABnzbd',jellyfin:'Jellyfin'};
+ var names = {treasuremaps:'Indexer',radarr:'Radarr',sonarr:'Sonarr',sabnzbd:'SABnzbd',jellyfin:'Jellyfin'};
  var details = {treasuremaps:'Titel finden. Releases auswählen.',radarr:'Filme suchen und importieren.',sonarr:'Serien und neue Folgen verfolgen.',sabnzbd:'Downloads, Prüfung und Entpacken.'};
  var icons = {treasuremaps:'✧',radarr:'R',sonarr:'S',sabnzbd:'↓'};
  var currentView = 'overview', queueService = 'sabnzbd', timer, generation = 0, pending = false;
@@ -98,7 +98,9 @@
  function loadSettings() {
   var epoch = generation; return api('Settings').then(function (data) {
    if (epoch !== generation) { return; } var host = q('#mcSettings'); clear(host);
-   var settings = (data.connections || []).concat([{service:'jellyfin',url:data.callbackUrl}]);
+   var settings = (data.connections || []).filter(function (s) { return s.service !== 'treasuremaps'; }).concat([{service:'jellyfin',url:data.callbackUrl}]);
+   var indexerHost = node('div','mc-indexers'); indexerHost.style.gridColumn = '1 / -1'; host.appendChild(indexerHost);
+   loadIndexers(indexerHost,epoch);
    settings.forEach(function (s) {
     var form = node('form','mc-form'); form.dataset.service = s.service; form.appendChild(node('h2','',names[s.service]));
     field(form,s.service === 'jellyfin' ? 'Jellyfin-Rückrufadresse für Sonarr / Radarr' : 'Server-Adresse','url',s.url,'url').required = true;
@@ -115,6 +117,40 @@
     }); host.appendChild(form);
    });
   },function () { message('Verbindungseinstellungen konnten nicht geladen werden.',true); });
+ }
+ function loadIndexers(host,epoch) {
+  return api('Indexers').then(function (data) {
+   if (epoch !== generation || !host.isConnected) { return; } clear(host);
+   host.appendChild(node('h2','','Indexer · Gemeinsam suchen'));
+   host.appendChild(node('p','mc-note','Alle aktivierten Anbieter werden gleichzeitig durchsucht. Gleiche Titel werden zusammengeführt; Veröffentlichungen behalten ihren Anbieter. Nach dem Hinzufügen unter „Verbindungen“ auch Sonarr und Radarr ergänzen.'));
+   var grid = node('div','mc-settings'); host.appendChild(grid);
+   (data.items || []).forEach(function (source) { indexerForm(grid,source,host,epoch); });
+   var add = node('button','mc-btn','+ Indexer hinzufügen'); add.type = 'button'; host.appendChild(add);
+   add.onclick = function () { add.disabled = true; indexerForm(grid,{id:'',name:'',protocol:'newznab',enabled:true,movieCategories:'2000',tvCategories:'5000'},host,epoch); };
+  },function () { if (epoch === generation) { host.appendChild(node('p','mc-note','Indexer konnten nicht geladen werden. Bitte erneut aktualisieren.')); } });
+ }
+ function indexerForm(grid,s,host,epoch) {
+  var form = node('form','mc-form'); form.dataset.service = 'indexer-' + (s.id || 'new');
+  form.appendChild(node('h2','',s.name || 'Neuer Indexer'));
+  field(form,'Name','text',s.name,'name').required = true;
+  var protocol = select(form,'Schnittstelle','protocol');
+  [['newznab','Newznab (z. B. NZBHydra / Prowlarr)'],['treasuremaps','Treasure Maps REST']].forEach(function (pair) { var o = node('option','',pair[1]); o.value = pair[0]; protocol.appendChild(o); }); protocol.value = s.protocol;
+  field(form,'API-Adresse (ohne Schlüssel oder Abfrageparameter)','url',s.url,'url').required = true;
+  var key = field(form,'API-Schlüssel','password','','apiKey'); key.placeholder = s.keyPresent ? 'Gespeichert · leer lassen zum Beibehalten' : 'API-Schlüssel eingeben';
+  var enabled = select(form,'Gemeinsame Suche','enabled'); [['true','Aktiviert'],['false','Pausiert']].forEach(function (p) { var o = node('option','',p[1]); o.value = p[0]; enabled.appendChild(o); }); enabled.value = String(s.enabled);
+  field(form,'Newznab-Filmkategorien','text',s.movieCategories,'movieCategories'); field(form,'Newznab-Serienkategorien','text',s.tvCategories,'tvCategories');
+  var save = node('button','mc-btn primary','Testen & speichern'); save.type = 'submit'; form.appendChild(save);
+  var result = node('p','mc-note'); result.setAttribute('role','status'); form.appendChild(result);
+  form.onsubmit = function (event) {
+   event.preventDefault(); save.disabled = true; result.textContent = 'Verbindung wird geprüft…';
+   var body = {id:s.id,name:form.elements.name.value,protocol:protocol.value,url:form.elements.url.value,apiKey:key.value,enabled:enabled.value === 'true',movieCategories:form.elements.movieCategories.value,tvCategories:form.elements.tvCategories.value};
+   api('Indexers','POST',body).then(function () { key.value = ''; if (epoch !== generation) { return; } message('Indexer gespeichert. Die gemeinsame Suche verwendet alle aktivierten Anbieter.'); loadIndexers(host,epoch); },function () { if (epoch !== generation) { return; } save.disabled = false; result.textContent = 'Speichern fehlgeschlagen. Adresse, Schnittstelle und Schlüssel prüfen. Zum Pausieren ist kein Verbindungstest nötig.'; });
+  };
+  if (s.id) {
+   var remove = node('button','mc-btn','Entfernen'); remove.type = 'button'; form.appendChild(remove);
+   remove.onclick = function () { if (!window.confirm('Indexer „' + s.name + '“ entfernen? Bereits gelistete Veröffentlichungen dieses Anbieters können dann nicht mehr heruntergeladen werden. Pausieren behält diese Zuordnung.')) { return; } remove.disabled = true; api('Indexers/' + encodeURIComponent(s.id),'DELETE').then(function () { if (epoch === generation) { loadIndexers(host,epoch); } },function () { remove.disabled = false; result.textContent = 'Entfernen fehlgeschlagen.'; }); };
+  }
+  grid.appendChild(form);
  }
  function view(name) { currentView = name; page.querySelectorAll('[data-panel]').forEach(function (e) { e.hidden = e.dataset.panel !== name; }); page.querySelectorAll('[data-view]').forEach(function (e) { e.classList.toggle('active',e.dataset.view === name); }); q('#mcViewName').textContent = {overview:'Übersicht',downloads:'Downloads',connections:'Verbindungen',settings:'Einstellungen'}[name]; if (name === 'downloads') { loadQueue(); } if (name === 'settings') { loadSettings(); } }
  function refresh() { if (pending) { return; } var epoch = generation; pending = true; q('#mcRefresh').disabled = true; var task = currentView === 'downloads' ? loadQueue() : currentView === 'connections' ? links(false) : currentView === 'settings' ? loadSettings() : loadSummary(); return Promise.resolve(task).then(function () { if (epoch === generation) { pending = false; q('#mcRefresh').disabled = false; } }); }

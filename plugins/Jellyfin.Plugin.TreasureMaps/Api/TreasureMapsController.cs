@@ -1030,6 +1030,7 @@ public class TreasureMapsController : ControllerBase
                     return new
                     {
                         guid = r.Guid,
+                        indexer = r.IndexerName,
                         title,
                         scene = r.Title,
                         year,
@@ -1042,7 +1043,7 @@ public class TreasureMapsController : ControllerBase
                 })
                 .ToList();
 
-            return Ok(new { ok = true, items, nextOffset = offset + (response?.Items?.Count ?? 0), hasMore = kind != "trending" && response?.Items?.Count == limit });
+            return Ok(new { ok = true, items, nextOffset = response?.NextOffset ?? offset + (response?.Items?.Count ?? 0), hasMore = kind != "trending" && (response?.HasMore ?? response?.Items?.Count == limit) });
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

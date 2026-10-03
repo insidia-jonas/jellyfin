@@ -100,10 +100,13 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
     }
 
     /// <inheritdoc />
-    public string Name => "Treasure-Maps";
+    public string Name => "Indexer";
 
     /// <inheritdoc />
-    public string Description => "Browse movies and TV shows from your Treasure-Maps indexer.";
+    public string DataKey => "Treasure-Maps";
+
+    /// <inheritdoc />
+    public string Description => "Filme und Serien entdecken, passende Veröffentlichungen auswählen und herunterladen.";
 
     /// <inheritdoc />
     public string DataVersion
@@ -115,13 +118,14 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
             var c = Config;
             return string.Join(
                 '|',
-                "42",
+                "43",
                 c.PrimaryLanguage,
                 string.Join(',', c.SecondaryLanguages ?? Array.Empty<string>()),
                 c.FilterByLanguage ? "1" : "0",
                 c.MinRating.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 c.ResultLimit.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                c.EnableXrel ? "x1" : "x0");
+                c.EnableXrel ? "x1" : "x0",
+                ShortHash(TreasureMapsListingCache.CurrentIdentity()));
         }
     }
 
@@ -154,7 +158,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
     /// <inheritdoc />
     public Task<DynamicImageResponse> GetChannelImage(ImageType type, CancellationToken cancellationToken)
     {
-        var path = ChannelArtwork.GetPosterPath("channel", "Treasure-Maps");
+        var path = ChannelArtwork.GetPosterPath("channel", "Indexer");
         if (string.IsNullOrEmpty(path))
         {
             return Task.FromResult(new DynamicImageResponse { HasImage = false });
@@ -377,7 +381,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
                     ct => GetCategoryAsync(folderId, "movie", folderId[GenrePrefix.Length..], null, 1, ct), cancellationToken).ConfigureAwait(false);
             }
 
-            return Hint("unknown-folder", "Nothing here", "This Treasure-Maps category has no titles right now.");
+            return Hint("unknown-folder", "Nothing here", "This Indexer category has no titles right now.");
         }
         catch (Exception ex)
         {
@@ -406,7 +410,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
 
         items.Add(Folder("downloads", "Downloads", order++));
         items.Add(Folder("new", "Neu hinzugefügt", order++));
-        items.Add(Folder("trending", "Trending", order++));
+        if (Configuration.IndexerSource.Sources(Config).Any(s => s.Protocol == "treasuremaps")) { items.Add(Folder("trending", "Trending", order++)); }
         items.Add(Folder("movies", "Filme", order++));
         items.Add(Folder("tv", "Serien", order++));
         items.Add(Folder("movies-de", "Filme auf Deutsch", order++));
@@ -426,7 +430,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
     {
         if (!Recommendations.AiRecommender.IsEnabled)
         {
-            var hint = Folder("foryou-hint", "Enable AI recommendations in the Treasure-Maps plugin settings", 0);
+            var hint = Folder("foryou-hint", "Enable AI recommendations in the Evolution plugin settings", 0);
             hint.Overview = "Set an AI provider (Grok / OpenAI / Anthropic) and API key on the plugin configuration page to get personal recommendations here.";
             return Result(new List<ChannelItemInfo> { hint });
         }
@@ -451,7 +455,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         {
             return Hint(
                 "foryou-empty",
-                "No matches on Treasure-Maps yet",
+                "Noch keine passenden Indexer-Ergebnisse",
                 "The AI suggested titles, but none are on the indexer right now. Watch or favourite a few more titles and try again.");
         }
 
@@ -612,7 +616,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
     {
         if (!SabnzbdClient.IsConfigured)
         {
-            var hint = Folder("downloads-hint", "Configure SABnzbd in the Treasure-Maps plugin settings", 0);
+            var hint = Folder("downloads-hint", "Configure SABnzbd in the Evolution plugin settings", 0);
             return Result(new List<ChannelItemInfo> { hint });
         }
 
@@ -631,8 +635,8 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
 
         if (items.Count == 0)
         {
-            var empty = Folder("downloads-empty", "No Treasure-Maps downloads yet", 0);
-            empty.Overview = "Only movies and shows you grab from Treasure-Maps appear here. Other SABnzbd jobs stay in your download client.";
+            var empty = Folder("downloads-empty", "No Indexer downloads yet", 0);
+            empty.Overview = "Only movies and shows you grab from your indexers appear here. Other SABnzbd jobs stay in your download client.";
             items.Add(empty);
         }
 
@@ -702,7 +706,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
                 SortName = ChannelPresentation.FolderSortName(0, "Finished"),
                 Type = ChannelItemType.Folder,
                 FolderType = ChannelFolderType.Container,
-                Overview = "Treasure-Maps sends the NZB to SABnzbd. After it finishes, the file is scanned into your Movies or TV Shows library.",
+                Overview = "Evolution sends the NZB to SABnzbd. After it finishes, the file is scanned into your Movies or TV Shows library.",
                 DateCreated = DateTime.UtcNow
             };
             return Result(new List<ChannelItemInfo> { done });
@@ -733,8 +737,8 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
             FolderType = ChannelFolderType.Container,
             ImageUrl = cover,
             Overview = string.IsNullOrWhiteSpace(rec?.Quality)
-                ? "This is a Treasure-Maps download, not a stream. After SABnzbd finishes, open Movies or TV Shows."
-                : rec.Quality + "\n\nThis is a Treasure-Maps download, not a stream. After SABnzbd finishes, open Movies or TV Shows.",
+                ? "This is a Indexer download, not a stream. After SABnzbd finishes, open Movies or TV Shows."
+                : rec.Quality + "\n\nThis is a Indexer download, not a stream. After SABnzbd finishes, open Movies or TV Shows.",
             DateCreated = rec?.GrabbedAt is DateTime grabbed && grabbed != default ? grabbed : DateTime.UtcNow
         };
         child.ProviderIds["TreasureMapsTitle"] = title;
@@ -1065,7 +1069,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         }
 
         return slice.Count == 0
-            ? Hint(scope + "-page-empty", "Nothing here", "This Treasure-Maps page has no more titles.")
+            ? Hint(scope + "-page-empty", "Nothing here", "This Indexer page has no more titles.")
             : Result(slice.ToList());
     }
 
@@ -1364,7 +1368,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
             return Hint(
                 scope + "-empty",
                 "Nothing here right now",
-                "Treasure-Maps has no matching titles for this category. Try another row or search.");
+                "Your indexers have no matching titles for this category. Try another row or search.");
         }
 
         return Result(items);
@@ -1777,7 +1781,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         var cards = await SearchLiveCardsAsync(term, 20, cancellationToken).ConfigureAwait(false);
         var list = cards.ToList();
         return list.Count == 0
-            ? Hint("search-empty", "No titles found", "Treasure-Maps has no title matching \"" + term + "\".")
+            ? Hint("search-empty", "No titles found", "Your indexers have no title matching \"" + term + "\".")
             : Result(list);
     }
 

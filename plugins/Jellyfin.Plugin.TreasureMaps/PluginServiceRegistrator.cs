@@ -17,6 +17,9 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     {
         serviceCollection.AddSingleton<TreasureMapsListingCache>();
         serviceCollection.AddSingleton<TreasureMapsApiClient>();
+        serviceCollection.AddHttpClient("Evolution.Indexers")
+            .RemoveAllLoggers()
+            .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.HttpClientHandler { AllowAutoRedirect = false });
         serviceCollection.AddSingleton<Management.ServiceManagement>();
         serviceCollection.AddSingleton<SabnzbdClient>();
         serviceCollection.AddSingleton<Recommendations.AiRecommender>();

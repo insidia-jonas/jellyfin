@@ -43,7 +43,7 @@ public sealed class ServiceManagement : IDisposable
             "radarr" => (c.RadarrUrl, c.RadarrApiKey),
             "sonarr" => (c.SonarrUrl, c.SonarrApiKey),
             "sabnzbd" => (c.SabnzbdUrl, c.SabnzbdApiKey),
-            "treasuremaps" => (c.BaseUrl, c.ApiKey),
+            "treasuremaps" => (IndexerSource.Sources(c).FirstOrDefault()?.Url ?? string.Empty, IndexerSource.Sources(c).FirstOrDefault()?.ApiKey ?? string.Empty),
             _ => throw new ArgumentException("Unknown service.", nameof(service))
         };
     }
@@ -92,6 +92,7 @@ public sealed class ServiceManagement : IDisposable
     {
         var settings = Settings(service);
         var identity = settings.Url + "|" + settings.Key;
+        if (service == "treasuremaps") { identity += System.Text.Json.JsonSerializer.Serialize(_configuration().Indexers); }
         lock (_status)
         {
             if (_status.TryGetValue(service, out var cached) && cached.Identity == identity
@@ -120,6 +121,19 @@ public sealed class ServiceManagement : IDisposable
         var configured = !string.IsNullOrWhiteSpace(url) && !string.IsNullOrWhiteSpace(key);
         try
         {
+            if (service == "treasuremaps")
+            {
+                var sources = IndexerSource.Sources(_configuration());
+                using var client = new TreasureMapsApiClient(_http, new Listing.TreasureMapsListingCache(), Microsoft.Extensions.Logging.Abstractions.NullLogger<TreasureMapsApiClient>.Instance, _configuration);
+                var results = await Task.WhenAll(sources.Select(async source =>
+                {
+                    try { await client.TestSourceAsync(source, ct).ConfigureAwait(false); return true; }
+                    catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or OperationCanceledException or ArgumentException or System.Xml.XmlException or System.Text.Json.JsonException) { return false; }
+                })).ConfigureAwait(false);
+                ct.ThrowIfCancellationRequested();
+                return new { id = service, configured, online = results.Length > 0 && results.All(r => r), url, version = (string?)null,
+                    responseMs = timer.ElapsedMilliseconds, message = results.Count(r => r) + " von " + sources.Count + " Indexern erreichbar" };
+            }
             var route = service switch { "sabnzbd" => "mode=queue&limit=0", "treasuremaps" => "user", _ => "system/status" };
             var status = await SendAsync(service, route, ct).ConfigureAwait(false);
             return new { id = service, configured, online = true, url, version = status is JsonObject ? (status["version"] ?? status["queue"]?["version"])?.ToString() : null, responseMs = timer.ElapsedMilliseconds, message = "Verbunden" };
@@ -210,13 +224,13 @@ public sealed class ServiceManagement : IDisposable
                         await SendAsync("sabnzbd", "mode=set_config&section=categories&name=" + Uri.EscapeDataString(name) + "&dir=" + Uri.EscapeDataString(folder ?? name), ct).ConfigureAwait(false);
                     }
 
-                    links.Add(new Connection("treasuremaps-sab-" + name, "Treasure Maps", "SABnzbd", exists || apply ? "ready" : "missing", "Direktdownload-Kategorie: " + name, !exists && apply));
+                    links.Add(new Connection("treasuremaps-sab-" + name, "Indexer", "SABnzbd", exists || apply ? "ready" : "missing", "Direktdownload-Kategorie: " + name, !exists && apply));
                 }
             }
             catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or OperationCanceledException or ArgumentException or System.Text.Json.JsonException)
             {
                 ct.ThrowIfCancellationRequested();
-                links.Add(new Connection("treasuremaps-sab", "Treasure Maps", "SABnzbd", "error", "Downloadkategorien konnten nicht geprüft werden."));
+                links.Add(new Connection("treasuremaps-sab", "Indexer", "SABnzbd", "error", "Downloadkategorien konnten nicht geprüft werden."));
             }
 
             foreach (var service in new[] { "radarr", "sonarr" })
@@ -290,14 +304,23 @@ public sealed class ServiceManagement : IDisposable
 
 
         var indexers = (await SendAsync(service, "indexer", ct).ConfigureAwait(false)).AsArray();
-        var indexerBase = c.BaseUrl.TrimEnd('/');
-        if (indexerBase.EndsWith("/api/v1", StringComparison.OrdinalIgnoreCase)) { indexerBase = indexerBase[..^7]; }
-        _ = ValidateUrl(indexerBase);
-        var indexer = FindResource(indexers, "Newznab", "baseUrl", indexerBase);
-        var fields = new JsonObject { ["baseUrl"] = indexerBase, ["apiKey"] = c.ApiKey };
-        if (indexer is null) { fields["categories"] = new JsonArray(isSeries ? 5000 : 2000); }
-        await EnsureResourceAsync(service, "indexer", "Newznab", "Treasure-Maps", indexer, fields,
-            new JsonObject { ["enableRss"] = true, ["enableAutomaticSearch"] = true, ["enableInteractiveSearch"] = true }, apply, "Treasure Maps", service, links, ct).ConfigureAwait(false);
+        foreach (var source in IndexerSource.Sources(c))
+        {
+            try
+            {
+                var indexerBase = source.Url.TrimEnd('/');
+                if (indexerBase.EndsWith("/api/v1", StringComparison.OrdinalIgnoreCase)) { indexerBase = indexerBase[..^7]; }
+                else if (indexerBase.EndsWith("/api", StringComparison.OrdinalIgnoreCase)) { indexerBase = indexerBase[..^4]; }
+                _ = ValidateUrl(indexerBase);
+                var indexer = FindResource(indexers, "Newznab", "baseUrl", indexerBase);
+                var fields = new JsonObject { ["baseUrl"] = indexerBase, ["apiKey"] = source.ApiKey };
+                if (indexer is null) { fields["categories"] = new JsonArray((isSeries ? source.TvCategories : source.MovieCategories).Split(',').Select(n => (JsonNode?)JsonValue.Create(int.Parse(n, CultureInfo.InvariantCulture))).ToArray()); }
+                await EnsureResourceAsync(service, "indexer", "Newznab", "Evolution · " + source.Name, indexer, fields,
+                    new JsonObject { ["enableRss"] = true, ["enableAutomaticSearch"] = true, ["enableInteractiveSearch"] = true }, apply, source.Name, service, links, ct, identitySuffix: source.Id).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or ArgumentException)
+            { links.Add(new Connection(service + "-indexer-" + source.Id, source.Name, service, "error", "Indexer-Verbindung konnte nicht geprüft werden.")); }
+        }
 
         // A successful connection test alone does not mean automatic imports/search are enabled.
         foreach (var (resource, field, desired) in new[]
@@ -322,7 +345,7 @@ public sealed class ServiceManagement : IDisposable
     }
 
     private async Task EnsureResourceAsync(string service, string resource, string implementation, string name, JsonObject? existing,
-        JsonObject fields, JsonObject properties, bool apply, string from, string to, List<Connection> links, CancellationToken ct, bool credentialsValid = true)
+        JsonObject fields, JsonObject properties, bool apply, string from, string to, List<Connection> links, CancellationToken ct, bool credentialsValid = true, string? identitySuffix = null)
     {
         var maskedKey = IsMasked(Field(existing, "apiKey"));
         var changed = existing is null || !credentialsValid || fields.Any(k => !(k.Key == "apiKey" && maskedKey) && !Equivalent(Field(existing, k.Key), k.Value))
@@ -372,7 +395,7 @@ public sealed class ServiceManagement : IDisposable
             }
         }
 
-        links.Add(new Connection(service + "-" + resource, from, to, apply ? "verified" : changed ? "missing" : "ready",
+        links.Add(new Connection(service + "-" + resource + (identitySuffix == null ? "" : "-" + identitySuffix), from, to, apply ? "verified" : changed ? "missing" : "ready",
             apply ? (changed ? "Ergänzt und Verbindungstest bestanden." : "Vorhanden; Verbindungstest bestanden.")
                 : changed ? "Verbindung fehlt oder benötigt eine Anpassung." : "Vorhandene Konfiguration passt.", apply && changed));
     }

@@ -79,10 +79,16 @@ public static class ReleaseGrouper
     /// <returns>The ordered list of groups.</returns>
     public static IReadOnlyList<ReleaseGroup> Group(IEnumerable<Release> releases)
     {
+        var rows = releases.Where(r => r is not null).ToList();
+        // Resolve identity bridges before folding; provider arrival/order must not create two posters.
+        var aliases = rows.Where(r => !string.IsNullOrWhiteSpace(r.Ids?.Imdb ?? r.Tv?.Imdb) && !string.IsNullOrWhiteSpace(r.Ids?.Tmdb ?? r.Tv?.Tmdb))
+            .GroupBy(r => KindOf(r) + ":imdb:" + (r.Ids?.Imdb ?? r.Tv?.Imdb), StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Select(r => r.Ids?.Tmdb ?? r.Tv?.Tmdb).Distinct().Count() == 1)
+            .ToDictionary(g => g.Key, g => KindOf(g.First()) + ":tmdb:" + (g.First().Ids?.Tmdb ?? g.First().Tv?.Tmdb), StringComparer.OrdinalIgnoreCase);
         var groups = new List<ReleaseGroup>();
         var byKey = new Dictionary<string, ReleaseGroup>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var release in releases)
+        foreach (var release in rows)
         {
             if (release is null || string.IsNullOrWhiteSpace(release.Guid))
             {
@@ -92,12 +98,24 @@ public static class ReleaseGrouper
             var kind = KindOf(release);
             var title = TitleOf(release, kind);
             var key = KeyOf(release, kind, title);
+            if (aliases.TryGetValue(key, out var canonical)) { key = canonical; }
 
             if (!byKey.TryGetValue(key, out var group))
             {
-                group = new ReleaseGroup { Key = key, Title = title, Kind = kind };
+                var imdb = release.Ids?.Imdb ?? release.Tv?.Imdb;
+                var tmdb = release.Ids?.Tmdb ?? release.Tv?.Tmdb;
+                var year = kind == "tv" ? ParseYear(FirstFour(release.Tv?.FirstAired)) : ParseYear(release.Movie?.Year);
+                group = groups.FirstOrDefault(g => g.Kind == kind
+                    && (string.IsNullOrEmpty(imdb) || string.IsNullOrEmpty(g.Imdb) || imdb == g.Imdb)
+                    && (string.IsNullOrEmpty(tmdb) || string.IsNullOrEmpty(g.Tmdb) || tmdb == g.Tmdb)
+                    && ((!string.IsNullOrEmpty(imdb) && imdb == g.Imdb) || (!string.IsNullOrEmpty(tmdb) && tmdb == g.Tmdb)
+                        || (year.HasValue && year == g.Year && Normalize(title) == Normalize(g.Title))));
+                if (group == null)
+                {
+                    group = new ReleaseGroup { Key = key, Title = title, Kind = kind };
+                    groups.Add(group);
+                }
                 byKey[key] = group;
-                groups.Add(group);
             }
 
             group.Releases.Add(release);

@@ -13,6 +13,28 @@ spec.loader.exec_module(stack)
 
 
 class BundleTests(unittest.TestCase):
+    def test_multiple_indexers_preserve_existing_sources_and_do_not_duplicate_on_rerun(self):
+        from types import SimpleNamespace
+        existing = [{'id': 'legacy', 'url': 'https://one.test', 'apiKey': 'kept'}]
+        added = []
+        settings = {'connections': []}
+        def api(base, route, key, method='GET', body=None, **kwargs):
+            if route.endswith('/Indexers'):
+                if method == 'POST':
+                    added.append(body)
+                    existing.append(body)
+                    return {'ok': True}
+                return {'items': existing}
+            return {'links': []} if route.endswith('/Apply') else settings
+        setup = {'indexers': [{'name': 'First', 'url': 'https://one.test/', 'apiKey': 'do-not-replace'},
+                              {'name': 'Second', 'protocol': 'newznab', 'url': 'https://two.test/api', 'apiKey': 'private'}]}
+        with patch.object(stack, 'admin_token', return_value='private'), patch.object(stack, 'request', side_effect=api), patch.object(stack, 'discover', return_value=[]):
+            for _ in range(2):
+                self.assertTrue(stack.reconcile(SimpleNamespace(url='http://localhost', out=Path('/unused')), Path('/unused'), setup=setup))
+        self.assertEqual(1, len(added))
+        self.assertEqual('Second', added[0]['name'])
+        self.assertEqual('kept', existing[0]['apiKey'])
+
     def test_health_before_api_readiness_does_not_cause_premature_rollback(self):
         with patch.object(stack, 'request', side_effect=[RuntimeError('API request failed: HTTP 503'), {'version': '1.0.4.0'}]) as api, patch.object(stack.time, 'sleep'):
             stack.wait_management('http://localhost', 'private', '1.0.4.0')

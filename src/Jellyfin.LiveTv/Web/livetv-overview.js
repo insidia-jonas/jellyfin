@@ -46,6 +46,16 @@
     var playGen = 0;
     var playState = null;
     var playError = null;
+    var pageNumber = 0;
+    var favoritesOnly = false;
+    var PAGE_SIZE = 48;
+    var guideCache = {};
+    var guideEpoch = 0;
+    var guideBusy = false;
+    var guideDialog = null;
+    var guideOpener = null;
+    var guideDay = 0;
+    var guideDialogRequest = 0;
 
     var style = document.createElement('style');
     style.setAttribute('data-livetv-overview', '1');
@@ -286,6 +296,10 @@
             nowRange: rangeText(start, end) || (nowHit && nowHit.range) || '',
             nowStart: start,
             nowEnd: end,
+            overview: program.Overview || String(item.Overview || '').split(/\r?\n/).filter(function (line) {
+                return !/^(Jetzt:|Danach:|Now:|Next:)/i.test(line.trim());
+            }).join(' ').trim(),
+            episode: program.EpisodeTitle || '',
             nextTitle: next.Name || (item.ProviderIds && (item.ProviderIds.LiveTvNext || item.ProviderIds.livetvnext)) || (nextHit && nextHit.title) || '',
             nextRange: rangeText(next.StartDate, next.EndDate) || (nextHit && nextHit.range) || '',
             percent: progressOf(item, Date.now()),
@@ -335,15 +349,159 @@
     function visibleItems() {
         var q = filter.replace(/\s+/g, ' ').trim().toLowerCase();
         if (!q) {
-            return items.slice();
+            return items.filter(function (item) { return !favoritesOnly || (item.UserData && item.UserData.IsFavorite); });
         }
         return items.filter(function (item) {
             var guide = guideOf(item);
             var blob = [guide.channelName, guide.nowTitle, guide.nextTitle, item.Number, item.ChannelNumber]
                 .join(' ')
                 .toLowerCase();
-            return blob.indexOf(q) !== -1;
+            return blob.indexOf(q) !== -1 && (!favoritesOnly || (item.UserData && item.UserData.IsFavorite));
         });
+    }
+
+    function guideChannelId(item) {
+        return item && ((item.ProviderIds || {}).LiveTvGuideChannel || (item.Type === 'TvChannel' ? item.Id : ''));
+    }
+
+    function programRequest(ids, start, end, limit) {
+        var client = api();
+        return client.getJSON(client.getUrl('LiveTv/Programs', {
+            userId: client.getCurrentUserId(), channelIds: ids.join(','), minEndDate: start.toISOString(),
+            maxStartDate: end.toISOString(), sortBy: 'StartDate', sortOrder: 'Ascending', fields: 'Overview,Genres',
+            enableImages: false, enableUserData: false, enableTotalRecordCount: false, limit: limit
+        }));
+    }
+
+    function mergePrograms(item, programs) {
+        var now = Date.now();
+        var current = programs.filter(function (p) { return Date.parse(p.StartDate) <= now && Date.parse(p.EndDate) > now; })[0];
+        var next = programs.filter(function (p) { return Date.parse(p.StartDate) > now; })[0];
+        if (current) { item.CurrentProgram = current; }
+        else if (item.CurrentProgram && Date.parse(item.CurrentProgram.EndDate) <= now) { delete item.CurrentProgram; }
+        if (next) { item.NextProgram = next; }
+        else if (item.NextProgram && Date.parse(item.NextProgram.EndDate) <= now) { delete item.NextProgram; }
+    }
+
+    // Fetch descriptions only for the displayed page, in bounded batches; never opens IPTV streams.
+    function hydrateGuide(shown) {
+        if (guideBusy || !owned || document.hidden || !api() || !api().getJSON) { return; }
+        var epoch = guideEpoch;
+        var needed = shown.filter(function (item) {
+            var id = guideChannelId(item);
+            var cached = guideCache[id];
+            if (cached && cached.expires > Date.now()) { mergePrograms(item, cached.items); }
+            return id && !isGroupFolder(item) && (!cached || cached.expires <= Date.now());
+        }).slice(0, 12);
+        if (!needed.length) { updateProgress(ensure(), shown); return; }
+        guideBusy = true;
+        var ids = needed.map(guideChannelId);
+        var request = programRequest(ids, new Date(), new Date(Date.now() + 4 * 3600000), 240);
+        var timeout = window.setTimeout(function () {
+            if (epoch !== guideEpoch) { return; }
+            guideEpoch++; guideBusy = false;
+            ids.forEach(function (id) { guideCache[id] = { expires: Date.now() + 30000, items: [] }; });
+        }, 12000);
+        request.then(function (result) {
+            if (epoch !== guideEpoch || !owned) { return; }
+            needed.forEach(function (item) {
+                var id = guideChannelId(item);
+                var programs = ((result && result.Items) || []).filter(function (p) { return p.ChannelId === id; });
+                guideCache[id] = { expires: Date.now() + 60000, items: programs };
+                mergePrograms(item, programs);
+            });
+            updateProgress(ensure(), shown);
+        }, function () {
+            if (epoch !== guideEpoch) { return; }
+            ids.forEach(function (id) { guideCache[id] = { expires: Date.now() + 30000, items: [] }; });
+        }).then(function () {
+            window.clearTimeout(timeout);
+            if (epoch === guideEpoch) { guideBusy = false; hydrateGuide(visibleItems().slice(pageNumber * PAGE_SIZE, (pageNumber + 1) * PAGE_SIZE)); }
+        });
+    }
+
+    function element(tag, cls, text) {
+        var node = document.createElement(tag);
+        node.className = cls || '';
+        if (text != null) { node.textContent = text; }
+        return node;
+    }
+
+    function closeGuide() {
+        guideDialogRequest++;
+        if (!guideDialog) { return; }
+        guideDialog.remove(); guideDialog = null;
+        document.documentElement.classList.remove('jf-guide-open');
+        if (guideOpener && guideOpener.isConnected) { guideOpener.focus(); }
+        guideOpener = null;
+    }
+
+    function loadGuideDay(item) {
+        if (!guideDialog) { return; }
+        var content = guideDialog.querySelector('.jf-guide-programs');
+        content.textContent = '';
+        content.appendChild(element('p', 'jf-guide-note', 'Programm wird geladen…'));
+        var request = ++guideDialogRequest;
+        var id = guideChannelId(item);
+        if (!id) { content.textContent = 'Für diesen Sender ist noch keine EPG-Zuordnung vorhanden.'; return; }
+        var start = new Date(); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() + guideDay);
+        var end = new Date(start); end.setDate(end.getDate() + 1);
+        var timeout = window.setTimeout(function () {
+            if (request === guideDialogRequest && guideDialog) {
+                guideDialogRequest++;
+                content.textContent = 'Das Programm antwortet gerade nicht. Bitte erneut versuchen.';
+            }
+        }, 12000);
+        programRequest([id], start, end, 150).then(function (result) {
+            if (request !== guideDialogRequest || !guideDialog) { return; }
+            content.textContent = '';
+            var programs = ((result && result.Items) || []).filter(function (p) { return p.ChannelId === id; });
+            if (!programs.length) { content.appendChild(element('p', 'jf-guide-note', 'Für diesen Tag liefert die EPG-Quelle keine Programmdaten.')); }
+            programs.forEach(function (p) {
+                var running = Date.parse(p.StartDate) <= Date.now() && Date.parse(p.EndDate) > Date.now();
+                var section = element('section', 'jf-guide-program' + (running ? ' is-running' : ''));
+                section.appendChild(element('p', 'jf-guide-time', rangeText(p.StartDate, p.EndDate) + (running ? ' · Läuft gerade' : '')));
+                section.appendChild(element('h3', '', p.Name || 'Sendung'));
+                var meta = [p.EpisodeTitle, (p.Genres || []).join(' · '), p.OfficialRating].filter(Boolean);
+                if (meta.length) { section.appendChild(element('p', 'jf-guide-meta', meta.join(' · '))); }
+                section.appendChild(element('p', 'jf-guide-description', p.Overview || 'Keine Beschreibung von der EPG-Quelle verfügbar.'));
+                content.appendChild(section);
+            });
+            var current = content.querySelector('.is-running');
+            if (current) { content.scrollTop = current.offsetTop - content.offsetTop - 12; }
+        }, function () {
+            if (request === guideDialogRequest && guideDialog) { content.textContent = 'Das Programm konnte nicht geladen werden. Bitte erneut versuchen.'; }
+        }).then(function () { window.clearTimeout(timeout); });
+    }
+
+    function openGuide(item, opener) {
+        closeGuide(); guideOpener = opener; guideDay = 0;
+        guideDialog = element('div', 'jf-guide-backdrop');
+        guideDialog.id = 'jf-livetv-guide';
+        var panel = element('section', 'jf-guide-panel'); panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true'); panel.setAttribute('aria-labelledby', 'jf-guide-heading');
+        var head = element('header', 'jf-guide-head');
+        var labels = element('div'); labels.appendChild(element('p', 'jf-live-eyebrow', 'DEIN PROGRAMM'));
+        var heading = element('h2', '', item.Name); heading.id = 'jf-guide-heading'; labels.appendChild(heading); head.appendChild(labels);
+        var close = element('button', 'jf-live-icon-button', '×'); close.type = 'button'; close.setAttribute('aria-label', 'Programm schließen'); close.onclick = closeGuide; head.appendChild(close);
+        var tools = element('div', 'jf-guide-tools');
+        ['Heute', 'Morgen'].forEach(function (label, day) {
+            var button = element('button', 'jf-live-pill' + (day === 0 ? ' active' : ''), label); button.type = 'button'; button.setAttribute('aria-pressed', String(day === 0));
+            button.onclick = function () { guideDay = day; tools.querySelectorAll('[aria-pressed]').forEach(function (b) { b.classList.toggle('active', b === button); b.setAttribute('aria-pressed', String(b === button)); }); loadGuideDay(item); }; tools.appendChild(button);
+        });
+        var refresh = element('button', 'jf-live-pill', 'Aktualisieren'); refresh.type = 'button'; refresh.onclick = function () { loadGuideDay(item); }; tools.appendChild(refresh);
+        var watch = element('button', 'jf-live-watch', '▶ Jetzt ansehen'); watch.type = 'button'; watch.onclick = function () { closeGuide(); play(item, items); }; tools.appendChild(watch);
+        var programs = element('div', 'jf-guide-programs'); programs.tabIndex = 0;
+        panel.appendChild(head); panel.appendChild(tools); panel.appendChild(programs); guideDialog.appendChild(panel);
+        guideDialog.addEventListener('click', function (event) { if (event.target === guideDialog) { closeGuide(); } });
+        guideDialog.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape' || event.key === 'Backspace') { event.preventDefault(); event.stopPropagation(); closeGuide(); }
+            if (event.key === 'Tab') {
+                var focusable = panel.querySelectorAll('button,[tabindex="0"]'); var first = focusable[0]; var last = focusable[focusable.length - 1];
+                if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+                else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+            }
+        }, true);
+        document.body.appendChild(guideDialog); document.documentElement.classList.add('jf-guide-open'); close.focus(); loadGuideDay(item);
     }
 
     function isStalePage(node) {
@@ -1345,6 +1503,8 @@
         var fill = row.querySelector('.jf-livetv-bar > span');
         var bar = row.querySelector('.jf-livetv-bar');
         var next = row.querySelector('.jf-livetv-next');
+        var plot = row.querySelector('.jf-livetv-plot');
+        if (plot) { plot.textContent = guide.folder ? '' : guide.overview || (guide.nowTitle ? 'Öffne das Programm für weitere Sendungen und Informationen.' : 'Für diesen Sender stehen derzeit keine Programminformationen bereit.'); }
         if (guide.folder) {
             if (show) {
                 show.textContent = guide.folderLine || (de ? 'Ordner' : 'Folder');
@@ -1369,6 +1529,7 @@
             fill.style.width = guide.percent + '%';
             bar.setAttribute('aria-valuenow', String(Math.round(guide.percent)));
         }
+        if (bar) { bar.hidden = guide.folder || guide.percent == null; }
         if (next) {
             next.textContent = guide.nextTitle
                 ? ((de ? 'Danach: ' : 'Next: ') + guide.nextTitle + (guide.nextRange ? ' · ' + guide.nextRange : ''))
@@ -1381,16 +1542,17 @@
         var row = document.createElement('button');
         row.type = 'button';
         row.className = 'jf-livetv-row';
-        row.setAttribute('role', 'listitem');
         row.setAttribute('data-id', item.Id || '');
         row.setAttribute('data-type', item.Type || (guide.folder ? 'Folder' : 'TvChannel'));
         row.tabIndex = 0;
         var logo = document.createElement('div');
         logo.className = 'jf-livetv-logo';
+        logo.setAttribute('aria-hidden', 'true');
         var url = posterUrl(item);
         if (url) {
             logo.style.backgroundImage = "url('" + String(url).replace(/'/g, '%27') + "')";
         }
+        if (!url || guide.folder) { logo.textContent = guide.folder ? '▦' : String(item.Name || 'TV').slice(0, 2); }
         var sender = document.createElement('div');
         sender.className = 'jf-livetv-sender';
         var number = item.Number || item.ChannelNumber || '';
@@ -1399,6 +1561,7 @@
         now.className = 'jf-livetv-now';
         now.appendChild(document.createElement('div')).className = 'jf-livetv-show';
         now.appendChild(document.createElement('div')).className = 'jf-livetv-times';
+        now.appendChild(document.createElement('div')).className = 'jf-livetv-plot';
         var bar = document.createElement('div');
         bar.className = 'jf-livetv-bar';
         bar.setAttribute('role', 'progressbar');
@@ -1418,13 +1581,22 @@
             event.stopPropagation();
             play(item, shown);
         });
-        if (index === 0 && document.activeElement !== search) {
-            window.setTimeout(function () { row.focus(); }, 40);
+        var card = element('article', 'jf-livetv-card' + (guide.folder ? ' is-folder' : ''));
+        card.setAttribute('role', 'listitem'); card.appendChild(row);
+        var actions = element('div', 'jf-live-actions');
+        if (guide.folder) { actions.appendChild(element('span', '', 'Gruppe öffnen →')); }
+        else {
+            var watch = element('button', 'jf-live-info jf-live-play-label', '▶ Jetzt ansehen'); watch.type = 'button';
+            watch.onclick = function () { play(item, shown); }; actions.appendChild(watch);
+            var info = element('button', 'jf-live-info', 'Programm & Infos'); info.type = 'button'; info.setAttribute('aria-label', 'Programm für ' + item.Name);
+            info.onclick = function () { openGuide(item, info); }; actions.appendChild(info);
         }
-        return row;
+        card.appendChild(actions);
+        return card;
     }
 
     function updateProgress(box, shown) {
+        if (!box) { return; }
         var de = german();
         var byId = {};
         shown.forEach(function (item) {
@@ -1452,11 +1624,13 @@
         var shown = visibleItems();
         if (mode === 'progress' && box.querySelector('.jf-livetv-list')) {
             updateProgress(box, shown);
+            hydrateGuide(shown.slice(pageNumber * PAGE_SIZE, (pageNumber + 1) * PAGE_SIZE));
             return;
         }
         paintToken += 1;
         var token = paintToken;
         box.innerHTML = '';
+        box.appendChild(element('p', 'jf-live-eyebrow', 'LIVE TV · DEIN PROGRAMM'));
         var head = document.createElement('div');
         head.className = 'jf-livetv-head';
         var title = document.createElement('div');
@@ -1464,7 +1638,8 @@
         title.textContent = parentItem && parentItem.Name && parentItem.Name !== 'Live TV' ? parentItem.Name : 'Live TV';
         var meta = document.createElement('div');
         meta.className = 'jf-livetv-count';
-        meta.textContent = shown.length + (de ? ' Sender' : ' channels');
+        var groups = shown.length > 0 && shown.every(isGroupFolder);
+        meta.textContent = shown.length + (groups ? ' Gruppen' : de ? ' Sender' : ' channels');
         var search = document.createElement('input');
         search.type = 'search';
         search.className = 'jf-livetv-search';
@@ -1473,6 +1648,7 @@
         search.setAttribute('aria-label', search.placeholder);
         search.addEventListener('input', function () {
             filter = search.value;
+            pageNumber = 0;
             render();
             var again = document.querySelector('#jf-livetv-overview .jf-livetv-search');
             if (again) {
@@ -1485,6 +1661,9 @@
         head.appendChild(title);
         head.appendChild(meta);
         head.appendChild(search);
+        var favorite = element('button', 'jf-live-pill' + (favoritesOnly ? ' active' : ''), '☆ Favoriten'); favorite.type = 'button'; favorite.setAttribute('aria-pressed', String(favoritesOnly));
+        favorite.onclick = function () { favoritesOnly = !favoritesOnly; pageNumber = 0; render(); };
+        if (!groups) { head.appendChild(favorite); }
 
         var cols = document.createElement('div');
         cols.className = 'jf-livetv-cols';
@@ -1494,9 +1673,10 @@
 
         var list = document.createElement('div');
         list.className = 'jf-livetv-list';
+        if (groups) { list.classList.add('is-groups'); }
         list.setAttribute('role', 'list');
         box.appendChild(head);
-        box.appendChild(cols);
+        box.appendChild(element('p', 'jf-live-intro', groups ? 'Deine Sender, übersichtlich nach Gruppen sortiert.' : 'Jetzt und danach. Entdecke dein Programm und schalte direkt ein.'));
         box.appendChild(list);
         paintError();
         if (!shown.length) {
@@ -1510,30 +1690,44 @@
                     : 'Live TV could not be loaded. Check the tuner and guide on the server.';
             } else {
                 empty.textContent = de
-                    ? 'Keine Sender. Tuner und Guide auf dem Server prüfen.'
+                    ? (filter || favoritesOnly ? 'Keine Sender für diese Auswahl.' : 'Keine Sender. Tuner und Guide auf dem Server prüfen.')
                     : 'No channels. Check the tuner and guide on the server.';
             }
             list.appendChild(empty);
             return;
+        }
+        pageNumber = Math.min(pageNumber, Math.max(0, Math.ceil(shown.length / PAGE_SIZE) - 1));
+        var pageItems = shown.slice(pageNumber * PAGE_SIZE, (pageNumber + 1) * PAGE_SIZE);
+        if (shown.length > PAGE_SIZE) {
+            var pages = element('nav', 'jf-live-pages'); pages.setAttribute('aria-label', 'Senderseiten');
+            [-1, 1].forEach(function (step) {
+                var button = element('button', 'jf-live-pill', step < 0 ? '← Zurück' : 'Weitere Sender →'); button.type = 'button';
+                button.disabled = step < 0 ? pageNumber === 0 : (pageNumber + 1) * PAGE_SIZE >= shown.length;
+                button.onclick = function () { pageNumber += step; render(); var top = document.querySelector('#jf-livetv-overview .jf-livetv-search'); if (top) { top.focus(); top.scrollIntoView({block:'center'}); } };
+                pages.appendChild(button);
+            });
+            pages.insertBefore(element('span', '', (pageNumber * PAGE_SIZE + 1) + '–' + Math.min((pageNumber + 1) * PAGE_SIZE, shown.length) + ' von ' + shown.length), pages.lastChild);
+            box.appendChild(pages);
         }
         var offset = 0;
         function paintChunk() {
             if (token !== paintToken) {
                 return;
             }
-            var end = Math.min(offset + ROW_CHUNK, shown.length);
+            var end = Math.min(offset + ROW_CHUNK, pageItems.length);
             var i;
             for (i = offset; i < end; i++) {
-                list.appendChild(buildRow(shown[i], i, de, shown, search));
+                list.appendChild(buildRow(pageItems[i], i, de, shown, search));
             }
             offset = end;
-            if (offset < shown.length && typeof window.requestAnimationFrame === 'function') {
+            if (offset < pageItems.length && typeof window.requestAnimationFrame === 'function') {
                 window.requestAnimationFrame(paintChunk);
-            } else if (offset < shown.length) {
+            } else if (offset < pageItems.length) {
                 window.setTimeout(paintChunk, 0);
             }
         }
         paintChunk();
+        hydrateGuide(pageItems);
     }
 
     function show(on) {
@@ -1546,6 +1740,7 @@
         if (!on && box) {
             box.remove();
         }
+        if (!on) { closeGuide(); }
         applyListMode();
         var legacy = document.getElementById('firetv-live');
         if (on && legacy) {
@@ -1710,7 +1905,8 @@
 
     function currentRouteKey() {
         var client = api();
-        return hash() + '|' + (client && client.getCurrentUserId ? client.getCurrentUserId() : '');
+        return hash() + '|' + (client && client.getCurrentUserId ? client.getCurrentUserId() : '')
+            + '|' + (client && client.serverAddress ? client.serverAddress() : '') + '|' + (client && client.accessToken ? client.accessToken() : '');
     }
 
     function sync() {
@@ -1723,6 +1919,7 @@
             loadGen += 1;
             paintToken += 1;
             items = [];
+            guideEpoch++; guideBusy = false; guideCache = {}; pageNumber = 0; filter = ''; favoritesOnly = false;
             parentItem = null;
             loading = false;
             hide();
@@ -1836,6 +2033,9 @@
         sync: sync,
         progressOf: progressOf,
         guideOf: guideOf,
+        guideChannelId: guideChannelId,
+        openGuide: openGuide,
+        closeGuide: closeGuide,
         isLiveTvItem: isLiveTvItem,
         play: play,
         resolvePlaybackManager: resolvePlaybackManager,

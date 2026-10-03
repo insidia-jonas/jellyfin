@@ -155,3 +155,37 @@ generation. Fire TV 2.4.8 also fixes direct playback of local files without stre
 
 Validation: `python3 -m unittest discover -s scripts/pi -p 'test_*.py'`, plugin tests,
 Live TV tests, `npm test --prefix FireTV/tests/web`, Fire TV core tests and Android lint.
+
+## Evolution and multiple indexers (1.1.0)
+
+The plugin is now **Evolution** and its browsable channel is **Indexer**. Existing
+plugin IDs, configuration files, download history, API routes and channel IDs remain
+compatible. The management portal's **Einstellungen → Indexer** section configures up
+to eight sources. All enabled sources are searched concurrently; individual failures
+have a bounded deadline. Matching titles are combined while releases retain their
+origin for downloads. The existing Treasure Maps REST adapter and standard Newznab
+endpoints (including NZBHydra/Prowlarr Newznab endpoints) are supported. Curated
+trending feeds remain available only for providers that implement them.
+
+Private installer JSON may contain an `indexers` array instead of the legacy
+`indexer` object, for example:
+
+```json
+{
+  "indexers": [
+    { "name": "Primary", "protocol": "treasuremaps", "url": "https://indexer.example", "apiKey": "PRIVATE" },
+    { "name": "Additional", "protocol": "newznab", "url": "http://127.0.0.1:5076/api", "apiKey": "PRIVATE", "movieCategories": "2000", "tvCategories": "5000" }
+  ]
+}
+```
+
+Existing source addresses retain their settings on repeated installs. After adding
+sources in the portal, **Verbindungen ergänzen & testen** connects every active source
+to Radarr and Sonarr using their real connection tests. Pausing a source controls
+Evolution's shared search; existing Arr settings remain separately managed.
+
+The browser's Live TV cards now show actual current/next EPG titles and descriptions,
+with a full Today/Tomorrow programme drawer, favourites and bounded page rendering.
+Guide queries use native channel IDs; they never open provider streams. Missing EPG
+and failed requests are distinguished. Fire TV 2.4.9 improves D-pad navigation through
+movie details, Indexer downloads and expandable subtitle controls.

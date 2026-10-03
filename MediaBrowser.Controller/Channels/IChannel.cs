@@ -19,6 +19,11 @@ namespace MediaBrowser.Controller.Channels
         string Name { get; }
 
         /// <summary>
+        /// Gets the stable identity used for stored channel IDs, independent of display branding.
+        /// </summary>
+        string DataKey => Name;
+
+        /// <summary>
         /// Gets the description.
         /// </summary>
         /// <value>The description.</value>

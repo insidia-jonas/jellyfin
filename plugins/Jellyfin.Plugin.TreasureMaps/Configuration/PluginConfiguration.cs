@@ -7,6 +7,9 @@ namespace Jellyfin.Plugin.TreasureMaps.Configuration;
 /// </summary>
 public class PluginConfiguration : BasePluginConfiguration
 {
+    /// <summary>Gets or sets indexers searched concurrently. Empty retains the legacy connection.</summary>
+    public System.Collections.Generic.List<IndexerSource> Indexers { get; set; } = new();
+
     /// <summary>Gets or sets the Jellyfin URL reachable by Sonarr and Radarr after imports.</summary>
     public string JellyfinCallbackUrl { get; set; } = "http://127.0.0.1:8096";
 

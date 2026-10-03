@@ -425,3 +425,24 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
 - Hero playback uses Jellyfin's registered `emby-itemscontainer` and `itemAction` contract. Production webpack uses numeric module ids; do not depend on importing playbackmanager by its source path. Keep server/item/type/resume metadata on the native action. New UI regressions are in `FireTV/tests/web/cinema.test.cjs`.
 - Subtitle tools are collapsed under the detail content. Search/quote starts on first expansion, requests JSON explicitly, and never enables generation without a valid quote. Existing sidecars are reused without force; missing quotes must not become an apparent zero-dollar estimate. Generation still requires the user's explicit confirmation.
 - Fire TV 2.4.8/code27 handles `Protocol=File` sources which permit DirectPlay but omit both stream URLs, via Jellyfin's authenticated `/Videos/{id}/stream?static=true&MediaSourceId=...` (Audio for audio items). Unsupported or remote sources cannot acquire this fallback; Live TV keeps its proxy rules. Verify actual first-frame playback, not just successful PlaybackInfo.
+
+### Evolution and browser programme guide (2026-10-03)
+
+- Evolution 1.1.0 / ClientScript v18 renames the channel to Indexer. Keep plugin GUID,
+  assembly/configuration filenames and legacy API/page aliases stable. `IChannel.DataKey`
+  separates display branding from channel AND child IDs; Indexer retains `Treasure-Maps`.
+- `IndexerSource` retains the legacy connection when no profiles exist. Up to eight
+  active REST/Newznab sources fan out concurrently with a 4.5-second multi-source budget.
+  Provider caches include credentials/protocol; failures are isolated and never cached as
+  empty success. Releases retain origin IDs for downloads; unscoped historic IDs use only
+  the legacy source. Never forward an indexer's REST key to a redirected download host.
+- Admin `Management/Indexers` returns masked profiles, tests before saving, and preserves
+  blank keys. Newznab uses caps-supported parameters and its own category mappings, never
+  Treasure Maps' language categories. Curated feeds are not invented for generic providers.
+  Pagination advances every provider by the requested page size, not the combined count.
+- Browser Live TV script v10 embeds `livetv-guide.css`, renders at most 48 cards and queries
+  native guide IDs in batches of 12. Programme details query Today/Tomorrow and distinguish
+  missing EPG from a failed request. Metadata is plain text; no additional tuner connections.
+- Fire TV 2.4.9/code28 loads `tvNavigation.js` for detail-page directional focus, including
+  native buttons and injected download/subtitle summaries. Keep text inputs, modals and
+  non-detail routes scoped; never generate subtitles or start downloads during focus tests.

@@ -9,6 +9,10 @@ namespace Jellyfin.Plugin.TreasureMaps.Api;
 /// </summary>
 public class ReleaseListResponse
 {
+    /// <summary>Gets or sets the shared per-provider offset for the next federated page.</summary>
+    public int? NextOffset { get; set; }
+    public bool? HasMore { get; set; }
+
     /// <summary>Gets or sets the returned releases.</summary>
     [JsonPropertyName("items")]
     public IReadOnlyList<Release> Items { get; set; } = new List<Release>();
@@ -37,6 +41,9 @@ public class Pagination
 /// <summary>A single indexer release.</summary>
 public class Release
 {
+    public string? IndexerId { get; set; }
+    public string? IndexerName { get; set; }
+
     /// <summary>Gets or sets the release GUID.</summary>
     [JsonPropertyName("guid")]
     public string Guid { get; set; } = string.Empty;

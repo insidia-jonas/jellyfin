@@ -35,7 +35,7 @@ public sealed class AiSubtitleProvider : ISubtitleProvider, IHasOrder
     }
 
     /// <inheritdoc />
-    public string Name => "Treasure-Maps KI";
+    public string Name => "Evolution KI";
 
     /// <inheritdoc />
     public int Order => 2;

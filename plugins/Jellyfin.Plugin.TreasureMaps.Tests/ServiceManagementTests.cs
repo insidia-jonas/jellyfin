@@ -15,6 +15,23 @@ namespace Jellyfin.Plugin.TreasureMaps.Tests;
 
 public class ServiceManagementTests
 {
+    [Fact]
+    public async Task MultipleIndexersAreConnectedToBothArrServicesWithoutDuplicates()
+    {
+        using var fixture = new Fixture();
+        fixture.Configuration.Indexers = IndexerSource.Sources(fixture.Configuration, true).ToList();
+        fixture.Configuration.Indexers.Add(new IndexerSource { Id = "additional", Name = "Additional", Protocol = "newznab", Url = "https://second.test/api", ApiKey = "second-secret" });
+        using var services = new ServiceManagement(fixture, fixture, () => fixture.Configuration);
+        var result = await services.ConnectionsAsync(true, TestContext.Current.CancellationToken);
+        Assert.DoesNotContain(result, p => p.State == "error");
+        Assert.Equal(2, fixture.Resources["sonarr/indexer"].Count);
+        Assert.Equal(2, fixture.Resources["radarr/indexer"].Count);
+        Assert.Equal(result.Count, result.Select(r => r.Id).Distinct().Count());
+        var writes = fixture.Writes;
+        await services.ConnectionsAsync(true, TestContext.Current.CancellationToken);
+        Assert.Equal(writes, fixture.Writes);
+    }
+
     [Theory]
     [InlineData("file:///etc/passwd")]
     [InlineData("http://user:secret@localhost:8080")]

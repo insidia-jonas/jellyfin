@@ -121,6 +121,7 @@ public static class ReleaseMapper
         item.ProviderIds["TreasureMaps"] = release.Guid;
         item.ProviderIds["TreasureMapsKind"] = isTv ? "tv" : "movie";
         item.ProviderIds["TreasureMapsLanguages"] = string.Join(",", releaseLanguages.Select(LanguageMatcher.Normalize).Where(x => !string.IsNullOrEmpty(x)).Distinct());
+        if (!string.IsNullOrWhiteSpace(release.IndexerName)) { item.ProviderIds["EvolutionIndexer"] = release.IndexerName; }
 
         var imdb = release.Ids?.Imdb ?? tv?.Imdb;
         if (!string.IsNullOrWhiteSpace(imdb))

@@ -22,8 +22,67 @@ namespace Jellyfin.Plugin.TreasureMaps.Api;
 [ApiController]
 [Authorize(Policy = Policies.RequiresElevation)]
 [Route("TreasureMaps/Management")]
-public sealed class ManagementController(ServiceManagement services, ILibraryManager library, IApplicationHost application, ILogger<ManagementController> logger) : ControllerBase
+public sealed class ManagementController(ServiceManagement services, ILibraryManager library, IApplicationHost application, ILogger<ManagementController> logger, TreasureMapsApiClient indexers) : ControllerBase
 {
+    private static readonly SemaphoreSlim IndexerChanges = new(1, 1);
+
+    [HttpGet("Indexers")]
+    public IActionResult Indexers() => Ok(new
+    {
+        items = IndexerSource.Sources(Plugin.Instance!.Configuration, true).Select(s => new
+        {
+            id = s.Id, name = s.Name, protocol = s.Protocol, url = s.Url, enabled = s.Enabled,
+            movieCategories = s.MovieCategories, tvCategories = s.TvCategories,
+            keyPresent = !string.IsNullOrWhiteSpace(s.ApiKey)
+        })
+    });
+
+    [HttpPost("Indexers")]
+    public async Task<IActionResult> SaveIndexer([FromBody] IndexerSource source, CancellationToken ct)
+    {
+        await IndexerChanges.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var existing = IndexerSource.Sources(Plugin.Instance!.Configuration, true);
+            if (string.IsNullOrEmpty(source.Id)) { source.Id = Guid.NewGuid().ToString("N"); }
+            var previous = existing.FirstOrDefault(s => s.Id == source.Id);
+            if (previous == null && existing.Count >= 8) { return BadRequest(new { message = "Maximal acht Indexer gleichzeitig konfigurieren." }); }
+            if (string.IsNullOrWhiteSpace(source.ApiKey)) { source.ApiKey = previous?.ApiKey ?? string.Empty; }
+            source.Url = source.Url.Trim().TrimEnd('/');
+            source.Name = source.Name.Trim();
+            source.Validate();
+            if (source.Enabled) { await indexers.TestSourceAsync(source, ct).ConfigureAwait(false); }
+            // Read after the asynchronous test so another settings form cannot be overwritten.
+            var c = JsonSerializer.Deserialize<PluginConfiguration>(JsonSerializer.Serialize(Plugin.Instance!.Configuration))!;
+            c.Indexers = IndexerSource.Sources(c, true).Select(s => s.Id == source.Id ? source : s).ToList();
+            if (!c.Indexers.Any(s => s.Id == source.Id)) { c.Indexers.Add(source); }
+            if (source.Id == "legacy") { c.BaseUrl = source.Url; c.ApiKey = source.ApiKey; }
+            Plugin.Instance.UpdateConfiguration(c);
+            return Ok(new { ok = true, id = source.Id });
+        }
+        catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
+        catch (Exception ex) when (ServiceError(ex) || ex is System.Xml.XmlException)
+        { return StatusCode(502, new { message = "Indexer-Test fehlgeschlagen. Adresse, Protokoll und Schlüssel prüfen. Nichts wurde gespeichert." }); }
+        finally { IndexerChanges.Release(); }
+    }
+
+    [HttpDelete("Indexers/{id}")]
+    public async Task<IActionResult> DeleteIndexer(string id, CancellationToken ct)
+    {
+        await IndexerChanges.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var c = JsonSerializer.Deserialize<PluginConfiguration>(JsonSerializer.Serialize(Plugin.Instance!.Configuration))!;
+            var existing = IndexerSource.Sources(c, true);
+            if (!existing.Any(s => s.Id == id)) { return NotFound(); }
+            c.Indexers = existing.Where(s => s.Id != id).ToList();
+            if (id == "legacy" || c.Indexers.Count == 0) { c.BaseUrl = string.Empty; c.ApiKey = string.Empty; }
+            Plugin.Instance.UpdateConfiguration(c);
+            return Ok(new { ok = true });
+        }
+        finally { IndexerChanges.Release(); }
+    }
+
     [HttpGet("Summary")]
     public async Task<IActionResult> Summary(CancellationToken ct)
     {

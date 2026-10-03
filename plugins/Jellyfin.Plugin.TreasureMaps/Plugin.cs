@@ -34,10 +34,10 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     public override Guid Id => new Guid("e2c9a6f4-8b1d-4f3a-9c2e-7a5b6d4c3e21");
 
     /// <inheritdoc />
-    public override string Name => "Treasure-Maps";
+    public override string Name => "Evolution";
 
     /// <inheritdoc />
-    public override string Description => "Browse a Treasure-Maps indexer inside Jellyfin and grab movie releases as NZBs.";
+    public override string Description => "Indexer, Downloads, Medienverwaltung und KI-Untertitel für Jellyfin.";
 
     /// <inheritdoc />
     public IEnumerable<PluginPageInfo> GetPages()
@@ -55,6 +55,13 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         yield return new PluginPageInfo
         {
             Name = Name,
+            EmbeddedResourcePath = GetType().Namespace + ".Configuration.config.html"
+        };
+
+        // Keep old bookmarks and external clients working after the display-name migration.
+        yield return new PluginPageInfo
+        {
+            Name = "Treasure-Maps",
             EmbeddedResourcePath = GetType().Namespace + ".Configuration.config.html"
         };
 
