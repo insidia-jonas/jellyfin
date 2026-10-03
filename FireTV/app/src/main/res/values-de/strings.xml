@@ -34,7 +34,7 @@
     <string name="close">Schließen</string>
     <string name="exit">Beenden</string>
     <string name="client_menu">Jellyfin</string>
-    <string name="client_menu_help">Menü öffnet diese Leiste. Im Film: Hoch für Ton und Untertitel. Zweimal Zurück vom Home beendet.</string>
+    <string name="client_menu_help">Menü öffnet diese Leiste. Im Film: Hoch für Ton und Untertitel. Zurück auf der Startseite öffnet das Menü. Zum Schließen „Beenden“ wählen.</string>
     <string name="webview_error_title">Mediathek nicht erreichbar</string>
     <string name="webview_error">Die Web-Oberfläche konnte nicht geladen werden. Prüfe, ob der Server läuft und dieser Fire TV ihn erreicht.</string>
     <string name="press_back_again">Nochmal Zurück zum Beenden</string>

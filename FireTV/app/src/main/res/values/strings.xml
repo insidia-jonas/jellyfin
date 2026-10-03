@@ -40,7 +40,7 @@
     <string name="close">Close</string>
     <string name="exit">Exit</string>
     <string name="client_menu">Jellyfin</string>
-    <string name="client_menu_help">Menu opens this rail. During playback, Up opens audio and subtitles. Back twice from Home exits.</string>
+    <string name="client_menu_help">Menu opens this rail. During playback, Up opens audio and subtitles. Back on Home opens the menu. Select Exit to close the app.</string>
     <string name="webview_error_title">Library unavailable</string>
     <string name="webview_error">The web interface could not be loaded. Check that the server is running and that this Fire TV can reach it.</string>
     <string name="press_back_again">Press Back again to exit</string>
