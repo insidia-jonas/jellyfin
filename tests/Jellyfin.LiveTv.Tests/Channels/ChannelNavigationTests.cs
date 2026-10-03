@@ -21,12 +21,36 @@ using MediaBrowser.Model.Querying;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Moq.Protected;
 using Xunit;
 
 namespace Jellyfin.LiveTv.Tests.Channels;
 
 public class ChannelNavigationTests
 {
+    [Theory]
+    [InlineData("Navigation test", "Indexer", 1)]
+    [InlineData("", "Indexer", 1)]
+    [InlineData("My collection", "My collection", 0)]
+    public async Task ListingMigratesProviderBrandingOnceAndPreservesCustomNames(string storedName, string expectedName, int saves)
+    {
+        using var fixture = new Fixture();
+        fixture.Root.Name = storedName;
+        fixture.Provider.SetupGet(x => x.Name).Returns("Indexer");
+
+        for (var i = 0; i < 2; i++)
+        {
+            var channels = await fixture.Manager.GetChannelsInternalAsync(new ChannelQuery());
+            var channel = Assert.Single(channels.Items);
+            Assert.Same(fixture.Root, channel);
+            Assert.Equal(expectedName, channel.Name);
+        }
+
+        fixture.Library.Verify(x => x.UpdateItemAsync(fixture.Root, null!, ItemUpdateType.MetadataEdit, It.IsAny<CancellationToken>()), Times.Exactly(saves));
+        fixture.Provider.Verify(x => x.GetChannelItems(It.IsAny<InternalChannelItemQuery>(), It.IsAny<CancellationToken>()), Times.Never());
+        fixture.VerifyNoDeletes();
+    }
+
     [Fact]
     public async Task DisplayRenamePreservesChannelAndExistingItemIdentity()
     {
@@ -141,7 +165,12 @@ public class ChannelNavigationTests
                 .ReturnsAsync(new[] { title });
             Library.Setup(x => x.GetNewItemId(It.IsAny<string>(), It.IsAny<Type>()))
                 .Returns((string key, Type type) => (key + type.Name).GetMD5());
-            Root = new Channel { Id = Library.Object.GetNewItemId("Channel Navigation test", typeof(Channel)), Name = "Navigation test" };
+            var root = new Mock<Channel> { CallBase = true };
+            root.Protected().Setup<string>("CreateSortName").Returns("Navigation test");
+            root.Setup(x => x.GetClientTypeName()).Returns("Channel");
+            Root = root.Object;
+            Root.Id = Library.Object.GetNewItemId("Channel Navigation test", typeof(Channel));
+            Root.Name = "Navigation test";
             Root.ChannelId = Root.Id;
             Items[Root.Id] = Root;
             Seed<Folder>("categories", Root.Id).Name = "Categories";

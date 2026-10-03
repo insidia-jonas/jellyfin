@@ -329,9 +329,25 @@ namespace Jellyfin.LiveTv.Channels
         {
             foreach (IChannel channel in GetAllChannels())
             {
-                yield return GetChannel(GetInternalChannelId(channel.DataKey)) ?? await GetChannel(channel, CancellationToken.None).ConfigureAwait(false);
+                var item = GetChannel(GetInternalChannelId(channel.DataKey));
+                if (item is null)
+                {
+                    item = await GetChannel(channel, CancellationToken.None).ConfigureAwait(false);
+                }
+                else if (NeedsDisplayNameUpdate(item, channel))
+                {
+                    item.Name = channel.Name;
+                    await _libraryManager.UpdateItemAsync(item, null, ItemUpdateType.MetadataEdit, CancellationToken.None).ConfigureAwait(false);
+                }
+
+                yield return item;
             }
         }
+
+        private static bool NeedsDisplayNameUpdate(Channel item, IChannel provider)
+            => string.IsNullOrWhiteSpace(item.Name)
+                || (!string.Equals(provider.DataKey, provider.Name, StringComparison.Ordinal)
+                    && string.Equals(item.Name, provider.DataKey, StringComparison.Ordinal));
 
         private MediaSourceInfo[] GetSavedMediaSources(BaseItem item)
         {
@@ -491,9 +507,7 @@ namespace Jellyfin.LiveTv.Channels
             item.OfficialRating = GetOfficialRating(channelInfo.ParentalRating);
             item.Overview = channelInfo.Description;
 
-            if (string.IsNullOrWhiteSpace(item.Name)
-                || (!string.Equals(channelInfo.DataKey, channelInfo.Name, StringComparison.Ordinal)
-                    && string.Equals(item.Name, channelInfo.DataKey, StringComparison.Ordinal)))
+            if (NeedsDisplayNameUpdate(item, channelInfo))
             {
                 item.Name = channelInfo.Name;
                 forceUpdate = true;
