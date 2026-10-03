@@ -1,8 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.TreasureMaps.Arr;
+using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.Movies;
+using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Entities;
 using Microsoft.Extensions.Hosting;
@@ -24,6 +29,9 @@ public sealed class LibraryRefreshService : BackgroundService
     private readonly ILogger<LibraryRefreshService> _logger;
     private readonly HashSet<string> _seenCompleted = new(StringComparer.Ordinal);
     private readonly CompletedDownloadImporter _importer;
+    private readonly ArrClient _arr;
+    private readonly HashSet<string> _arrCompleted = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, DateTimeOffset> _arrRetry = new(StringComparer.Ordinal);
     private bool _attached;
 
     /// <summary>
@@ -34,17 +42,20 @@ public sealed class LibraryRefreshService : BackgroundService
     /// <param name="grabService">The grab store (only Treasure-Maps jobs trigger an import).</param>
     /// <param name="importer">Discovers completed files without a global scan.</param>
     /// <param name="logger">The logger.</param>
+    /// <param name="arr">Registers direct downloads with Sonarr/Radarr.</param>
     public LibraryRefreshService(
         ILibraryManager libraryManager,
         SabnzbdClient sabnzbd,
         GrabService grabService,
         CompletedDownloadImporter importer,
+        ArrClient arr,
         ILogger<LibraryRefreshService> logger)
     {
         _libraryManager = libraryManager;
         _sabnzbd = sabnzbd;
         _grabService = grabService;
         _importer = importer;
+        _arr = arr;
         _logger = logger;
     }
 
@@ -98,6 +109,51 @@ public sealed class LibraryRefreshService : BackgroundService
                 _logger.LogInformation("Completed Treasure-Maps download '{Name}' discovered; metadata queued", item.Name);
             }
         }
+
+        // A slow/offline Arr or pending metadata must never block Jellyfin discovery.
+        var pending = items.Where(i => IsCompleted(i) && !string.IsNullOrWhiteSpace(i.Storage)
+            && _grabService.IsTracked(i.Id, i.Name) && !_arrCompleted.Contains(i.Id ?? i.Name ?? string.Empty)
+            && (!_arrRetry.TryGetValue(i.Id ?? i.Name ?? string.Empty, out var at) || at <= DateTimeOffset.UtcNow)).Take(2);
+        foreach (var item in pending)
+        {
+            var key = item.Id ?? item.Name ?? string.Empty;
+            _arrRetry[key] = DateTimeOffset.UtcNow.AddMinutes(2);
+            try
+            {
+                var series = _grabService.Lookup(item.Id, item.Name)?.Kind == "tv";
+                if (await _arr.SyncCompletedAsync(series, item.Storage!, FindTitle(item.Storage!, series), cancellationToken).ConfigureAwait(false))
+                {
+                    _arrCompleted.Add(key);
+                    _arrRetry.Remove(key);
+                    _logger.LogInformation("Completed Treasure-Maps title registered with {Service}; targeted file scan queued", series ? "Sonarr" : "Radarr");
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception ex) { _logger.LogDebug("Arr library registration will retry ({ErrorType})", ex.GetType().Name); }
+        }
+    }
+
+    private ArrTitle? FindTitle(string storage, bool series)
+    {
+        BaseItem? item = _libraryManager.FindByPath(storage, null);
+        if (!series && item is not Movie && Directory.Exists(storage))
+        {
+            item = Directory.EnumerateFiles(storage).Where(LibraryPaths.IsLibraryVideo)
+                .Select(path => _libraryManager.FindByPath(path, false)).OfType<Movie>().FirstOrDefault();
+        }
+
+        if (series)
+        {
+            var ancestor = storage;
+            while (item is not Series && !string.IsNullOrEmpty(ancestor))
+            {
+                ancestor = Path.GetDirectoryName(ancestor);
+                if (ancestor is not null) { item = _libraryManager.FindByPath(ancestor, true); }
+            }
+        }
+
+        return item is Movie or Series && item.GetProviderId(MetadataProvider.Imdb) is { Length: > 0 } imdb
+            ? new ArrTitle(item.Name, series, imdb, item.ProductionYear) : null;
     }
 
     private async Task AttachFromSabnzbdAsync(CancellationToken cancellationToken)

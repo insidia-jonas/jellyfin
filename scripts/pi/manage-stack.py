@@ -24,6 +24,9 @@ import uuid
 import xml.etree.ElementTree as ET
 import zipfile
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import stack_automation
+
 PLUGIN_ID = 'e2c9a6f4-8b1d-4f3a-9c2e-7a5b6d4c3e21'
 SERVICE = 'jellyfin12'
 
@@ -286,7 +289,35 @@ def install_missing(args, account, services):
         if name == 'sabnzbd':
             run('apt-get', 'update')
             run('apt-get', 'install', '-y', 'sabnzbdplus')
-            print('SABnzbd installed from configured Debian repositories. Complete its Usenet account setup, then rerun --configure-only.')
+            data = Path('/var/lib/sabnzbd')
+            data.mkdir(exist_ok=True)
+            config = data / 'sabnzbd.ini'
+            if config.exists():
+                raise RuntimeError('Existing SABnzbd config found; refusing to replace it')
+            seed = '[misc]\nhost = 127.0.0.1\nport = 8080\nbrowser = 0\napi_key = ' + uuid.uuid4().hex + '\nnzb_key = ' + uuid.uuid4().hex + '\n'
+            setup = stack_automation.load_setup(args.setup_config)
+            if setup:
+                for key, rel in [('download_dir', 'incomplete'), ('complete_dir', 'complete')]:
+                    folder = Path(setup['mediaRoot']) / 'Downloads' / rel
+                    stack_automation.ensure_directory(folder, account)
+                    seed += key + ' = ' + json.dumps(str(folder)) + '\n'
+            config.write_text(seed)
+            chown_tree(data, account)
+            config.chmod(0o600)
+            unit = Path('/etc/systemd/system/sabnzbdplus.service')
+            unit.write_text(f'[Unit]\nDescription=SABnzbd Media Stack\nAfter=network-online.target\n\n[Service]\nUser={account.pw_name}\nUMask=0002\n'
+                            f'ExecStart=/usr/bin/sabnzbdplus -f {config} -s 127.0.0.1:8080 -b 0\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target\n')
+            run('systemctl', 'daemon-reload')
+            run('systemctl', 'enable', '--now', 'sabnzbdplus')
+            sab = {'service': 'sabnzbd', 'url': 'http://127.0.0.1:8080', 'apiKey': sab_misc(config.read_text())['api_key']}
+            for attempt in range(30):
+                try:
+                    stack_automation.api(sab, {'mode': 'queue'})
+                    break
+                except (OSError, RuntimeError):
+                    if attempt == 29: raise RuntimeError('SABnzbd did not become ready') from None
+                    time.sleep(1)
+            print('SABnzbd started with a private API key. Provider and category setup follows automatically.')
             continue
         destination = Path('/opt') / name.capitalize()
         data = Path('/var/lib') / name
@@ -312,18 +343,29 @@ def install_missing(args, account, services):
         run('systemctl', 'enable', '--now', name)
         for _ in range(30):
             if (data / 'config.xml').is_file():
-                break
+                try:
+                    service = {'service': name, **arr_configuration(data / 'config.xml', 7878 if name == 'radarr' else 8989)}
+                    stack_automation.api(service, 'system/status')
+                    break
+                except (OSError, RuntimeError):
+                    pass
             time.sleep(1)
+        else:
+            raise RuntimeError(name + ': API did not become ready')
 
 
-def reconcile(args, home):
+def reconcile(args, home, choices=None, setup=None):
+    choices, setup = choices or {}, setup or {}
     token = admin_token(args.url, args.out / 'data')
     if not token:
         print('Complete the Jellyfin administrator setup/login, then rerun --configure-only; no credentials were created or reset.')
         return False
     settings = request(args.url, 'TreasureMaps/Management/Settings', token)
     known = {s['service']: s for s in settings['connections']}
-    for found in discover(args, home):
+    if setup.get('indexer') and not known['treasuremaps']['keyPresent']:
+        request(args.url, 'TreasureMaps/Management/Settings', token, 'POST', {'service': 'treasuremaps', **setup['indexer']})
+    detected = {s['service']: s for s in discover(args, home)}
+    for found in detected.values():
         current = known[found['service']]
         # Never replace manually configured remote servers or their credentials.
         if current['keyPresent']:
@@ -335,9 +377,24 @@ def reconcile(args, home):
         if item['service'] not in ('radarr', 'sonarr') or not item['keyPresent'] or item['profile'] > 0 and item['root']:
             continue
         options = request(args.url, 'TreasureMaps/Management/Options/' + item['service'], token)
-        if len(options['profiles']) == 1 and len(options['folders']) == 1:
+        local_url = detected.get(item['service'], {}).get('url', '')
+        choice = choices.get(item['service']) if item['url'].rstrip('/') == local_url.rstrip('/') else None
+        if choice:
+            request(args.url, 'TreasureMaps/Management/Settings', token, 'POST',
+                    {'service': item['service'], 'url': item['url'], 'profile': item['profile'] or choice['profile'], 'root': item['root'] or choice['root']})
+        elif len(options['profiles']) == 1 and len(options['folders']) == 1:
             request(args.url, 'TreasureMaps/Management/Settings', token, 'POST',
                     {'service': item['service'], 'url': item['url'], 'profile': options['profiles'][0]['id'], 'root': options['folders'][0]['path']})
+    if setup.get('mediaRoot'):
+        route = 'Plugins/' + PLUGIN_ID + '/Configuration'
+        config = request(args.url, route, token)
+        changed = False
+        for key, folder in [('SabnzbdMovieFolder', 'Filme'), ('SabnzbdTvFolder', 'Serien')]:
+            if not config.get(key) or config[key] in ('movies', 'tv'):
+                config[key] = str(Path(setup['mediaRoot']) / folder)
+                changed = True
+        if changed:
+            request(args.url, route, token, 'POST', config)
     links = request(args.url, 'TreasureMaps/Management/Connections/Apply', token, 'POST', timeout=180)['links']
     for link in links:
         print(link['from'] + ' -> ' + link['to'] + ': ' + link['state'] + ' (' + link['detail'] + ')')
@@ -357,10 +414,12 @@ def main(argv=None):
     parser.add_argument('--apply', action='store_true')
     parser.add_argument('--configure-only', action='store_true')
     parser.add_argument('--install-missing', action='store_true')
+    parser.add_argument('--setup-config', type=Path, help='Private JSON with mediaRoot, indexer and Usenet credentials for new systems')
     parser.add_argument('--allow-dirty', action='store_true', help='Allow a locally reviewed development bundle')
     for service in ('radarr', 'sonarr', 'sab'):
         parser.add_argument('--' + service + '-config')
     args = parser.parse_args(argv)
+    setup = stack_automation.load_setup(args.setup_config)
     import pwd
     account = pwd.getpwnam(args.user)
     home = Path(account.pw_dir)
@@ -414,7 +473,8 @@ def main(argv=None):
                 args.bundle = build / 'release.zip'
                 run(*prefix, 'python3', args.repo / 'scripts/pi/package-release.py', '--repo', args.repo, '--server', build / 'server', '--output', args.bundle)
             deploy(args, account, args.bundle)
-        okay = reconcile(args, home)
+        choices = stack_automation.configure(discover(args, home), setup, account)
+        okay = reconcile(args, home, choices, setup)
         print('Medienzentrale: ' + args.url.rstrip('/') + '/web/#/configurationpage?name=TreasureMapsManagement')
         return 0 if okay else 2
 

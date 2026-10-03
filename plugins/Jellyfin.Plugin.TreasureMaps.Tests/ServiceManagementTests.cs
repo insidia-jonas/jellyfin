@@ -112,6 +112,7 @@ public class ServiceManagementTests
             SabnzbdUrl = "http://sab.test:8080", SabnzbdApiKey = "sab-secret", BaseUrl = "https://indexer.test", ApiKey = "indexer-secret"
         };
         public Dictionary<string, JsonArray> Resources { get; } = new();
+        public Dictionary<string, JsonObject> Configs { get; } = new();
         public HashSet<string> Categories { get; } = new();
         private readonly List<AuthenticationInfo> _keys = new();
         public int Writes { get; private set; }
@@ -147,6 +148,24 @@ public class ServiceManagementTests
             if (route == "qualityprofile") { return Reply(new JsonArray(new JsonObject { ["id"] = 2, ["name"] = "Existing profile" })); }
             if (route == "rootfolder") { return Reply(new JsonArray(new JsonObject { ["path"] = service == "radarr" ? "/movies" : "/series" })); }
             if (route == "system/status") { return Reply(new JsonObject { ["version"] = "1.0" }); }
+            if (route.StartsWith("config/", StringComparison.Ordinal))
+            {
+                var configKey = service + "/" + route.Split('/')[1];
+                if (!Configs.TryGetValue(configKey, out var config))
+                {
+                    config = new JsonObject { ["id"] = 1, ["enableCompletedDownloadHandling"] = false, ["rssSyncInterval"] = 0, ["unrelated"] = "preserved" };
+                    Configs[configKey] = config;
+                }
+
+                if (request.Method == HttpMethod.Put)
+                {
+                    config = JsonNode.Parse(await request.Content!.ReadAsStringAsync(cancellationToken))!.AsObject();
+                    Configs[configKey] = config;
+                    Writes++;
+                }
+
+                return Reply(config);
+            }
             var resource = route.Split('/')[0];
             var key = service + "/" + resource;
             if (!Resources.TryGetValue(key, out var resources)) { resources = new JsonArray(); Resources[key] = resources; }

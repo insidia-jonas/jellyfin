@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -129,5 +130,63 @@ public class ArrClientTests
         using var client = new ArrClient(server, Config);
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => client.RequestAsync(new("Movie", false, "tt123", null), TestContext.Current.CancellationToken));
         Assert.Equal("Radarr meldet HTTP 401.", error.Message);
+    }
+
+    [Fact]
+    public async Task CompletedSeriesUsesExistingFolderIdentityAndNeverSearchesOrChangesMonitoring()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "arr-series");
+        var folder = Path.Combine(root, "Monster");
+        using var server = new Server { Reply = (_, path, _) => path.EndsWith("/series", StringComparison.Ordinal)
+            ? new JsonArray(new JsonObject { ["id"] = 7, ["path"] = folder, ["imdbId"] = "tt123", ["monitored"] = false }).ToJsonString() : "{}" };
+        using var client = new ArrClient(server, () => { var c = Config(); c.SonarrRootFolder = root; return c; });
+        Assert.True(await client.SyncCompletedAsync(true, Path.Combine(folder, "Season 4"), new("Wrong metadata", true, "tt999", 2022), TestContext.Current.CancellationToken));
+        var post = Assert.Single(server.Calls, x => x.Method != "GET");
+        Assert.Equal("RescanSeries", post.Body!["name"]!.ToString());
+        Assert.Equal(7, post.Body["seriesId"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task CompletedTitleOutsideLibraryNeverSendsRequests()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "arr-series");
+        using var server = new Server();
+        using var client = new ArrClient(server, () => { var c = Config(); c.SonarrRootFolder = root; return c; });
+        Assert.False(await client.SyncCompletedAsync(true, root + "-other/show", null, TestContext.Current.CancellationToken));
+        Assert.False(await client.SyncCompletedAsync(true, root, null, TestContext.Current.CancellationToken));
+        Assert.Empty(server.Calls);
+    }
+
+    [Fact]
+    public async Task NewCompletedSeriesWaitsForIdentityAndAddsFutureMonitoringWithoutBackfill()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "arr-series");
+        using var server = new Server { Reply = (method, path, body) => method == "POST" ? "{\"id\":7}"
+            : path.Contains("lookup", StringComparison.Ordinal) ? "[{\"tvdbId\":44,\"imdbId\":\"tt123\",\"title\":\"Show\"}]" : "[]" };
+        using var client = new ArrClient(server, () => { var c = Config(); c.SonarrRootFolder = root; return c; });
+        var storage = Path.Combine(root, "Show", "Season 1");
+        Assert.False(await client.SyncCompletedAsync(true, storage, null, TestContext.Current.CancellationToken));
+        Assert.True(await client.SyncCompletedAsync(true, storage, new("Show", true, "tt123", 2024), TestContext.Current.CancellationToken));
+        var add = Assert.Single(server.Calls, x => x.Method == "POST" && x.Path.EndsWith("/series", StringComparison.Ordinal));
+        Assert.Equal(Path.Combine(root, "Show"), add.Body!["path"]!.ToString());
+        Assert.Equal("future", add.Body["addOptions"]!["monitor"]!.ToString());
+        Assert.False(add.Body["addOptions"]!["searchForMissingEpisodes"]!.GetValue<bool>());
+        Assert.DoesNotContain(server.Calls, x => x.Body?["name"]?.ToString()?.Contains("Search", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public async Task UnassignedMovieUsesOnlyOneApprovedFileWithinItsOwnFolder()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "arr-movies");
+        var folder = Path.Combine(root, "Movie");
+        using var server = new Server { Reply = (_, path, _) => path.Contains("manualimport", StringComparison.Ordinal)
+            ? new JsonArray(new JsonObject { ["path"] = Path.Combine(folder, "obfuscated.mkv"), ["movie"] = new JsonObject { ["id"] = 2 }, ["rejections"] = new JsonArray() }).ToJsonString()
+            : path.EndsWith("/movie", StringComparison.Ordinal) ? new JsonArray(new JsonObject { ["id"] = 2, ["path"] = folder, ["hasFile"] = false }).ToJsonString() : "{}" };
+        using var client = new ArrClient(server, () => { var c = Config(); c.RadarrRootFolder = root; return c; });
+        Assert.True(await client.SyncCompletedAsync(false, folder, null, TestContext.Current.CancellationToken));
+        var post = Assert.Single(server.Calls, x => x.Method == "POST");
+        Assert.Equal("ManualImport", post.Body!["name"]!.ToString());
+        Assert.Equal("copy", post.Body["importMode"]!.ToString());
+        Assert.Equal(2, post.Body["files"]![0]!["movieId"]!.GetValue<int>());
     }
 }

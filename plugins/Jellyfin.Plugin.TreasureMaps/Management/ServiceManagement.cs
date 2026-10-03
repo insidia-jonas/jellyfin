@@ -127,8 +127,16 @@ public sealed class ServiceManagement : IDisposable
         catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or OperationCanceledException or ArgumentException or System.Text.Json.JsonException)
         {
             ct.ThrowIfCancellationRequested();
-            return new { id = service, configured, online = false, url, version = (string?)null, responseMs = timer.ElapsedMilliseconds,
-                message = configured ? "Nicht erreichbar oder Anmeldung fehlgeschlagen" : "Einrichtung fehlt" };
+            return new
+            {
+                id = service,
+                configured,
+                online = false,
+                url,
+                version = (string?)null,
+                responseMs = timer.ElapsedMilliseconds,
+                message = configured ? "Nicht erreichbar oder Anmeldung fehlgeschlagen" : "Einrichtung fehlt"
+            };
         }
     }
 
@@ -290,6 +298,27 @@ public sealed class ServiceManagement : IDisposable
         if (indexer is null) { fields["categories"] = new JsonArray(isSeries ? 5000 : 2000); }
         await EnsureResourceAsync(service, "indexer", "Newznab", "Treasure-Maps", indexer, fields,
             new JsonObject { ["enableRss"] = true, ["enableAutomaticSearch"] = true, ["enableInteractiveSearch"] = true }, apply, "Treasure Maps", service, links, ct).ConfigureAwait(false);
+
+        // A successful connection test alone does not mean automatic imports/search are enabled.
+        foreach (var (resource, field, desired) in new[]
+        {
+            ("downloadclient", "enableCompletedDownloadHandling", (JsonNode)JsonValue.Create(true)!),
+            ("indexer", "rssSyncInterval", (JsonNode)JsonValue.Create(15)!)
+        })
+        {
+            var current = (await SendAsync(service, "config/" + resource, ct).ConfigureAwait(false)).AsObject();
+            var enabled = field == "rssSyncInterval" ? Number(current[field]) > 0 : current[field]?.GetValue<bool>() == true;
+            if (!enabled && apply)
+            {
+                current[field] = desired.DeepClone();
+                await SendAsync(service, "config/" + resource + "/" + current["id"]!.GetValue<int>(), ct, current, HttpMethod.Put).ConfigureAwait(false);
+                var verified = await SendAsync(service, "config/" + resource, ct).ConfigureAwait(false);
+                if (!JsonNode.DeepEquals(verified[field], desired)) { throw new InvalidOperationException("Automatik-Einstellung wurde nicht übernommen."); }
+            }
+
+            links.Add(new Connection(service + "-automation-" + resource, service, field == "rssSyncInterval" ? "Neue Veröffentlichungen" : "Bibliotheksimport",
+                enabled || apply ? "ready" : "missing", field == "rssSyncInterval" ? "RSS-Abgleich für überwachte Folgen/Titel." : "Abgeschlossene Downloads automatisch übernehmen.", !enabled && apply));
+        }
     }
 
     private async Task EnsureResourceAsync(string service, string resource, string implementation, string name, JsonObject? existing,

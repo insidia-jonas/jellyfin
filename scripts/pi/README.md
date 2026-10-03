@@ -69,14 +69,65 @@ relocated. Containers/remote services need appropriate reachable URLs and shared
 mounts; set the Jellyfin callback URL accordingly. Missing/unreachable directories are
 reported instead of silently creating an empty library.
 
-`--install-missing` optionally installs absent Radarr/Sonarr from their official stable
-download endpoints and SABnzbd from the configured Debian repositories. Existing units
-and data prevent duplicate installation. New services still require their own initial
-account/provider setup, media roots and quality selection; the script does not invent
-Usenet or indexer credentials. Configure Debian's contrib/backports if SABnzbd is not
-available. Sources: [Servarr](https://github.com/Servarr/Wiki/blob/master/servarr/servarr-install-script.sh),
+`--install-missing` installs absent Radarr/Sonarr from their official stable download
+endpoints and SABnzbd from the configured Debian repositories. Existing units and data
+prevent duplicate installation. New SABnzbd starts on loopback with generated private
+API keys; the management portal can operate it immediately. For direct LAN access to its
+own UI, configure a login and listening address in SABnzbd. Configure Debian's
+contrib/backports if SABnzbd is not available. Sources: [Servarr](https://github.com/Servarr/Wiki/blob/master/servarr/servarr-install-script.sh),
 [Sonarr](https://github.com/Sonarr/Sonarr/blob/develop/distribution/debian/install.sh),
 [SABnzbd](https://sabnzbd.org/wiki/installation/install-debian).
+
+### New systems: configure the complete download chain
+
+Mount the media disk and create its dedicated media directory first. Create a private
+JSON file outside the checkout, for example `/root/media-stack.json`, with mode `600`:
+
+```json
+{
+  "mediaRoot": "/srv/media",
+  "qualityProfile": "HD-1080p",
+  "indexer": { "url": "https://YOUR-INDEXER", "apiKey": "YOUR-KEY" },
+  "usenet": {
+    "host": "YOUR-NEWS-SERVER", "port": 563, "ssl": true,
+    "username": "YOUR-USER", "password": "YOUR-PASSWORD", "connections": 8
+  }
+}
+```
+
+```sh
+sudo chmod 600 /root/media-stack.json
+sudo python3 scripts/pi/manage-stack.py --user jonas --apply --install-missing \
+  --setup-config /root/media-stack.json --web-dist /path/to/jellyfin-web/dist
+```
+
+The installer starts missing services, waits for their APIs, creates movie/series roots
+and separate incomplete/completed download folders, sets up the Usenet account and
+SABnzbd categories/sorting, selects the named existing quality profile, enables completed
+download handling and RSS, and configures the indexer/API links in both directions.
+It never creates fictitious provider credentials. Finish Jellyfin's administrator wizard
+once, then repeat with `--configure-only` and the same setup file to complete its links.
+Review language/custom-format preferences in Arr when starting from factory profiles.
+
+Existing Usenet servers, custom categories, paths, positive RSS intervals, monitored
+seasons, and profile choices survive repeated runs. New directories share the service
+owner; existing libraries are not recursively chowned. Missing provider credentials or
+media roots fail with a concrete message instead of reporting a ready download chain.
+Arr-managed downloads use staging categories `sonarr` / `radarr`; SAB sorting only covers
+direct Treasure Maps categories `tv` / `movies`.
+
+Sonarr uses RSS to discover newly uploaded releases; it does not repeatedly search all
+old missing episodes. A series, season **and episode** must be monitored. Importing a
+completed direct Treasure Maps series registers future monitoring without downloading
+its entire back catalogue. Existing monitoring choices remain unchanged. See the
+[Sonarr quick start](https://wiki.servarr.com/sonarr/quick-start-guide).
+
+Plugin 1.0.7 also registers completed direct downloads with Arr using existing folder
+identity first, then a unique IMDb lookup after Jellyfin metadata is available. It scans
+only the affected title, preserves existing profiles/paths and retries unavailable Arr
+services or pending metadata. A single approved but unassigned movie file can be attached
+in place through Radarr's import API. Ambiguous identities or files are never guessed.
+Upstream series aliases can still require an explicit import assignment in Sonarr.
 
 ## Unified management
 

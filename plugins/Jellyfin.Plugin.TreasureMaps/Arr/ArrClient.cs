@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -170,4 +171,77 @@ public sealed class ArrClient : IDisposable
         else { command["movieIds"] = new JsonArray(JsonValue.Create(id)); }
         await SendAsync(s, HttpMethod.Post, "command", command, ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Registers a completed direct download already in the final library, then rescans only
+    /// that title. Existing monitoring, profiles and paths are preserved; no search is started.
+    /// Returns false while metadata/configuration is missing so the caller can retry.
+    /// </summary>
+    public async Task<bool> SyncCompletedAsync(bool series, string storage, ArrTitle? title, CancellationToken ct)
+    {
+        var s = GetSettings(series);
+        if (!Configured(s) || !Path.IsPathFullyQualified(storage) || !Path.IsPathFullyQualified(s.Root)) { return false; }
+        var relative = Path.GetRelativePath(s.Root, storage);
+        if (relative == "." || relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) || Path.IsPathRooted(relative)) { return false; }
+        var folder = Path.Combine(s.Root, relative.Split(Path.DirectorySeparatorChar)[0]);
+        await _requests.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var all = (await SendAsync(s, HttpMethod.Get, s.Resource, null, ct).ConfigureAwait(false)).AsArray().OfType<JsonObject>().ToList();
+            // The existing folder identity wins over potentially incorrect Jellyfin metadata.
+            var existing = all.FirstOrDefault(x => SamePath(x["path"]?.ToString(), folder));
+            if (existing is null)
+            {
+                if (title is null || title.IsSeries != series || !System.Text.RegularExpressions.Regex.IsMatch(title.ImdbId, "^tt[0-9]+$")) { return false; }
+                // Do not relocate an existing title or silently create a second copy.
+                if (all.Any(x => string.Equals(x["imdbId"]?.ToString(), title.ImdbId, StringComparison.OrdinalIgnoreCase))) { return false; }
+                var lookup = await SendAsync(s, HttpMethod.Get, s.Resource + "/lookup?term=" + Uri.EscapeDataString("imdb:" + title.ImdbId), null, ct).ConfigureAwait(false);
+                var matches = lookup.AsArray().OfType<JsonObject>().Where(x => x["imdbId"]?.ToString() == title.ImdbId).ToList();
+                if (matches.Count != 1 || (matches[0][s.Identity]?.GetValue<int>() ?? 0) <= 0) { return false; }
+                var candidate = (JsonObject)matches[0].DeepClone();
+                candidate.Remove("id");
+                candidate["path"] = folder;
+                candidate["rootFolderPath"] = s.Root;
+                candidate["qualityProfileId"] = s.Profile;
+                candidate["monitored"] = series;
+                if (series)
+                {
+                    candidate["seasonFolder"] = true;
+                    candidate["monitorNewItems"] = "all";
+                    candidate["addOptions"] = new JsonObject { ["monitor"] = "future", ["searchForMissingEpisodes"] = false, ["searchForCutoffUnmetEpisodes"] = false };
+                }
+                else
+                {
+                    candidate["minimumAvailability"] = "released";
+                    candidate["addOptions"] = new JsonObject { ["searchForMovie"] = false };
+                }
+
+                existing = (await SendAsync(s, HttpMethod.Post, s.Resource, candidate, ct).ConfigureAwait(false)).AsObject();
+            }
+
+            var command = new JsonObject { ["name"] = series ? "RescanSeries" : "RescanMovie", [series ? "seriesId" : "movieId"] = existing["id"]!.GetValue<int>() };
+            if (!series && existing["hasFile"]?.GetValue<bool>() != true)
+            {
+                // Scene-obfuscated filenames can remain unassigned after an ordinary disk scan.
+                // Only accept one unambiguous, approved file already in this movie's own folder.
+                var rows = (await SendAsync(s, HttpMethod.Get, "manualimport?movieId=" + existing["id"]!.GetValue<int>() + "&filterExistingFiles=true", null, ct).ConfigureAwait(false)).AsArray();
+                var approved = rows.OfType<JsonObject>().Where(r => r["movie"]?["id"]?.GetValue<int>() == existing["id"]!.GetValue<int>()
+                    && (r["rejections"]?.AsArray().Count ?? 0) == 0 && SamePath(Path.GetDirectoryName(r["path"]?.ToString()), folder)).ToList();
+                if (approved.Count == 1)
+                {
+                    var file = (JsonObject)approved[0].DeepClone();
+                    file["movieId"] = existing["id"]!.GetValue<int>();
+                    command = new JsonObject { ["name"] = "ManualImport", ["importMode"] = "copy", ["files"] = new JsonArray(file) };
+                }
+            }
+
+            await SendAsync(s, HttpMethod.Post, "command", command, ct).ConfigureAwait(false);
+            return true;
+        }
+        finally { _requests.Release(); }
+    }
+
+    private static bool SamePath(string? left, string right)
+        => !string.IsNullOrWhiteSpace(left) && Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar).Equals(
+            Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 }
