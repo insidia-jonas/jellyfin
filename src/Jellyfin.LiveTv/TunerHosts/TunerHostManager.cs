@@ -70,12 +70,17 @@ public class TunerHostManager : ITunerHostManager
             throw new ResourceNotFoundException();
         }
 
+        var config = _config.GetLiveTvConfiguration();
+        if (provider is M3UTunerHost)
+        {
+            var previous = config.TunerHosts.FirstOrDefault(t => string.Equals(t.Id, info.Id, StringComparison.OrdinalIgnoreCase));
+            M3uUrlFailover.PreserveChannelNamespace(info, previous);
+        }
+
         if (provider is IConfigurableTunerHost configurable)
         {
             await configurable.Validate(info).ConfigureAwait(false);
         }
-
-        var config = _config.GetLiveTvConfiguration();
 
         var list = config.TunerHosts;
         var index = Array.FindIndex(list, i => string.Equals(i.Id, info.Id, StringComparison.OrdinalIgnoreCase));

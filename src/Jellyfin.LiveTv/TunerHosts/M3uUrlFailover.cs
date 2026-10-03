@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
+using MediaBrowser.Common.Extensions;
 using MediaBrowser.Model.LiveTv;
 
 namespace Jellyfin.LiveTv.TunerHosts;
@@ -17,6 +19,17 @@ internal static class M3uUrlFailover
     public const int ConfirmedHangsBeforeSwitch = 2;
 
     private static readonly char[] UrlSeparators = ['|', '\n', '\r'];
+
+    /// <summary>Retains the legacy channel namespace before changing a listing URL.</summary>
+    /// <param name="info">The tuner being updated.</param>
+    /// <param name="previous">The previously saved tuner, when editing an existing source.</param>
+    internal static void PreserveChannelNamespace(TunerHostInfo info, TunerHostInfo? previous = null)
+    {
+        var source = previous ?? info;
+        info.ChannelIdNamespace = string.IsNullOrWhiteSpace(source.ChannelIdNamespace)
+            ? source.Url.GetMD5().ToString("N", CultureInfo.InvariantCulture)
+            : source.ChannelIdNamespace;
+    }
 
     /// <summary>
     /// Splits a tuner URL field that may contain several ingest playlists.

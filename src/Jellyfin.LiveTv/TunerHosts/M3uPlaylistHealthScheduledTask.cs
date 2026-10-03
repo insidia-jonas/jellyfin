@@ -160,6 +160,7 @@ public class M3uPlaylistHealthScheduledTask : IScheduledTask, IConfigurableSched
         // fallback order when changing only the playlist download address.
         var previousCandidates = M3uUrlFailover.GetCandidateUrls(tuner);
         var hasIngest = previousCandidates.Any(M3uUrlFailover.IsIngestEndpoint);
+        M3uUrlFailover.PreserveChannelNamespace(tuner);
         tuner.Url = best.Url;
         tuner.AlternateUrls = previousCandidates
             .Where(url => !string.Equals(url, best.Url, StringComparison.OrdinalIgnoreCase))

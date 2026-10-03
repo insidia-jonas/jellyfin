@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Jellyfin.LiveTv.Channels;
 using Jellyfin.LiveTv.Tests;
 using Jellyfin.LiveTv.TunerHosts;
+using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Net;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Channels;
@@ -16,6 +17,7 @@ using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Model.IO;
 using MediaBrowser.Model.LiveTv;
+using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Moq.Protected;
@@ -32,6 +34,34 @@ public sealed class M3UTunerHostListingCacheTests
     {
         Directory.CreateDirectory(_cachePath);
         LiveTvChannelSetIdentity.Reset();
+    }
+
+    [Fact]
+    public async Task SaveListingEditAndReloadPreservesActualChannelIds()
+    {
+        var saved = new TunerHostInfo { Id = Guid.NewGuid().ToString("N"), Type = "m3u", Url = "http://cdn.example/kodi.m3u" };
+        var requests = new List<Uri>();
+        const string playlist = "#EXTM3U\n#EXTINF:-1 tvg-id=\"film.de\",Film\nhttp://ingest.example/film.ts\n";
+        var host = CreateHost(saved, requests, playlist);
+        var before = Assert.Single(await host.GetChannels(saved, false, TestContext.Current.CancellationToken));
+        var options = new LiveTvOptions { TunerHosts = [saved] };
+        var config = new Mock<IConfigurationManager>();
+        config.Setup(c => c.GetConfiguration("livetv")).Returns(options);
+        var manager = new TunerHostManager(NullLogger<TunerHostManager>.Instance, config.Object, Mock.Of<ITaskManager>(), [host]);
+
+        var updated = await manager.SaveTunerHost(new TunerHostInfo { Id = saved.Id, Type = "m3u", Url = "https://cdn.example/extreme.m3u" }, false);
+        var after = Assert.Single(host.GetCachedChannels());
+        Assert.Equal(before.Id, after.Id);
+        Assert.Equal("https://cdn.example/extreme.m3u", requests[^1].AbsoluteUri);
+
+        // A fresh host must keep the same identity, including a subsequent edit
+        // from an older client that does not send the namespace field.
+        var reloaded = CreateHost(updated, requests, playlist);
+        var refreshed = await reloaded.RefreshListingAsync(updated, null!, TestContext.Current.CancellationToken);
+        Assert.Equal(before.Id, Assert.Single(refreshed.Channels).Id);
+        var secondEdit = await manager.SaveTunerHost(new TunerHostInfo { Id = saved.Id, Type = "m3u", Url = "http://cdn.example/extreme.m3u" }, false);
+        Assert.Equal(updated.ChannelIdNamespace, secondEdit.ChannelIdNamespace);
+        Assert.Equal(before.Id, Assert.Single(host.GetCachedChannels()).Id);
     }
 
     [Fact]

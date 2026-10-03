@@ -1,5 +1,6 @@
 using System;
 using Jellyfin.LiveTv.TunerHosts;
+using MediaBrowser.Common.Extensions;
 using MediaBrowser.Model.LiveTv;
 using Xunit;
 
@@ -7,6 +8,21 @@ namespace Jellyfin.LiveTv.Tests.TunerHosts;
 
 public class M3uUrlFailoverTests
 {
+    [Fact]
+    public void ListingEditsAndSubsequentFailoversKeepLegacyChannelNamespace()
+    {
+        var saved = new TunerHostInfo { Url = "http://listing.example/kodi.m3u" };
+        var edited = new TunerHostInfo { Url = "https://listing.example/extreme.m3u" };
+        M3uUrlFailover.PreserveChannelNamespace(edited, saved);
+        Assert.Equal(saved.Url.GetMD5().ToString("N"), edited.ChannelIdNamespace);
+        edited.Url = "http://listing.example/extreme.m3u";
+        M3uUrlFailover.PreserveChannelNamespace(edited);
+        Assert.Equal(saved.Url.GetMD5().ToString("N"), edited.ChannelIdNamespace);
+        var olderClient = new TunerHostInfo { Url = "https://listing.example/list.m3u" };
+        M3uUrlFailover.PreserveChannelNamespace(olderClient, edited);
+        Assert.Equal(edited.ChannelIdNamespace, olderClient.ChannelIdNamespace);
+    }
+
     [Fact]
     public void SplitAndNormalize_PipeSeparatedUrls_StoresAlternates()
     {

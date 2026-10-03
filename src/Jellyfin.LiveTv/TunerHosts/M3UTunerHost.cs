@@ -70,7 +70,9 @@ namespace Jellyfin.LiveTv.TunerHosts
 
         private string GetFullChannelIdPrefix(TunerHostInfo info)
         {
-            return ChannelIdPrefix + info.Url.GetMD5().ToString("N", CultureInfo.InvariantCulture);
+            return ChannelIdPrefix + (string.IsNullOrWhiteSpace(info.ChannelIdNamespace)
+                ? info.Url.GetMD5().ToString("N", CultureInfo.InvariantCulture)
+                : info.ChannelIdNamespace);
         }
 
         protected override async Task<List<ChannelInfo>> GetChannelsInternal(TunerHostInfo tuner, CancellationToken cancellationToken)

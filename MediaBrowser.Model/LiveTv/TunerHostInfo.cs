@@ -21,6 +21,11 @@ namespace MediaBrowser.Model.LiveTv
 
         public string Url { get; set; }
 
+        /// <summary>
+        /// Gets or sets the persisted M3U channel namespace, preserving existing IDs when the listing URL changes.
+        /// </summary>
+        public string ChannelIdNamespace { get; set; }
+
         public string Type { get; set; }
 
         public string DeviceId { get; set; }
@@ -56,13 +61,13 @@ namespace MediaBrowser.Model.LiveTv
         public string EpgUrl { get; set; }
 
         /// <summary>
-        /// Gets or sets additional playlist URLs (other ingest servers) used for health scoring and failover.
+        /// Gets or sets additional listing URLs and host-only stream origins used for health checks and failover.
         /// The primary <see cref="Url"/> field may also contain pipe-separated URLs.
         /// </summary>
         public string[] AlternateUrls { get; set; }
 
         /// <summary>
-        /// Gets or sets the playlist URL currently selected by health checks.
+        /// Gets or sets the selected stream origin, or the selected listing when no separate origins are configured.
         /// </summary>
         public string ActiveUrl { get; set; }
 

@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.LiveTv.TunerHosts;
 using MediaBrowser.Common.Configuration;
+using MediaBrowser.Common.Extensions;
 using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Model.LiveTv;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -50,6 +51,7 @@ public class M3uPlaylistHealthScheduledTaskTests
 
         Assert.Equal([original, alternate], handler.Requests);
         Assert.Equal(alternate, tuner.Url);
+        Assert.Equal(original.GetMD5().ToString("N"), tuner.ChannelIdNamespace);
         Assert.Equal(alternate, M3uUrlFailover.GetPlaylistUrl(tuner));
         Assert.Contains(original, tuner.AlternateUrls);
         Assert.Equal(separateIngest ? ingest : alternate, tuner.ActiveUrl);
