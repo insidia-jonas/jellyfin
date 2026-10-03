@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -23,6 +24,83 @@ namespace Jellyfin.LiveTv.Tests.TunerHosts;
 
 public class SharedHttpStreamRecoveryTests
 {
+    public static bool HasFfmpeg => ChannelMediaProbeTests.HasFfmpeg;
+
+    [Fact(Skip = "Set JELLYFIN_TEST_FFMPEG to verify decoded fallback media.", SkipUnless = nameof(HasFfmpeg))]
+    public async Task ConfiguredAlternateSuppliesDecodableVideoAfterPrimaryFails()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var directory = Directory.CreateTempSubdirectory();
+        try
+        {
+            var transport = Path.Combine(directory.FullName, "video.ts");
+            await Ffmpeg(["-i", Path.Combine(AppContext.BaseDirectory, "Test Data", "health-video.mp4"), "-c", "copy", "-f", "mpegts", transport]);
+            using var fixture = new Fixture(HttpStatusCode.ServiceUnavailable, await File.ReadAllBytesAsync(transport, token));
+            await fixture.Stream.Open(token);
+            await using var reader = fixture.Stream.GetStream();
+            await WaitUntil(() => fixture.Health.GetHealth("channel").Status == "Healthy");
+            // Closing flushes the last file buffer; the test file-system mock keeps
+            // the captured output available to the existing reader for decoding.
+            await fixture.Stream.Close();
+            var capture = Path.Combine(directory.FullName, "received.ts");
+            await using (var file = File.Create(capture))
+            {
+                await reader.CopyToAsync(file, token);
+            }
+
+            var decoded = await Ffmpeg(["-i", capture, "-t", "1", "-map", "0:v:0", "-progress", "pipe:1", "-f", "null", "-"]);
+            Assert.True(ChannelMediaProbe.HasDecodedMedia(decoded, requireVideo: true));
+            Assert.Equal(["primary.example", "primary.example", "secondary.example"], fixture.Handler.Hosts);
+            Assert.Equal(1, fixture.Handler.MaximumActiveConnections);
+            Assert.Equal(0, fixture.Handler.ActiveConnections);
+            Assert.Equal("http://primary.example", fixture.Tuner.ActiveUrl);
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
+    private static async Task<string> Ffmpeg(string[] arguments)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(15));
+        var info = new ProcessStartInfo(Environment.GetEnvironmentVariable("JELLYFIN_TEST_FFMPEG")!)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true
+        };
+        foreach (var argument in new[] { "-nostdin", "-v", "error", "-threads", "1" })
+        {
+            info.ArgumentList.Add(argument);
+        }
+
+        foreach (var argument in arguments)
+        {
+            info.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(info)!;
+        var output = process.StandardOutput.ReadToEndAsync(deadline.Token);
+        var error = process.StandardError.ReadToEndAsync(deadline.Token);
+        try
+        {
+            await process.WaitForExitAsync(deadline.Token);
+            Assert.True(process.ExitCode == 0, await error);
+            return await output;
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync(CancellationToken.None);
+            }
+        }
+    }
+
     [Fact]
     public async Task MissingPrimaryUsesConfiguredAlternateWithoutChangingOtherChannels()
     {
@@ -41,15 +119,31 @@ public class SharedHttpStreamRecoveryTests
     }
 
     [Fact]
-    public async Task AuthenticationFailureStopsImmediatelyAndDoesNotMarkChannelDead()
+    public async Task AllSourcesFailStopsAfterFourRequests()
     {
-        using var fixture = new Fixture(HttpStatusCode.Forbidden);
+        using var fixture = new Fixture(HttpStatusCode.NotFound, alternateStatus: HttpStatusCode.ServiceUnavailable);
+        await fixture.Stream.Open(TestContext.Current.CancellationToken);
+        using var reader = fixture.Stream.GetStream();
+        await WaitUntil(() => !fixture.Stream.EnableStreamSharing);
+        Assert.Equal(["primary.example", "primary.example", "secondary.example", "secondary.example"], fixture.Handler.Hosts);
+        Assert.Equal("http://primary.example", fixture.Tuner.ActiveUrl);
+        await reader.DisposeAsync();
+        await fixture.Stream.Close();
+        Assert.Equal(0, fixture.Handler.ActiveConnections);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden, "ProviderAuthentication")]
+    [InlineData(HttpStatusCode.TooManyRequests, "ProviderBusy")]
+    public async Task AccountFailureStopsImmediatelyAndDoesNotMarkChannelDead(HttpStatusCode status, string reason)
+    {
+        using var fixture = new Fixture(status);
         await fixture.Stream.Open(TestContext.Current.CancellationToken);
         using var reader = fixture.Stream.GetStream();
         await WaitUntil(() => !fixture.Stream.EnableStreamSharing);
         Assert.Single(fixture.Handler.Hosts);
         Assert.Equal("Unknown", fixture.Health.GetHealth("channel").Status);
-        Assert.Equal("ProviderAuthentication", fixture.Health.GetHealth("channel").Reason);
+        Assert.Equal(reason, fixture.Health.GetHealth("channel").Reason);
         Assert.False(fixture.Health.CanProbe("tuner"));
         await reader.DisposeAsync();
         await fixture.Stream.Close();
@@ -70,9 +164,9 @@ public class SharedHttpStreamRecoveryTests
         private readonly DirectoryInfo _directory = Directory.CreateTempSubdirectory();
         private readonly HttpClient _client;
 
-        internal Fixture(HttpStatusCode primaryStatus)
+        internal Fixture(HttpStatusCode primaryStatus, byte[]? media = null, HttpStatusCode alternateStatus = HttpStatusCode.OK)
         {
-            Handler = new ProviderHandler(primaryStatus);
+            Handler = new ProviderHandler(primaryStatus, media, alternateStatus);
             _client = new HttpClient(Handler);
             var http = new Mock<IHttpClientFactory>();
             http.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(_client);
@@ -102,7 +196,7 @@ public class SharedHttpStreamRecoveryTests
         }
     }
 
-    private sealed class ProviderHandler(HttpStatusCode primaryStatus) : HttpMessageHandler
+    private sealed class ProviderHandler(HttpStatusCode primaryStatus, byte[]? media, HttpStatusCode alternateStatus) : HttpMessageHandler
     {
         internal List<string> Hosts { get; } = [];
 
@@ -118,15 +212,21 @@ public class SharedHttpStreamRecoveryTests
                 return Task.FromResult(new HttpResponseMessage(primaryStatus));
             }
 
+            if (alternateStatus != HttpStatusCode.OK)
+            {
+                return Task.FromResult(new HttpResponseMessage(alternateStatus));
+            }
+
             ActiveConnections++;
             MaximumActiveConnections = Math.Max(MaximumActiveConnections, ActiveConnections);
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new MediaStream(() => ActiveConnections--)) });
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new MediaStream(() => ActiveConnections--, media)) });
         }
     }
 
-    private sealed class MediaStream(Action closed) : Stream
+    private sealed class MediaStream(Action closed, byte[]? media) : Stream
     {
-        private int _reads;
+        private readonly byte[] _data = media ?? TransportPackets();
+        private int _offset;
         private int _disposed;
 
         public override bool CanRead => true;
@@ -141,11 +241,19 @@ public class SharedHttpStreamRecoveryTests
 
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
-            if (_reads++ != 0)
+            if (_offset == _data.Length)
             {
                 await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             }
 
+            var count = Math.Min(buffer.Length, _data.Length - _offset);
+            _data.AsMemory(_offset, count).CopyTo(buffer);
+            _offset += count;
+            return count;
+        }
+
+        private static byte[] TransportPackets()
+        {
             var data = new byte[188 * 5];
             for (var i = 0; i < 5; i++)
             {
@@ -154,8 +262,7 @@ public class SharedHttpStreamRecoveryTests
                 data[(i * 188) + 3] = 0x10;
             }
 
-            data.CopyTo(buffer);
-            return data.Length;
+            return data;
         }
 
         public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();

@@ -7,9 +7,6 @@ namespace MediaBrowser.Model.LiveTv
 {
     public class LiveTvOptions
     {
-        /// <summary>Gets or sets a value indicating whether idle checks may decode favorite and recent channels.</summary>
-        public bool EnableChannelHealthProbes { get; set; } = true;
-
         public LiveTvOptions()
         {
             TunerHosts = Array.Empty<TunerHostInfo>();
@@ -17,6 +14,9 @@ namespace MediaBrowser.Model.LiveTv
             MediaLocationsCreated = Array.Empty<string>();
             RecordingPostProcessorArguments = "\"{path}\"";
         }
+
+        /// <summary>Gets or sets a value indicating whether idle checks may decode favorite and recent channels.</summary>
+        public bool EnableChannelHealthProbes { get; set; } = true;
 
         public int? GuideDays { get; set; }
 

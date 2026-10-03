@@ -20,9 +20,9 @@ namespace Jellyfin.LiveTv.TunerHosts
     public class LiveStream : ILiveStream
     {
         private readonly IConfigurationManager _configurationManager;
+        private readonly IDisposable _playbackReservation;
         private int _activeReaders;
         private DateTime _lastReaderReleasedUtc;
-        private readonly IDisposable _playbackReservation;
         private int _disposed;
 
         public LiveStream(

@@ -9,6 +9,8 @@ internal sealed class LiveStreamRecovery
 
     internal int Failures { get; private set; }
 
+    internal bool ShouldSwitch => Failures > 0 && Failures % 2 == 0;
+
     internal bool Failed(DateTime now, TimeSpan dataDuration)
     {
         if (dataDuration >= TimeSpan.FromSeconds(15))
@@ -21,6 +23,4 @@ internal sealed class LiveStreamRecovery
         Failures++;
         return Failures < 4 && now - _firstFailure.Value < TimeSpan.FromSeconds(40);
     }
-
-    internal bool ShouldSwitch => Failures > 0 && Failures % 2 == 0;
 }

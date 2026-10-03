@@ -60,7 +60,8 @@ public sealed class M3uPlaylistHealthChecker
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             stopwatch.Stop();
-            _logger.LogWarning(ex, "Health probe failed for playlist {Url}", playlistUrl);
+            // Provider URLs and exception messages can contain account credentials.
+            _logger.LogWarning("M3U listing health probe failed ({ErrorType})", ex.GetType().Name);
             return Result(playlistUrl, false, stopwatch.ElapsedMilliseconds, 0, 0);
         }
     }

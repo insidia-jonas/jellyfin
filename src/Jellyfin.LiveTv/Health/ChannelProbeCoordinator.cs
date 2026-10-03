@@ -7,6 +7,7 @@ namespace Jellyfin.LiveTv.Health;
 
 /// <summary>Gives viewers and recordings priority over one server-wide idle probe.</summary>
 [SuppressMessage("Design", "CA1001", Justification = "Probe leases are owned and disposed by the worker after its media process exits.")]
+[SuppressMessage("IDisposableAnalyzers.Correctness", "IDISP006:Implement IDisposable", Justification = "The worker owns and disposes probe leases only after the media process exits.")]
 public sealed class ChannelProbeCoordinator
 {
     private readonly object _sync = new();

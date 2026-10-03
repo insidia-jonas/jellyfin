@@ -243,7 +243,7 @@ namespace Jellyfin.LiveTv.TunerHosts
                             currentOrigin = M3uUrlFailover.GetNextUrl(candidates, currentOrigin);
                             url = M3uUrlFailover.RewriteStreamUrl(originalUrl, currentOrigin);
                             // A failing channel must not change the configured origin for every other channel.
-                            Logger.LogInformation("Trying configured alternate source for channel {ChannelId}", _channelId);
+                            Logger.LogInformation("Trying configured alternate host {SourceHost} for channel {ChannelId}", new Uri(url).Host, _channelId);
                         }
 
                         await Task.Delay(TimeSpan.FromSeconds(Math.Min(recovery.Failures, 3)), cancellationToken).ConfigureAwait(false);

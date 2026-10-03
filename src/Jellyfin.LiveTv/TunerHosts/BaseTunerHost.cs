@@ -609,6 +609,7 @@ namespace Jellyfin.LiveTv.TunerHosts
                         liveStream.Dispose();
                         throw;
                     }
+
                     var endTime = DateTime.UtcNow;
                     Logger.LogInformation("Live stream opened after {0}ms", (endTime - startTime).TotalMilliseconds);
                     return liveStream;

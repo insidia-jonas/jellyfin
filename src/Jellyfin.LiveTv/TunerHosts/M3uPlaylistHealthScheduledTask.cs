@@ -13,7 +13,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.LiveTv.TunerHosts;
 
 /// <summary>
-/// Tests configured M3U ingest URLs every 15 minutes and switches to the most stable one.
+/// Tests configured M3U listings without changing separately configured stream origins.
 /// </summary>
 public class M3uPlaylistHealthScheduledTask : IScheduledTask, IConfigurableScheduledTask
 {
@@ -120,14 +120,16 @@ public class M3uPlaylistHealthScheduledTask : IScheduledTask, IConfigurableSched
 
         M3uPlaylistHealthResult? best = null;
         M3uPlaylistHealthResult? current = null;
-        var currentUrl = M3uUrlFailover.GetPrimaryUrl(tuner);
+        var currentUrl = M3uUrlFailover.GetPlaylistUrl(tuner);
 
-        foreach (var url in candidates)
+        for (var candidate = 0; candidate < candidates.Count; candidate++)
         {
+            var url = candidates[candidate];
             var result = await _healthChecker.ProbeAsync(url, tuner, cancellationToken).ConfigureAwait(false);
             _logger.LogInformation(
-                "M3U health {Url}: success={Success} score={Score:0.###} elapsed={Elapsed}ms (listing/host only, no TV stream)",
-                result.Url,
+                "M3U listing health for tuner {TunerId}, candidate {Candidate}: success={Success} score={Score:0.###} elapsed={Elapsed}ms (no TV stream)",
+                tuner.Id,
+                candidate + 1,
                 result.Success,
                 result.Score,
                 result.ElapsedMs);
@@ -147,14 +149,31 @@ public class M3uPlaylistHealthScheduledTask : IScheduledTask, IConfigurableSched
         {
             if (best is null || !best.Success)
             {
-                _logger.LogWarning("No healthy M3U ingest URL found for tuner {TunerId}", tuner.Id);
+                _logger.LogWarning("No healthy M3U listing found for tuner {TunerId}", tuner.Id);
             }
 
             return false;
         }
 
-        _logger.LogInformation("Switching M3U ingest for tuner {TunerId} to {Url}", tuner.Id, best.Url);
-        tuner.ActiveUrl = best.Url;
+        _logger.LogInformation("Switching M3U listing for tuner {TunerId}", tuner.Id);
+        // A listing CDN is not a media origin. Keep both the active ingest and its
+        // fallback order when changing only the playlist download address.
+        var previousCandidates = M3uUrlFailover.GetCandidateUrls(tuner);
+        var hasIngest = previousCandidates.Any(M3uUrlFailover.IsIngestEndpoint);
+        tuner.Url = best.Url;
+        tuner.AlternateUrls = previousCandidates
+            .Where(url => !string.Equals(url, best.Url, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (!hasIngest)
+        {
+            tuner.ActiveUrl = best.Url;
+        }
+        else if (!M3uUrlFailover.IsIngestEndpoint(tuner.ActiveUrl))
+        {
+            // Repair configurations where an older listing check overwrote ActiveUrl.
+            tuner.ActiveUrl = previousCandidates.First(M3uUrlFailover.IsIngestEndpoint);
+        }
+
         return true;
     }
 }
