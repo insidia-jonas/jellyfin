@@ -116,6 +116,13 @@ html.layout-tv,
     max-width: 52em;
 }
 
+/* D-pad focus belongs to actions, not the WebView's text selection handles. */
+.layout-tv { -webkit-user-select: none; user-select: none; }
+.layout-tv input, .layout-tv textarea, .layout-tv [contenteditable="true"] { -webkit-user-select: text; user-select: text; }
+.layout-tv #tmSubtitles summary:focus, .layout-tv #tmSubtitles button:focus,
+.layout-tv #tmReleases button:focus, .layout-tv #tmReleases summary:focus,
+.layout-tv #tmArrRequest button:focus { outline: 3px solid #efc16b; outline-offset: 4px; background-color: #403726; }
+
 .layout-tv .mainDetailButtons .emby-button,
 .layout-tv .detailButton {
     min-height: 3.2em;

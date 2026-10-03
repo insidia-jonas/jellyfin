@@ -91,6 +91,11 @@
         if (!parent) {
             return;
         }
+        if (!document.querySelector('script[src="/native/tvNavigation.js"]')) {
+            var navigation = document.createElement('script');
+            navigation.src = '/native/tvNavigation.js';
+            parent.appendChild(navigation);
+        }
         if (!document.getElementById("firetv-cinema-css")) {
             var link = document.createElement("link");
             link.id = "firetv-cinema-css";

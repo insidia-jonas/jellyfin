@@ -130,6 +130,13 @@ adb shell am start -n org.jellyfin.firetvweb.preview/org.jellyfin.firetv.connect
 
 Diese Variante behält den Paketnamen `org.jellyfin.firetvweb.preview`, damit bestehende Installationen samt Anmeldung aktualisiert werden können. Der Schalter bestimmt nur die Paketidentität, nicht den sichtbaren App-Namen. Eine bereits installierte, anders signierte Haupt-App bleibt bestehen. Ohne `-PfiretvPreview=true` entsteht die normale Variante. Beide Varianten verwenden denselben APK-Ausgabepfad; die gewünschte Datei vor dem nächsten Varianten-Build kopieren.
 
+Version 2.4.9 ergänzt die Fernbedienungsnavigation auf Detailseiten: Richtungstasten
+führen zu bedienbaren Elementen einschließlich Indexer-Downloads und aufklappbaren
+Untertiteln. Beschreibungstext wird nicht als Fokusziel ausgewählt; ausgeblendete,
+deaktivierte und eingeklappte Elemente werden übersprungen. Enter betätigt einen
+Knopf einmal, auch bei gedrückter Taste. Eingabefelder behalten ihre Textbedienung.
+Regressionsprüfung: `FireTV/tests/web/detail-navigation.test.cjs`.
+
 Wiedergabe-Diagnose (Anfragedauer, erstes Bild, Pufferpausen, Wiederholungen und verworfene Frames, ohne Stream-URLs oder Tokens):
 
 ```bash
