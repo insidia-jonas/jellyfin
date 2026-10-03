@@ -273,6 +273,7 @@ BenchmarkDotNet.Artifacts
 
 # Ignore web artifacts from native builds
 web/
+!plugins/Jellyfin.Plugin.TreasureMaps/Web/
 web-src.*
 apiclient/generated
 

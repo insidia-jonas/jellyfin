@@ -97,13 +97,24 @@ object StreamResolver {
             }
         }
         val urls = urlsOf(source)
+        // Local files often advertise DirectPlay without a DirectStreamUrl. The
+        // native client must use Jellyfin's authenticated static-file endpoint.
+        val fileUrl = if (!live && urls.supportsDirectPlay && jsonStringField(source, "Protocol") == "File") {
+            val route = if (PlaybackPayload.isAudio(payload)) "Audio" else "Videos"
+            val sourceId = jsonStringField(source, "Id") ?: itemId
+            "$server/$route/${java.net.URLEncoder.encode(itemId, "UTF-8")}/stream?static=true&MediaSourceId=${java.net.URLEncoder.encode(sourceId, "UTF-8")}" +
+                (playSessionId?.let { "&PlaySessionId=${java.net.URLEncoder.encode(it, "UTF-8")}" } ?: "")
+        } else {
+            null
+        }
         val playUrl = if (live) {
             PlayUrl.resolveLive(server, urls) ?: error("No playable live URL from the Jellyfin proxy")
         } else {
-            PlayUrl.resolve(server, urls) ?: error("No playable URL for this release")
+            PlayUrl.resolve(server, urls) ?: fileUrl ?: error("No playable URL for this release")
         }
         val authed = StreamAuth.withAccessToken(playUrl, token)
         val playMethod = when {
+            fileUrl != null && playUrl == fileUrl -> "DirectPlay"
             urls.supportsDirectPlay && playUrl == urls.path -> "DirectPlay"
             !urls.transcodingUrl.isNullOrBlank() && playUrl.contains(urls.transcodingUrl!!) -> "Transcode"
             else -> "DirectStream"

@@ -3,9 +3,9 @@
   <PropertyGroup>
     <RootNamespace>Jellyfin.Plugin.TreasureMaps</RootNamespace>
     <AssemblyName>Jellyfin.Plugin.TreasureMaps</AssemblyName>
-    <AssemblyVersion>1.0.5.0</AssemblyVersion>
-    <FileVersion>1.0.5.0</FileVersion>
-    <Version>1.0.5.0</Version>
+    <AssemblyVersion>1.0.6.0</AssemblyVersion>
+    <FileVersion>1.0.6.0</FileVersion>
+    <Version>1.0.6.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -30,6 +30,8 @@
     <EmbeddedResource Include="Theme\glass.css" />
     <None Remove="Web\treasuremaps.js" />
     <EmbeddedResource Include="Web\treasuremaps.js" />
+    <EmbeddedResource Include="Web\cinema.js" />
+    <EmbeddedResource Include="Web\cinema.css" />
     <None Remove="Media\download_started.mp4" />
     <EmbeddedResource Include="Media\download_started.mp4" />
   </ItemGroup>

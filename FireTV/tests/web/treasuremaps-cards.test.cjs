@@ -123,3 +123,36 @@ test('automatic requests use the title endpoint and clean up reused library deta
     e.w.history.pushState({}, '', '#/home');
     assert.equal(e.w.document.querySelector('#tmArrRequest'), null);
 });
+
+test('subtitle tools are collapsed below metadata and load a JSON Grok quote only when opened', async t => {
+    const e = setup(t); const calls = [];
+    e.w.document.querySelector('.page').insertAdjacentHTML('afterbegin', '<div class="infoWrapper"><div class="nameContainer"></div></div><div class="detailSection"></div>');
+    e.api.getItem = () => Promise.resolve({ Id: id, Name: 'Movie', Type: 'Movie' });
+    e.api.getCurrentUser = () => Promise.resolve({ Configuration: { SubtitleLanguagePreference: 'de' } });
+    e.api.ajax = options => {
+        calls.push(options);
+        assert.equal(options.dataType, 'json');
+        return Promise.resolve({ ok: true, aiEnabled: true, opensubtitles: [], quote: { ok: true, enabled: true, summary: 'ca. 0.16 USD', totalUsd: 0.164, whisperUsd: 0.1583, translationUsd: 0.0057, includesTranslation: true, whisperModel: 'grok-voice-transcribe-2.0' } });
+    };
+    e.w.ApiClient = e.api; e.load(); await e.clock.tickAsync(1200);
+    const panel = e.w.document.querySelector('#tmSubtitles');
+    assert.equal(panel.tagName, 'DETAILS'); assert.equal(panel.open, false);
+    assert.equal(panel.closest('.infoWrapper'), null); assert.ok(panel.closest('.detailSection'));
+    assert.equal(calls.length, 0);
+    panel.open = true; panel.dispatchEvent(new e.w.Event('toggle')); await e.clock.tickAsync(1);
+    assert.equal(calls.length, 1); assert.match(panel.querySelector('.tmSubHint').textContent, /Grok 0.16 USD/);
+    assert.equal(panel.querySelector('.tmSubGen').disabled, false);
+});
+
+test('a missing subtitle quote cannot advertise zero cost or start generation', async t => {
+    const e = setup(t); let generated = 0;
+    e.w.document.querySelector('.page').insertAdjacentHTML('afterbegin', '<div class="detailSection"></div>');
+    e.api.getItem = () => Promise.resolve({ Id: id, Name: 'Movie', Type: 'Movie' });
+    e.api.getCurrentUser = () => Promise.resolve({});
+    e.api.ajax = options => { if (options.type === 'POST') { generated++; } return Promise.resolve({ ok: true, aiEnabled: true, quote: null }); };
+    e.w.ApiClient = e.api; e.load(); await e.clock.tickAsync(1200);
+    const panel = e.w.document.querySelector('#tmSubtitles'); panel.open = true;
+    panel.dispatchEvent(new e.w.Event('toggle')); await e.clock.tickAsync(1);
+    const button = panel.querySelector('.tmSubGen'); assert.equal(button.disabled, true);
+    assert.doesNotMatch(panel.textContent, /0.00 USD/); button.click(); assert.equal(generated, 0);
+});

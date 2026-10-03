@@ -3,13 +3,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Mime;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Text;
 using Jellyfin.Data;
+using Jellyfin.Plugin.TreasureMaps;
 using Jellyfin.Plugin.TreasureMaps.Languages;
 using Jellyfin.Plugin.TreasureMaps.ReleaseNaming;
-using Jellyfin.Plugin.TreasureMaps;
 using Jellyfin.Plugin.TreasureMaps.Subtitles;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.Channels;
@@ -761,14 +761,21 @@ public class TreasureMapsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     public IActionResult ClientScript()
     {
-        var stream = GetType().Assembly.GetManifestResourceStream("Jellyfin.Plugin.TreasureMaps.Web.treasuremaps.js");
-        if (stream is null)
+        using var stream = GetType().Assembly.GetManifestResourceStream("Jellyfin.Plugin.TreasureMaps.Web.treasuremaps.js");
+        using var cinema = GetType().Assembly.GetManifestResourceStream("Jellyfin.Plugin.TreasureMaps.Web.cinema.js");
+        using var styles = GetType().Assembly.GetManifestResourceStream("Jellyfin.Plugin.TreasureMaps.Web.cinema.css");
+        if (stream is null || cinema is null || styles is null)
         {
             return NotFound();
         }
 
         Response.Headers.CacheControl = "no-cache";
-        return File(stream, "application/javascript");
+        using var scriptReader = new StreamReader(stream);
+        using var cinemaReader = new StreamReader(cinema);
+        using var styleReader = new StreamReader(styles);
+        var css = System.Text.Json.JsonSerializer.Serialize(styleReader.ReadToEnd());
+        var styleScript = "(function(){if(document.getElementById('jellyfin-cinema-style'))return;var s=document.createElement('style');s.id='jellyfin-cinema-style';s.textContent=" + css + ";document.head.appendChild(s);})();\n";
+        return Content(scriptReader.ReadToEnd() + "\n" + styleScript + cinemaReader.ReadToEnd(), "application/javascript");
     }
 
     /// <summary>

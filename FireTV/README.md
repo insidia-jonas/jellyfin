@@ -8,6 +8,14 @@ Das ist bewusst **kein** API-only-Client wie [jellyfin-androidtv](https://github
 
 Fire TV client that hosts the full Jellyfin web UI (same architecture as the official iOS app: WebView + NativeShell). Video playback uses ExoPlayer so selecting a movie cannot freeze Amazon WebView. Downloads use Android DownloadManager. The 1920 CSS-pixel TV layout is scaled to the actual window, with automatic viewport height.
 
+## Änderungen in 2.4.8 und Plugin 1.0.6
+
+- Kino-Startseite mit Titelmotiv, Fortsetzen und manuell auswählbaren Titeln aus der eigenen Bibliothek. Einheitliche dunkle Bibliotheks- und Detailansichten mit warmen Akzenten; bedienbar auf TV, Desktop und Handy.
+- Kartenreihen bleiben innerhalb des Bildschirms. Beschriftete Wiedergabe-/Trailerknöpfe, übersichtliche Filminfos und aufklappbare Untertitelwerkzeuge unter den Details.
+- Die Oberfläche kommt aus dem Server-Plugin (ClientScript v17), benötigt keinen Web-Neubau und behält Jellyfins Navigation, Wiedergabe, Filter und Treasure-Maps-Funktionen. Keine automatisch laufenden Vorschauen oder zusätzlichen Indexer-/KI-Abfragen für das Titelmotiv.
+- Lokale Filme/Serien starten auch dann, wenn der Server DirectPlay erlaubt, aber keine Stream-URL liefert. Die App nutzt in diesem Fall den authentifizierten Jellyfin-Dateiendpunkt. Live-TV-Quellen und nicht unterstützte Codecs behalten ihre vorhandenen Regeln.
+- Untertitel-Kostenschätzungen werden korrekt als JSON eingelesen. Grok wird als Anbieter angezeigt; ohne gültigen Preis bleibt die Erstellung gesperrt. Vorhandene Untertitel werden ohne erneute Erzeugung wiederverwendet.
+
 ## Serverkorrektur für Treasure-Maps-Navigation (02.10.2026)
 
 Startseiten-Empfehlungen und Suchtreffer werden nicht mehr als Kinder des Kategorie-Hauptordners gespeichert. Dadurch löst das Öffnen von Treasure Maps keine rekursive Löschung dieser Titelkarten aus. Gleichzeitige Listenaufrufe führen die Ordnerabstimmung nacheinander aus; alte Titelkarten behalten ihre IDs, Details und Benutzerdaten. Dasselbe gilt für Titel, die aus einer wechselnden Kategorie-Liste herausfallen: Deren Bereinigung öffnet keine entfernten Detailordner mehr. Die Ordnerabstimmung berücksichtigt alle gespeicherten Kinder, unabhängig von der angefragten Seitengröße. Die installierte APK 2.4.6 nutzt die Serverkorrektur ohne weiteres App-Update.

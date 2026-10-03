@@ -90,7 +90,7 @@
             deviceId: device.deviceId || "",
             deviceName: device.deviceName || "Fire TV",
             appName: device.appName || "Jellyfin Fire TV",
-            appVersion: device.appVersion || "2.4.7"
+            appVersion: device.appVersion || "2.4.8"
         };
     }
 

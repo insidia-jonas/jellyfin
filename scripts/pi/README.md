@@ -94,5 +94,13 @@ and Arr postprocessing can add time; a global scan is no longer started for each
 AI subtitles support native Grok speech recognition with timed cues and optional
 translation. Keys remain scoped to their provider; search/quotes never generate bills.
 
+Plugin 1.0.6 includes the cinema interface for home, movie/series libraries and details,
+including the Fire TV wrapper. It is installed with the plugin and injected at server
+startup; no additional jellyfin-web build or overwrite of custom branding is needed.
+Reload the web client after updating. The home feature uses only the signed-in user's
+library and resume history, with bounded cached reads and no indexer/AI requests.
+Subtitle tools are expandable below the details and require a valid cost quote before
+generation. Fire TV 2.4.8 also fixes direct playback of local files without stream URLs.
+
 Validation: `python3 -m unittest discover -s scripts/pi -p 'test_*.py'`, plugin tests,
 Live TV tests, `npm test --prefix FireTV/tests/web`, Fire TV core tests and Android lint.

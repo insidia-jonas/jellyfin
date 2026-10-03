@@ -9,6 +9,52 @@ import java.util.concurrent.Executors
 
 class StreamResolverTest {
     @Test
+    fun `local direct play without stream URLs uses authenticated static media endpoint`() {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/Items/local-file/PlaybackInfo") { exchange ->
+            exchange.requestBody.readBytes()
+            val body = """{"PlaySessionId":"session","MediaSources":[{"Id":"version+1","Protocol":"File","Path":"/media/film.mkv","Container":"mkv","SupportsDirectPlay":true,"SupportsDirectStream":true}]}""".toByteArray()
+            exchange.sendResponseHeaders(200, body.size.toLong())
+            exchange.responseBody.use { it.write(body) }
+        }
+        server.start()
+        try {
+            val base = "http://127.0.0.1:${server.address.port}"
+            val video = StreamResolver.resolve("""{"ids":["local-file"],"serverAddress":"$base","accessToken":"private","userId":"u","startPositionTicks":100000000}""", false)
+            assertTrue(video.url.startsWith("$base/Videos/local-file/stream?static=true&MediaSourceId=version%2B1"))
+            assertTrue(video.url.contains("api_key=private"))
+            assertTrue(video.url.contains("PlaySessionId=session"))
+            assertEquals("DirectPlay", video.playMethod)
+            assertEquals(10000L, video.startPositionMs)
+            val audio = StreamResolver.resolve("""{"items":[{"Id":"local-file","MediaType":"Audio"}],"serverAddress":"$base","accessToken":"private","userId":"u"}""", false)
+            assertTrue(audio.url.startsWith("$base/Audio/local-file/stream?static=true"))
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `unsupported local files and remote sources do not acquire static direct play URLs`() {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        var source = """{"Id":"x","Protocol":"File","Path":"/media/file.mkv","SupportsDirectPlay":false}"""
+        server.createContext("/Items/x/PlaybackInfo") { exchange ->
+            exchange.requestBody.readBytes()
+            val body = """{"MediaSources":[$source]}""".toByteArray()
+            exchange.sendResponseHeaders(200, body.size.toLong())
+            exchange.responseBody.use { it.write(body) }
+        }
+        server.start()
+        try {
+            val payload = """{"ids":["x"],"serverAddress":"http://127.0.0.1:${server.address.port}","userId":"u"}"""
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException::class.java) { StreamResolver.resolve(payload, false) }
+            source = """{"Id":"x","Protocol":"Http","SupportsDirectPlay":true}"""
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException::class.java) { StreamResolver.resolve(payload, false) }
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
     fun `resolves direct stream url from a local jellyfin-compatible server`() {
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         var capturedBody = ""

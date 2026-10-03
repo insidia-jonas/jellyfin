@@ -313,16 +313,17 @@
     function enhanceSubtitles(item) {
         if (!item || !item.Id || (item.Type !== 'Movie' && item.Type !== 'Episode')) { return; }
         if (item.ChannelId && !item.Path) { return; }
-        whenReady('.itemName,.nameContainer,.detailSection,.detailImageContainer', 16, function (page) {
+        whenReady('.detailSection,.detailPageSecondaryContainer', 16, function (page) {
             if (!page || page.getAttribute('data-tm-subs') === item.Id) { return; }
             page.setAttribute('data-tm-subs', item.Id);
             var old = page.querySelector('#tmSubtitles');
             if (old) { old.remove(); }
 
-            var box = document.createElement('div');
+            var box = document.createElement('details');
             box.id = 'tmSubtitles';
-            var h = document.createElement('h2');
-            h.textContent = 'Untertitel';
+            var h = document.createElement('summary');
+            h.tabIndex = 0;
+            h.textContent = 'Untertitel suchen & erstellen';
             box.appendChild(h);
 
             var bar = document.createElement('div');
@@ -365,29 +366,27 @@
             list.className = 'tmSubList';
             box.appendChild(list);
 
-            var anchor = page.querySelector('.nameContainer, .itemName, .detailSection') || page;
-            if (anchor.parentNode) {
-                anchor.parentNode.insertBefore(box, anchor.nextSibling);
-            } else {
-                page.insertBefore(box, page.firstChild);
-            }
+            var anchor = page.querySelector('.detailSection, .detailPageSecondaryContainer') || page;
+            anchor.appendChild(box);
 
             var lastQuote = null;
 
             function setQuote(res) {
-                lastQuote = res && res.quote ? res.quote : res;
-                if (!lastQuote || lastQuote.ok === false) {
-                    quoteEl.textContent = (lastQuote && lastQuote.message) || 'KI-Untertitel nicht konfiguriert (Whisper-Key im Plugin).';
+                lastQuote = res && res.quote;
+                if (!lastQuote || lastQuote.ok !== true || !lastQuote.summary || !Number.isFinite(lastQuote.totalUsd)) {
+                    quoteEl.textContent = (lastQuote && lastQuote.message) || 'Keine gültige Kostenschätzung. Prüfe die KI-Konfiguration.';
+                    hintEl.textContent = 'Die Erstellung ist ohne Kostenschätzung gesperrt.';
                     genBtn.disabled = true;
                     return;
                 }
                 quoteEl.textContent = lastQuote.summary || 'Keine Kostenschätzung.';
                 hintEl.textContent = lastQuote.alreadyExists
-                    ? 'Datei liegt schon neben dem Video. Erzeugen überschreibt sie (erneute Kosten).'
-                    : ('Whisper ' + formatUsd(lastQuote.whisperUsd)
+                    ? 'Die vorhandene Datei wird wiederverwendet. Es entstehen keine neuen Kosten.'
+                    : ((String(lastQuote.whisperModel || '').indexOf('grok-') === 0 ? 'Grok ' : 'Whisper ') + formatUsd(lastQuote.whisperUsd)
                         + (lastQuote.includesTranslation ? ' + Übersetzung ' + formatUsd(lastQuote.translationUsd) : '')
                         + ' · Startet erst nach Bestätigung.');
                 genBtn.disabled = lastQuote.enabled === false;
+                genBtn.textContent = lastQuote.alreadyExists ? 'Vorhandene verwenden' : 'KI erzeugen';
                 if (res && res.aiEnabled === false) {
                     quoteEl.textContent = 'KI-Untertitel sind aus oder ohne API-Key.';
                     genBtn.disabled = true;
@@ -427,7 +426,7 @@
                         dl.textContent = 'Lädt…';
                         api().ajax({
                             url: api().getUrl('TreasureMaps/Subtitles/Download', { itemId: item.Id, id: hit.id }),
-                            type: 'POST'
+                            type: 'POST', dataType: 'json'
                         }).then(function (res) {
                             dl.textContent = res && res.ok ? 'Gespeichert' : 'Fehler';
                             if (!res || !res.ok) {
@@ -451,7 +450,7 @@
                 quoteEl.textContent = 'Suche und Kostenschätzung…';
                 api().ajax({
                     url: api().getUrl('TreasureMaps/Subtitles/Search', { itemId: item.Id, language: sel.value }),
-                    type: 'GET'
+                    type: 'GET', dataType: 'json'
                 }).then(function (res) {
                     searchBtn.disabled = false;
                     if (!res || !res.ok) {
@@ -472,16 +471,17 @@
             sel.addEventListener('change', search);
             genBtn.addEventListener('click', function () {
                 var q = lastQuote || {};
+                if (genBtn.disabled || q.ok !== true || !Number.isFinite(q.totalUsd)) { return; }
                 var line = q.summary || ('ca. ' + formatUsd(q.totalUsd));
                 if (!window.confirm('KI-Untertitel jetzt erzeugen?\n\n' + line + '\n\nDie Erstellung kann bei langen Filmen mehrere Minuten dauern.')) {
                     return;
                 }
                 genBtn.disabled = true;
                 genBtn.textContent = 'Erzeugt…';
-                hintEl.textContent = 'Whisper läuft. Bitte das Fenster offen lassen.';
+                hintEl.textContent = 'Untertitel werden verarbeitet. Bitte das Fenster offen lassen.';
                 api().ajax({
-                    url: api().getUrl('TreasureMaps/Subtitles/Generate', { itemId: item.Id, language: sel.value, force: 'true' }),
-                    type: 'POST'
+                    url: api().getUrl('TreasureMaps/Subtitles/Generate', { itemId: item.Id, language: sel.value, force: 'false' }),
+                    type: 'POST', dataType: 'json'
                 }).then(function (res) {
                     if (res && res.ok) {
                         genBtn.textContent = 'Fertig';
@@ -499,11 +499,14 @@
                 });
             });
 
+            var searched = false;
+            box.addEventListener('toggle', function () {
+                if (box.open && !searched) { searched = true; search(); }
+            });
             preferredSubLang(function (lang) {
                 if (lang && sel.querySelector('option[value="' + lang + '"]')) {
                     sel.value = lang;
                 }
-                search();
             });
         });
     }
