@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
-import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.View
 import android.webkit.CookieManager
@@ -46,7 +45,6 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
     private var ignoreSsl: Boolean = false
     private lateinit var nativeshellJs: String
     private var documentStartActive: Boolean = false
-    private var lastBackAt: Long = 0L
     private var initialWebFocusDone: Boolean = false
     private val refreshDownloads = object : Runnable {
         override fun run() {
@@ -246,16 +244,12 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
 
     private fun handleWebBack() {
         binding.webView.evaluateJavascript(
-            "window.FireTvRemote&&window.FireTvRemote.send('Escape');!!(window.FireTvCanExit&&window.FireTvCanExit())",
+            "window.FireTvNavigation?window.FireTvNavigation.back():'root'",
         ) { result ->
-            if (result == "true") {
-                val now = SystemClock.elapsedRealtime()
-                if (now - lastBackAt < 2_200) {
-                    finishAffinity()
-                } else {
-                    lastBackAt = now
-                    Toast.makeText(this, R.string.press_back_again, Toast.LENGTH_SHORT).show()
-                }
+            if (result == "\"root\"") {
+                // Leaving the app is an explicit menu action, never a side effect
+                // of web history, an Escape event, or repeated remote Back presses.
+                if (!binding.menuOverlay.isVisible) { toggleMenu() }
             }
         }
     }
@@ -327,7 +321,7 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
     }
 
     override fun exitApp() {
-        runOnUiThread { finishAffinity() }
+        runOnUiThread { if (!binding.menuOverlay.isVisible) { toggleMenu() } }
     }
 
     override fun openServerSelection() {

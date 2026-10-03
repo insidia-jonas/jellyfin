@@ -112,8 +112,22 @@ public static class SubtitleFiles
     public static string Write(string mediaPath, string language, string srt)
     {
         var path = SidecarPath(mediaPath, language);
-        File.WriteAllText(path, srt ?? string.Empty);
-        return path;
+        if (string.IsNullOrWhiteSpace(srt) || SrtCues.Parse(srt).Count == 0)
+        {
+            throw new InvalidOperationException("No valid subtitle cues to save.");
+        }
+
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, srt);
+            File.Move(temporary, path, overwrite: true);
+            return path;
+        }
+        finally
+        {
+            if (File.Exists(temporary)) { File.Delete(temporary); }
+        }
     }
 
     /// <summary>

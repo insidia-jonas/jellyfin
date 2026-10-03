@@ -7,6 +7,9 @@ namespace Jellyfin.LiveTv.Channels;
 /// </summary>
 internal sealed class LiveTvNowNext
 {
+    /// <summary>Gets the native Live TV channel ID used by the program API.</summary>
+    public Guid ChannelId { get; init; }
+
     /// <summary>Gets the title on air now.</summary>
     public string? NowTitle { get; init; }
 

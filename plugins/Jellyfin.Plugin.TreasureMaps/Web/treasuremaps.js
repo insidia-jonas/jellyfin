@@ -934,21 +934,30 @@
                 page.appendChild(host);
             }
 
-            Promise.all([
-                api().getItems(api().getCurrentUserId(), { ParentId: folder.Id, Fields: 'ProviderIds,Overview,PrimaryImageAspectRatio' }),
-                fetchStatus()
-            ]).then(function (pair) {
+            // Status is authoritative and fast; catalog materialization must not delay it.
+            fetchStatus().then(function (status) {
                 if (route !== location.hash || !host.isConnected) { return; }
-                var children = (pair[0] && pair[0].Items) || [];
-                var status = pair[1];
-                renderDownloadRows(host, children, status);
+                host._tmStatus = status;
+                renderDownloadRows(host, host._tmChildren || [], status);
                 startPoll();
+            }).catch(function () { if (route === location.hash && host.isConnected) { startPoll(); } });
+            api().getItems(api().getCurrentUserId(), { ParentId: folder.Id, Fields: 'ProviderIds,Overview,PrimaryImageAspectRatio' }).then(function (result) {
+                if (route !== location.hash || !host.isConnected) { return; }
+                host._tmChildren = (result && result.Items) || [];
+                renderDownloadRows(host, host._tmChildren, host._tmStatus);
             }).catch(function () { });
         });
     }
 
     function renderDownloadRows(host, children, status) {
-        host.querySelectorAll('.tmDlRow').forEach(function (n) { n.remove(); });
+        var signature = JSON.stringify([children, status]);
+        if (host._tmSignature === signature) { return; }
+        host._tmSignature = signature;
+        var active = document.activeElement;
+        var focusedRow = active && active.closest && active.closest('.tmDlRow');
+        var focusedId = focusedRow && focusedRow.dataset.nzo;
+        var focusedClass = focusedRow && active !== focusedRow ? active.className : '';
+        host.querySelectorAll('.tmDlRow, .tmDlEmpty').forEach(function (n) { n.remove(); });
         var items = (status && status.items) || [];
         var rows = [];
 
@@ -957,7 +966,7 @@
                 var child = matchChild(children, entry);
                 rows.push({ entry: entry, child: child });
             });
-        } else {
+        } else if (!status || !status.ok) {
             children.forEach(function (child) {
                 if (/no treasure-maps downloads|configure sabnzbd/i.test(child.Name || '')) {
                     return;
@@ -968,7 +977,7 @@
 
         if (!rows.length) {
             var empty = document.createElement('div');
-            empty.className = 'tmDlMeta';
+            empty.className = 'tmDlMeta tmDlEmpty';
             empty.textContent = (status && status.message) || 'No Treasure-Maps downloads yet.';
             host.appendChild(empty);
             return;
@@ -984,7 +993,12 @@
             var end = Math.min(offset + 16, rows.length);
             var i;
             for (i = offset; i < end; i++) {
-                host.appendChild(buildDownloadRow(rows[i].child, rows[i].entry, status && status.speed));
+                var row = buildDownloadRow(rows[i].child, rows[i].entry, status && status.speed);
+                host.appendChild(row);
+                if (focusedId && row.dataset.nzo === focusedId) {
+                    var focusTarget = focusedClass ? row.getElementsByClassName(focusedClass)[0] : row;
+                    (focusTarget || row).focus();
+                }
             }
             offset = end;
             if (offset < rows.length && typeof window.requestAnimationFrame === 'function') {
@@ -1095,7 +1109,7 @@
             var host = document.getElementById('tmDownloads');
             if (host && !host.querySelector('.tmDlRow')) {
                 var empty = document.createElement('div');
-                empty.className = 'tmDlMeta';
+                empty.className = 'tmDlMeta tmDlEmpty';
                 empty.textContent = 'No Treasure-Maps downloads yet.';
                 host.appendChild(empty);
             }
@@ -1240,11 +1254,8 @@
             });
 
             if (dlHost) {
-                api().getItems(api().getCurrentUserId(), { ParentId: parent, Fields: 'ProviderIds' }).then(function (result) {
-                    if (route === location.hash && dlHost.isConnected) { renderDownloadRows(dlHost, (result && result.Items) || [], res); }
-                }).catch(function () {
-                    if (route === location.hash && dlHost.isConnected) { renderDownloadRows(dlHost, [], res); }
-                });
+                dlHost._tmStatus = res;
+                renderDownloadRows(dlHost, dlHost._tmChildren || [], res);
                 anyActive = anyActive || (res.items || []).some(function (i) {
                     return i.status !== 'Completed' && i.status !== 'Failed';
                 });

@@ -49,16 +49,18 @@ public class AiRecommender
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<AiRecommender> _logger;
+    private readonly Func<PluginConfiguration> _configuration;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AiRecommender"/> class.
     /// </summary>
     /// <param name="httpClientFactory">The HTTP client factory.</param>
     /// <param name="logger">The logger.</param>
-    public AiRecommender(IHttpClientFactory httpClientFactory, ILogger<AiRecommender> logger)
+    public AiRecommender(IHttpClientFactory httpClientFactory, ILogger<AiRecommender> logger, Func<PluginConfiguration>? configuration = null)
     {
         _httpClientFactory = httpClientFactory;
         _logger = logger;
+        _configuration = configuration ?? (() => Config);
     }
 
     private static PluginConfiguration Config =>
@@ -114,7 +116,7 @@ public class AiRecommender
     /// <returns>The model reply text.</returns>
     public async Task<string> CompleteAsync(string prompt, CancellationToken cancellationToken)
     {
-        var config = Config;
+        var config = _configuration();
         var provider = (config.AiProvider ?? "openai").Trim().ToLowerInvariant();
 
         return provider switch

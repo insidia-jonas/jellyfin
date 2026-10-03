@@ -44,6 +44,16 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     {
         yield return new PluginPageInfo
         {
+            Name = "TreasureMapsManagement",
+            DisplayName = "Medienzentrale",
+            EnableInMainMenu = true,
+            MenuSection = "server",
+            MenuIcon = "dashboard",
+            EmbeddedResourcePath = GetType().Namespace + ".Configuration.management.html"
+        };
+
+        yield return new PluginPageInfo
+        {
             Name = Name,
             EmbeddedResourcePath = GetType().Namespace + ".Configuration.config.html"
         };

@@ -90,7 +90,7 @@
             deviceId: device.deviceId || "",
             deviceName: device.deviceName || "Fire TV",
             appName: device.appName || "Jellyfin Fire TV",
-            appVersion: device.appVersion || "2.4.6"
+            appVersion: device.appVersion || "2.4.7"
         };
     }
 
@@ -292,6 +292,8 @@
     var paused = false;
     var restoreAfterPlayback = false;
     var programs = {};
+    var guideItemId = "";
+    var guideReturnFocus = null;
     var OVERSCAN = 4;
 
     function readState() {
@@ -566,7 +568,84 @@
             }).then(function () { favorite.disabled = false; });
         });
         entry.appendChild(row); entry.appendChild(favorite);
+        var info = document.createElement("button"); info.type = "button"; info.className = "firetv-live-info";
+        info.textContent = "ⓘ"; info.hidden = isGroup(item);
+        info.setAttribute("aria-label", "Programminfo: " + item.Name);
+        info.addEventListener("click", function () { openGuide(item.Id, info); });
+        entry.appendChild(info);
         return entry;
+    }
+
+    function guideChannelId(item) {
+        return item && ((item.ProviderIds || {}).LiveTvGuideChannel || (item.Type === "TvChannel" ? item.Id : ""));
+    }
+
+    function closeGuide() {
+        var dialog = document.getElementById("firetv-guide");
+        if (!dialog) { return false; }
+        dialog.remove(); guideItemId = "";
+        if (guideReturnFocus && guideReturnFocus.isConnected) { guideReturnFocus.focus(); }
+        guideReturnFocus = null;
+        return true;
+    }
+
+    function openGuide(id, focus) {
+        closeGuide();
+        guideItemId = id; guideReturnFocus = focus;
+        var dialog = document.createElement("div"); dialog.id = "firetv-guide";
+        dialog.setAttribute("role", "dialog"); dialog.setAttribute("aria-modal", "true");
+        dialog.setAttribute("aria-labelledby", "firetv-guide-title");
+        dialog.innerHTML = '<div class="firetv-guide-card"><button class="firetv-guide-close">Schließen</button>' +
+            '<h2 id="firetv-guide-title"></h2><div class="firetv-guide-content" tabindex="0"></div>' +
+            '<button class="firetv-guide-play">Sender ansehen</button></div>';
+        document.body.appendChild(dialog);
+        dialog.querySelector(".firetv-guide-close").addEventListener("click", closeGuide);
+        dialog.querySelector(".firetv-guide-play").addEventListener("click", function () { closeGuide(); play(byId[id], shown); });
+        dialog.addEventListener("keydown", function (event) {
+            if (event.key === "Escape" || event.keyCode === 27) { event.preventDefault(); event.stopPropagation(); closeGuide(); }
+            if ((event.key === "ArrowDown" || event.key === "ArrowUp") && event.target.classList.contains("firetv-guide-content")) {
+                event.preventDefault(); event.stopPropagation();
+                var content = event.target;
+                if (event.key === "ArrowUp" && content.scrollTop <= 0) { dialog.querySelector(".firetv-guide-close").focus(); }
+                else if (event.key === "ArrowDown" && content.scrollTop + content.clientHeight >= content.scrollHeight - 2) { dialog.querySelector(".firetv-guide-play").focus(); }
+                else { content.scrollTop += event.key === "ArrowDown" ? 110 : -110; }
+            }
+            else if ((event.key === "ArrowDown" && event.target.classList.contains("firetv-guide-close")) ||
+                (event.key === "ArrowUp" && event.target.classList.contains("firetv-guide-play"))) {
+                event.preventDefault(); event.stopPropagation(); dialog.querySelector(".firetv-guide-content").focus();
+            }
+        }, true);
+        renderGuide();
+        delete programs[id]; refreshGuide();
+        dialog.querySelector(".firetv-guide-content").focus();
+    }
+
+    function renderGuide() {
+        var dialog = document.getElementById("firetv-guide");
+        var item = byId[guideItemId];
+        if (!dialog || !item) { return; }
+        dialog.querySelector("h2").textContent = item.Name + " · Programm";
+        var body = dialog.querySelector(".firetv-guide-content");
+        var scroll = body.scrollTop; body.textContent = "";
+        var schedule = (programs[item.Id] || {}).items || [];
+        if (!schedule.length && item.CurrentProgram) { schedule = [item.CurrentProgram]; }
+        if (!schedule.length) {
+            var hint = document.createElement("p");
+            hint.textContent = item.Overview || "Für diesen Sender sind derzeit keine Programminformationen verfügbar.";
+            body.appendChild(hint);
+        }
+        schedule.forEach(function (program, index) {
+            var section = document.createElement("section");
+            var title = document.createElement("h3");
+            title.textContent = clock(program.StartDate) + "–" + clock(program.EndDate) + "  " + program.Name;
+            section.appendChild(title);
+            var meta = [program.EpisodeTitle, (program.Genres || []).join(" · "), program.OfficialRating].filter(Boolean);
+            if (meta.length) { var tags = document.createElement("p"); tags.className = "firetv-guide-meta"; tags.textContent = meta.join(" · "); section.appendChild(tags); }
+            if (program.Overview) { var plot = document.createElement("p"); plot.textContent = program.Overview; section.appendChild(plot); }
+            if (index === 0 && !program.Overview) { var missing = document.createElement("p"); missing.textContent = "Keine Beschreibung vom EPG-Anbieter verfügbar."; section.appendChild(missing); }
+            body.appendChild(section);
+        });
+        body.scrollTop = scroll;
     }
 
     function updateRow(entry, item) {
@@ -635,21 +714,22 @@
         if (!viewport || loading || guideLoading || document.hidden || paused) { return; }
         var ids = Object.keys(rows);
         var now = Date.now();
-        ids = ids.filter(function (id) { return !isGroup(byId[id]) && (!programs[id] || programs[id].expires <= now); });
+        ids = ids.filter(function (id) { return guideChannelId(byId[id]) && !isGroup(byId[id]) && (!programs[id] || programs[id].expires <= now); });
         if (!ids.length) { return; }
         var client = window.ApiClient;
         if (!client || !client.getJSON) { return; }
         guideLoading = true;
         var token = requestToken;
         client.getJSON(client.getUrl("LiveTv/Programs", {
-            userId: client.getCurrentUserId(), channelIds: ids.join(","), minEndDate: new Date(now).toISOString(),
+            userId: client.getCurrentUserId(), channelIds: ids.map(function (id) { return guideChannelId(byId[id]); }).join(","), minEndDate: new Date(now).toISOString(),
             maxStartDate: new Date(now + 12 * 3600000).toISOString(), sortBy: "StartDate", sortOrder: "Ascending",
-            enableImages: false, enableUserData: false, enableTotalRecordCount: false, limit: 500
+            enableImages: false, enableUserData: false, enableTotalRecordCount: false, fields: "Overview,Genres", limit: 500
         })).then(function (result) {
             if (token !== requestToken || !viewport) { return; }
             var all = (result && result.Items) || [];
             ids.forEach(function (id) {
-                var list = all.filter(function (program) { return program.ChannelId === id; }).sort(function (a, b) { return Date.parse(a.StartDate) - Date.parse(b.StartDate); });
+                var channelId = guideChannelId(byId[id]);
+                var list = all.filter(function (program) { return program.ChannelId === channelId; }).sort(function (a, b) { return Date.parse(a.StartDate) - Date.parse(b.StartDate); });
                 var current = list.filter(function (p) { return Date.parse(p.StartDate) <= now && Date.parse(p.EndDate) > now; })[0];
                 var next = list.filter(function (p) { return Date.parse(p.StartDate) > now; })[0];
                 var item = byId[id];
@@ -660,8 +740,9 @@
                     else if (item.NextProgram && Date.parse(item.NextProgram.EndDate) <= now) { delete item.NextProgram; }
                     if (rows[id]) { updateRow(rows[id], item); }
                 }
-                programs[id] = { expires: now + 60000 };
+                programs[id] = { expires: now + 60000, items: list };
             });
+            renderGuide();
         }).catch(function () {
             if (token === requestToken) { ids.forEach(function (id) { programs[id] = { expires: now + 30000 }; }); }
         }).then(function () { if (token === requestToken) { guideLoading = false; } });
@@ -713,6 +794,7 @@
     }
 
     function hide() {
+        closeGuide();
         if (viewport) { saved.scroll = viewport.scrollTop; persist(); }
         requestToken++; loading = false; guideLoading = false; lastKey = "";
         clearInterval(timer); timer = 0; clearTimeout(guideTimer); guideTimer = 0;
@@ -781,7 +863,7 @@
     }
 
     window.FireTvLive = {
-        sync: sync, play: play, progressOf: progressOf, nextLine: nextLine, clock: clock,
+        sync: sync, play: play, progressOf: progressOf, nextLine: nextLine, clock: clock, closeGuide: closeGuide,
         setActive: function (active) {
             paused = !active;
             if (active) {

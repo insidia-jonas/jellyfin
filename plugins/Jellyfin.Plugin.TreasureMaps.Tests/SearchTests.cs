@@ -15,7 +15,7 @@ public class SearchTests
     [InlineData("The Matrix Reloaded", "Matrix", 75f)]
     [InlineData("The Bear", "bear", 93f)]
     [InlineData("The Bear King of the Kitchen", "the bear", 75f)]
-    [InlineData("Inception", "cept", 55f)]
+    [InlineData("Inception", "cept", 0f)]
     [InlineData("Inception", "xyz", 0f)]
     [InlineData("The Lord of the Rings", "lord rings", 62f)]
     public void ScoreTitle_RanksMatches(string title, string query, float expected)

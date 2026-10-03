@@ -63,6 +63,7 @@
             <div class="content-primary tmWrap">
                 <h1>Treasure-Maps</h1>
 
+                <p id="tmSearchHelp" style="color:#b8c9d5">Gezielt suchen: <strong>Matrix 1999</strong>, <strong>The Bear S02E03</strong> oder <strong>tt0133093</strong>. Anführungszeichen suchen den exakten Titel; <strong>film:</strong> und <strong>serie:</strong> grenzen den Typ ein.</p>
                 <div class="tmToolbar">
                     <div class="tmTabs">
                         <button class="tmTab active" data-type="trending">Trending</button>
@@ -74,7 +75,7 @@
                     </div>
                     <div class="tmSpacer"></div>
                     <div class="tmSearch">
-                        <input type="text" id="tmQuery" placeholder="Search…" />
+                        <input type="text" id="tmQuery" placeholder="Titel, Jahr oder IMDb-ID" aria-describedby="tmSearchHelp" />
                         <button class="tmBtn" id="tmSearchBtn">Search</button>
                     </div>
                 </div>

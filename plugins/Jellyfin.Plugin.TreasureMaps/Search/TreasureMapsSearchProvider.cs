@@ -71,7 +71,7 @@ public class TreasureMapsSearchProvider : IExternalSearchProvider
                 continue;
             }
 
-            var score = TreasureMapsSearch.ScoreTitle(item.Name, term, item.ProductionYear);
+            var score = TreasureMapsSearch.ScoreIdentity(item.Name, term, item.ProductionYear, item.ProviderIds.GetValueOrDefault("TreasureMapsKind"), item.ProviderIds.GetValueOrDefault("Imdb"));
             if (score <= 0f)
             {
                 continue;

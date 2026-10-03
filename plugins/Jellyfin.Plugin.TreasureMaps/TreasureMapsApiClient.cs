@@ -119,6 +119,7 @@ public sealed class TreasureMapsApiClient : IDisposable
             ["sort"] = "posted_desc",
             ["extended"] = "1"
         };
+        Search.TreasureMapsSearch.ApplyParameters(parameters, query, "movie");
         return GetJsonAsync<ReleaseListResponse>("movie", parameters, CacheTtlForQuery(query), cancellationToken);
     }
 
@@ -152,6 +153,7 @@ public sealed class TreasureMapsApiClient : IDisposable
             ["sort"] = "posted_desc",
             ["extended"] = "1"
         };
+        Search.TreasureMapsSearch.ApplyParameters(parameters, query, "tv");
         return GetJsonAsync<ReleaseListResponse>("tv", parameters, CacheTtlForQuery(query), cancellationToken);
     }
 

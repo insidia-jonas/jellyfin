@@ -138,6 +138,11 @@ internal static class LiveTvLibraryChannelItems
         {
             [ProviderKey] = "1"
         };
+        if (nowNext is not null && nowNext.ChannelId != Guid.Empty)
+        {
+            providers["LiveTvGuideChannel"] = nowNext.ChannelId.ToString("N");
+        }
+
         if (!string.IsNullOrWhiteSpace(nowNext?.NowTitle))
         {
             providers[ProviderNowKey] = nowNext.NowTitle.Trim();

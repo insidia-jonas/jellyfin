@@ -29,6 +29,10 @@ internal static class LiveTvNowNextMap
             .ToDictionary(static group => group.Key, static group => group.First().ExternalId);
 
         var byTunerId = new Dictionary<string, LiveTvNowNext>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in externalIdByInternal)
+        {
+            byTunerId[pair.Value!] = new LiveTvNowNext { ChannelId = pair.Key };
+        }
 
         foreach (var group in programs.Where(static p => p is not null).GroupBy(static p => p.ChannelId))
         {
@@ -48,6 +52,7 @@ internal static class LiveTvNowNextMap
 
             byTunerId[tunerId] = new LiveTvNowNext
             {
+                ChannelId = group.Key,
                 NowTitle = now?.Name,
                 NowStart = now?.StartDate,
                 NowEnd = now?.EndDate,

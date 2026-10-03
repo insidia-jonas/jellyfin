@@ -48,6 +48,48 @@ test('native bootstrap loads shared channel health after the body exists, only o
     assert.equal(w.document.querySelectorAll('script[src="/native/channelHealth.js"]').length, 1);
 });
 
+test('Back ignores cached Home DOM and returns through real SPA routes', async t => {
+    const { w, clock, load } = setup(t, { hash: '#/home.html' });
+    const home = w.document.createElement('div');
+    home.className = 'homePage'; home.hidden = true; w.document.body.appendChild(home);
+    load('nativeshell.js');
+    w.history.pushState({}, '', '#/list?parentId=live');
+    w.history.pushState({}, '', '#/list?parentId=movie-group');
+    assert.equal(w.FireTvCanExit(), false);
+    assert.equal(w.FireTvNavigation.back(), 'handled');
+    await clock.tickAsync(650);
+    assert.equal(w.location.hash, '#/list?parentId=live');
+    assert.equal(w.FireTvCanExit(), false);
+    w.FireTvNavigation.back();
+    await clock.tickAsync(650);
+    assert.equal(w.location.hash, '#/home.html');
+    assert.equal(w.FireTvNavigation.back(), 'root');
+});
+
+test('Back closes program details first and preserves the channel route', async t => {
+    const { w, clock, load, channels } = setup(t);
+    channels[0].ProviderIds = { LiveTvGuideChannel: 'native-guide-id' };
+    channels[0].Type = 'ChannelVideoItem';
+    const requests = [];
+    const getJSON = w.ApiClient.getJSON;
+    w.ApiClient.getJSON = url => {
+        if (!url.startsWith('LiveTv/Programs')) { return getJSON(url); }
+        requests.push(new URL(url, 'http://jellyfin.test'));
+        return Promise.resolve({ Items: [{ ChannelId: 'native-guide-id', Name: 'Abendfilm', Overview: 'Die vollständige Handlung.', StartDate: new Date(w.Date.now() - 60000).toISOString(), EndDate: new Date(w.Date.now() + 3600000).toISOString() }] });
+    };
+    load('nativeshell.js'); load('tvLive.js');
+    await clock.tickAsync(600);
+    const info = w.document.querySelector('.firetv-live-info');
+    info.click();
+    await clock.tickAsync(100);
+    assert.match(w.document.getElementById('firetv-guide').textContent, /vollständige Handlung/);
+    assert.ok(requests.some(url => url.searchParams.get('channelIds').includes('native-guide-id')));
+    assert.equal(w.FireTvNavigation.back(), 'handled');
+    assert.equal(w.document.getElementById('firetv-guide'), null);
+    assert.equal(w.location.hash, '#/livetv');
+    assert.equal(w.document.activeElement, info);
+});
+
 test('Live TV settles without replacing rows or stealing focus', async t => {
     const { w, clock, calls, load } = setup(t);
     load('tvLive.js'); load('tvExperience.js');

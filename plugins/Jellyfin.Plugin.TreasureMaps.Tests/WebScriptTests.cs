@@ -6,14 +6,17 @@ namespace Jellyfin.Plugin.TreasureMaps.Tests;
 
 public class WebScriptTests
 {
-    private static string ScriptPath()
-        => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..",
-            "Jellyfin.Plugin.TreasureMaps", "Web", "treasuremaps.js"));
+    private static string ScriptText()
+    {
+        using var stream = typeof(Plugin).Assembly.GetManifestResourceStream("Jellyfin.Plugin.TreasureMaps.Web.treasuremaps.js")!;
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
 
     [Fact]
     public void ReleaseRows_WrapOnNarrowScreens()
     {
-        var js = File.ReadAllText(ScriptPath());
+        var js = ScriptText();
         Assert.Contains("overflow-wrap:anywhere", js, StringComparison.Ordinal);
         Assert.Contains("white-space:normal", js, StringComparison.Ordinal);
         Assert.Contains("@media (max-width:700px)", js, StringComparison.Ordinal);
@@ -26,7 +29,7 @@ public class WebScriptTests
     [Fact]
     public void DownloadsList_UsesTitleRowsAndOpenTargets()
     {
-        var js = File.ReadAllText(ScriptPath());
+        var js = ScriptText();
         Assert.Contains("#tmDownloads", js, StringComparison.Ordinal);
         Assert.Contains("enhanceDownloadsList", js, StringComparison.Ordinal);
         Assert.Contains("tmDlTitle", js, StringComparison.Ordinal);
@@ -43,7 +46,7 @@ public class WebScriptTests
     [Fact]
     public void TitlePage_ReplacesPosterGridIncludingAndereInhalte()
     {
-        var js = File.ReadAllText(ScriptPath());
+        var js = ScriptText();
         Assert.Contains("#childrenCollapsible", js, StringComparison.Ordinal);
         Assert.Contains("childrenItemsContainer", js, StringComparison.Ordinal);
         Assert.Contains("andere inhalte", js, StringComparison.Ordinal);
@@ -61,7 +64,7 @@ public class WebScriptTests
     [Fact]
     public void SearchPage_InjectsTreasureMapsHits()
     {
-        var js = File.ReadAllText(ScriptPath());
+        var js = ScriptText();
         Assert.Contains("enhanceSearchPage", js, StringComparison.Ordinal);
         Assert.Contains("TreasureMaps/Search/Cards", js, StringComparison.Ordinal);
         Assert.Contains("#tmSearchHits", js, StringComparison.Ordinal);
@@ -70,7 +73,7 @@ public class WebScriptTests
     [Fact]
     public void SubtitlePanel_QuotesCostBeforeGenerate()
     {
-        var js = File.ReadAllText(ScriptPath());
+        var js = ScriptText();
         Assert.Contains("#tmSubtitles", js, StringComparison.Ordinal);
         Assert.Contains("enhanceSubtitles", js, StringComparison.Ordinal);
         Assert.Contains("TreasureMaps/Subtitles/Search", js, StringComparison.Ordinal);
@@ -85,12 +88,12 @@ public class WebScriptTests
         var html = "<html><body>hi</body></html>";
         var first = WebScriptInjector.ApplyScriptTag(html);
         Assert.NotNull(first);
-        Assert.Contains("TreasureMaps/ClientScript?v=15", first, StringComparison.Ordinal);
+        Assert.Contains("TreasureMaps/ClientScript?v=16", first, StringComparison.Ordinal);
 
-        var stale = first!.Replace("ClientScript?v=15", "ClientScript?v=3", StringComparison.Ordinal);
+        var stale = first!.Replace("ClientScript?v=16", "ClientScript?v=3", StringComparison.Ordinal);
         var upgraded = WebScriptInjector.ApplyScriptTag(stale);
         Assert.NotNull(upgraded);
-        Assert.Contains("ClientScript?v=15", upgraded, StringComparison.Ordinal);
+        Assert.Contains("ClientScript?v=16", upgraded, StringComparison.Ordinal);
         Assert.Equal(1, CountOccurrences(upgraded!, "plugin=\"TreasureMaps\""));
     }
 

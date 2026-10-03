@@ -285,6 +285,7 @@ html.jf-livetv-list-on .busy {
 }
 
 #firetv-live {
+    font-size: 28px;
     position: fixed;
     z-index: 12;
     top: 7em;
@@ -453,7 +454,7 @@ html.jf-livetv-list-on .busy {
 }
 
 #firetv-live .jf-channel-health {
-    font-size: 0.7em;
+    font-size: 0.78em;
     line-height: 1.25;
     white-space: nowrap;
     overflow: hidden;
@@ -462,7 +463,7 @@ html.jf-livetv-list-on .busy {
 
 #firetv-live .firetv-live-now {
     margin-top: 0.2em;
-    color: #9aa6b6;
+    color: #becbdd;
     font-weight: 600;
     font-size: 0.95em;
     line-height: 1.2;
@@ -487,7 +488,7 @@ html.jf-livetv-list-on .busy {
 
 #firetv-live .firetv-live-next {
     margin-top: 0.2em;
-    color: #7f8b9b;
+    color: #aabbd0;
     font-weight: 550;
     font-size: 0.88em;
     line-height: 1.2;
@@ -608,3 +609,17 @@ html.jf-livetv-list-on .busy {
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 12px !important;
 }
+
+#firetv-live .firetv-live-info { flex: 0 0 2.3em; margin-left: .2em; border: 0; border-radius: 8px; background: #172338; color: #eef5ff; font: inherit; font-size: 1.2em; }
+#firetv-live [hidden] { display: none !important; }
+#firetv-guide { position: fixed; inset: 0; z-index: 99999; background: rgba(0,0,0,.85); padding: 50px 150px; box-sizing: border-box; color: #eff5ff; font-size: 28px; }
+#firetv-guide .firetv-guide-card { background: #131d2d; border-radius: 16px; padding: 32px; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; }
+#firetv-guide h2 { margin: 0 0 24px; font-size: 36px; }
+#firetv-guide h3 { font-size: 29px; margin: 0 0 12px; color: #9fd5ff; }
+#firetv-guide p { margin: 8px 0; line-height: 1.5; }
+#firetv-guide section { padding: 16px 4px 24px; border-bottom: 1px solid #354257; }
+#firetv-guide .firetv-guide-content { flex: 1; overflow-y: auto; min-height: 0; padding: 8px 16px; }
+#firetv-guide .firetv-guide-meta { color: #b9c8d9; font-size: 24px; }
+#firetv-guide button { background: #225583; color: white; border: 0; border-radius: 8px; padding: 12px 22px; font: inherit; align-self: flex-start; }
+#firetv-guide .firetv-guide-close { align-self: flex-end; }
+#firetv-guide :focus { outline: 3px solid #56b6ff; outline-offset: -3px; }

@@ -239,6 +239,11 @@ public class LiveTvLibraryChannel : IChannel, IRequiresMediaInfoCallback, IHasCa
             }
 
             guide.TryGetValue(item.ExternalId, out var nowNext);
+            if (nowNext is not null && nowNext.ChannelId != Guid.Empty)
+            {
+                item.SetProviderId("LiveTvGuideChannel", nowNext.ChannelId.ToString("N"));
+            }
+
             var subtitle = LiveTvLibraryChannelPresentation.ProgramSubtitle(nowNext);
             item.OriginalTitle = string.IsNullOrWhiteSpace(subtitle) ? item.Name : subtitle;
             item.Overview = LiveTvLibraryChannelPresentation.Overview(nowNext);

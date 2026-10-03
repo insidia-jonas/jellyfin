@@ -73,12 +73,13 @@ public static class SubtitleCost
         decimal whisperUsdPerMinute,
         decimal translationUsdPerMillionTokens,
         string whisperModel,
-        string? title = null)
+        string? title = null,
+        bool includeEnglishTranslation = false)
     {
         var minutes = Math.Max(1, (int)Math.Ceiling(Math.Max(0, seconds) / 60.0));
         var chunks = Math.Max(1, (int)Math.Ceiling(minutes / (double)ChunkMinutes));
         var lang = string.IsNullOrWhiteSpace(language) ? "en" : language.Trim().ToLowerInvariant();
-        var translate = !string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase);
+        var translate = includeEnglishTranslation || !string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase);
 
         var whisper = decimal.Round(minutes * whisperUsdPerMinute, 4, MidpointRounding.AwayFromZero);
         // ~150 spoken words/min → ~200 tokens/min in + 200 out when translating the SRT.
@@ -115,7 +116,8 @@ public static class SubtitleCost
         }
 
         var money = FormatUsd(quote.TotalUsd);
-        var bits = "KI erzeugen · ca. " + money + " · " + quote.Minutes + " Min. Whisper";
+        var speech = quote.WhisperModel.StartsWith("grok-", StringComparison.Ordinal) ? "Grok" : "Whisper";
+        var bits = "KI erzeugen · ca. " + money + " · " + quote.Minutes + " Min. " + speech;
         if (quote.IncludesTranslation)
         {
             bits += " + Übersetzung " + quote.Language.ToUpperInvariant();

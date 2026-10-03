@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
+using System.Text.Json;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -24,30 +26,61 @@ public static class SrtCues
     /// <returns>The shifted SRT and the next cue index.</returns>
     public static (string Text, int NextIndex) Shift(string srt, TimeSpan offset, int startIndex)
     {
-        var blocks = SplitBlocks(srt);
-        var sb = new StringBuilder();
-        var index = startIndex;
-        foreach (var block in blocks)
+        var cues = Parse(srt);
+        return (Render(cues.Select((cue, i) => cue with { Index = startIndex + i, Start = cue.Start + offset, End = cue.End + offset })), startIndex + cues.Count);
+    }
+
+    /// <summary>A validated subtitle cue with timestamps independent of translated text.</summary>
+    public sealed record Cue(int Index, TimeSpan Start, TimeSpan End, string Text);
+
+    /// <summary>Reads subtitle cues, retaining indexes and rejecting invalid time intervals.</summary>
+    public static IReadOnlyList<Cue> Parse(string srt)
+    {
+        var cues = new List<Cue>();
+        foreach (var block in SplitBlocks(srt))
         {
-            var shifted = Timestamp.Replace(block, m =>
-            {
-                var start = Read(m, 1) + offset;
-                var end = Read(m, 5) + offset;
-                return Format(start) + " --> " + Format(end);
-            });
-
-            var lines = shifted.Split('\n');
-            if (lines.Length == 0)
-            {
-                continue;
-            }
-
-            lines[0] = index.ToString(CultureInfo.InvariantCulture);
-            sb.Append(string.Join('\n', lines).Trim()).Append("\n\n");
-            index++;
+            var match = Timestamp.Match(block);
+            var start = Read(match, 1);
+            var end = Read(match, 5);
+            var text = block[(match.Index + match.Length)..].Trim();
+            var prefix = block[..match.Index].Trim();
+            var index = int.TryParse(prefix, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number) ? number : cues.Count + 1;
+            if (end <= start || string.IsNullOrWhiteSpace(text)) { throw new InvalidOperationException("Invalid subtitle cue returned by the speech service."); }
+            cues.Add(new Cue(index, start, end, text));
         }
 
-        return (sb.ToString(), index);
+        return cues;
+    }
+
+    /// <summary>Renders valid subtitle cues without allowing the translator to change timing.</summary>
+    public static string Render(IEnumerable<Cue> cues)
+        => Concat(cues.Select(c => c.Index.ToString(CultureInfo.InvariantCulture) + "\n" + Format(c.Start) + " --> " + Format(c.End) + "\n" + c.Text));
+
+    /// <summary>Applies a complete JSON translation, retaining every original index and timestamp.</summary>
+    public static string ApplyTranslation(string source, string response)
+    {
+        var cues = Parse(source);
+        var first = response.IndexOf('[', StringComparison.Ordinal);
+        var last = response.LastIndexOf(']');
+        if (first < 0 || last < first) { throw new InvalidOperationException("The translation service did not return subtitle text as JSON."); }
+        using var doc = JsonDocument.Parse(response[first..(last + 1)]);
+        var translated = new Dictionary<int, string>();
+        foreach (var row in doc.RootElement.EnumerateArray())
+        {
+            var index = row.GetProperty("index").GetInt32();
+            var text = row.GetProperty("text").GetString();
+            if (string.IsNullOrWhiteSpace(text) || !translated.TryAdd(index, text.Trim()))
+            {
+                throw new InvalidOperationException("The translation contains missing or duplicate subtitle cues.");
+            }
+        }
+
+        if (translated.Count != cues.Count || cues.Any(c => !translated.ContainsKey(c.Index)))
+        {
+            throw new InvalidOperationException("The translation is incomplete. No incorrect language file was saved.");
+        }
+
+        return Render(cues.Select(c => c with { Text = Regex.Replace(translated[c.Index], @"\r?\n\s*\n", "\n") }));
     }
 
     /// <summary>

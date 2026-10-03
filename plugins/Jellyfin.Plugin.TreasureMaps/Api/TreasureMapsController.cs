@@ -322,7 +322,8 @@ public class TreasureMapsController : ControllerBase
             }
 
             quote.AlreadyExists = false;
-            var srt = await ai.GenerateAsync(quote, cancellationToken).ConfigureAwait(false);
+            var srt = await ai.GenerateAsync(quote, cancellationToken, force).ConfigureAwait(false);
+            item?.ChangedExternally();
             return Ok(new
             {
                 ok = true,
@@ -983,7 +984,8 @@ public class TreasureMapsController : ControllerBase
             return await SearchCardsAsync(q, cancellationToken).ConfigureAwait(false);
         }
 
-        var kind = (type ?? "movie").ToLowerInvariant();
+        var parsedQuery = Jellyfin.Plugin.TreasureMaps.Search.TreasureMapsSearch.ParseQuery(q);
+        var kind = parsedQuery.Kind ?? (type ?? "movie").ToLowerInvariant();
         var limit = Math.Clamp(Plugin.Instance?.Configuration.ResultLimit ?? 100, 1, 100);
         offset = Math.Clamp(offset, 0, 10000);
         try
@@ -995,8 +997,10 @@ public class TreasureMapsController : ControllerBase
                 _ => await _client.SearchMoviesAsync(q, genre, null, limit, offset, cancellationToken).ConfigureAwait(false)
             };
 
-            var items = (response?.Items ?? Enumerable.Empty<Release>())
-                .Where(r => !string.IsNullOrWhiteSpace(r.Guid))
+            var releases = (response?.Items ?? Enumerable.Empty<Release>()).Where(r => !string.IsNullOrWhiteSpace(r.Guid));
+            var relevant = kind == "trending" || string.IsNullOrWhiteSpace(q) || q == "*" ? releases
+                : Jellyfin.Plugin.TreasureMaps.Search.TreasureMapsSearch.RelevantReleases(releases, q);
+            var items = relevant
                 .Select(r =>
                 {
                     var parsed = ReleaseNameParser.Parse(r.Title);

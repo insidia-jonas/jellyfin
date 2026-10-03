@@ -28,12 +28,14 @@ public static class LiveSearchPages
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(timeout ?? TimeSpan.FromSeconds(6));
         var all = new List<Release>();
-        var first = new[] { Run("movie", 0), Run("tv", 0) };
+        var parsed = TreasureMapsSearch.ParseQuery(query);
+        var kinds = parsed.Kind is null ? new[] { "movie", "tv" } : new[] { parsed.Kind };
+        var first = kinds.Select(kind => Run(kind, 0)).ToArray();
         await WaitForPages(first).ConfigureAwait(false);
         var completed = first.Where(t => t.IsCompletedSuccessfully).Select(t => t.Result).ToList();
         all.AddRange(completed.SelectMany(p => p.Items));
 
-        var matches = ReleaseGrouper.Group(all).Count(g => TreasureMapsSearch.ScoreTitle(g.Title, query, g.Year) > 0);
+        var matches = ReleaseGrouper.Group(all.Where(r => TreasureMapsSearch.ScoreRelease(r, query) > 0)).Count;
         if (!deadline.IsCancellationRequested && matches < take)
         {
             var more = completed.Where(p => p.Ok && p.Items.Count >= 100).Select(p => Run(p.Kind, 100)).ToArray();

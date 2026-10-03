@@ -7,6 +7,9 @@ namespace Jellyfin.Plugin.TreasureMaps.Configuration;
 /// </summary>
 public class PluginConfiguration : BasePluginConfiguration
 {
+    /// <summary>Gets or sets the Jellyfin URL reachable by Sonarr and Radarr after imports.</summary>
+    public string JellyfinCallbackUrl { get; set; } = "http://127.0.0.1:8096";
+
     /// <summary>Gets or sets Radarr's API base address.</summary>
     public string RadarrUrl { get; set; } = string.Empty;
     /// <summary>Gets or sets Radarr's server-side API credential.</summary>
@@ -203,6 +206,15 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Gets or sets a value indicating whether AI subtitle creation (Whisper + optional translation) is enabled.
     /// </summary>
     public bool EnableAiSubtitles { get; set; } = true;
+
+    /// <summary>Gets or sets the speech provider: auto, grok, or whisper.</summary>
+    public string SubtitleSpeechProvider { get; set; } = "auto";
+
+    /// <summary>Gets or sets the xAI speech-to-text model.</summary>
+    public string GrokSpeechModel { get; set; } = "grok-voice-transcribe-2.0";
+
+    /// <summary>Gets or sets the estimated xAI REST speech price per hour.</summary>
+    public decimal GrokSpeechUsdPerHour { get; set; } = 0.10m;
 
     /// <summary>
     /// Gets or sets an optional OpenAI-compatible Whisper base URL (for example Groq).

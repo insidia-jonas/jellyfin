@@ -160,29 +160,56 @@
         }, true);
     }
 
+    // Track SPA routes explicitly: hidden Home DOM survives inside the web router.
+    var backRoutes = [String(location.hash || "#/home.html")];
+    var navigatingBack = false;
+    var backFallback = 0;
+    function rememberRoute(replace) {
+        var route = String(location.hash || "#/home.html");
+        if (backRoutes[backRoutes.length - 1] === route) { return; }
+        var previous = backRoutes.lastIndexOf(route);
+        if (navigatingBack && previous >= 0) { backRoutes = backRoutes.slice(0, previous + 1); }
+        else if (replace) { backRoutes[backRoutes.length - 1] = route; }
+        else { backRoutes.push(route); if (backRoutes.length > 80) { backRoutes.shift(); } }
+        navigatingBack = false;
+        clearTimeout(backFallback);
+    }
+    ["pushState", "replaceState"].forEach(function (method) {
+        var original = history[method];
+        history[method] = function () {
+            var result = original.apply(this, arguments);
+            rememberRoute(method === "replaceState");
+            return result;
+        };
+    });
+    window.addEventListener("hashchange", function () { rememberRoute(false); });
+    window.addEventListener("popstate", function () { rememberRoute(false); });
+    function hasBackOverlay() {
+        return Array.prototype.some.call(document.querySelectorAll(".dialog, .actionSheet, .dialogContainer, .mainDrawer-open, .drawer-open"), function (el) {
+            return el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
+        });
+    }
     window.FireTvCanExit = function () {
-        try {
-            var blocking = document.querySelectorAll(".dialog, .actionSheet, .dialogContainer");
-            for (var i = 0; i < blocking.length; i++) {
-                if (blocking[i].offsetParent !== null) {
-                    return false;
-                }
-            }
-            if (document.querySelector(".mainDrawer-open, .drawer-open")) {
-                return false;
-            }
-            var hash = String(location.hash || "").toLowerCase();
-            if (hash.indexOf("details") !== -1 || hash.indexOf("item") !== -1 || hash.indexOf("wizard") !== -1) {
-                return false;
-            }
-            if (!hash || hash === "#" || hash === "#/" || hash.indexOf("home") !== -1) {
-                return true;
-            }
-            if (document.querySelector(".homeSectionsContainer, .homePage")) {
-                return true;
-            }
-        } catch (e) { /* ignore */ }
-        return false;
+        return !hasBackOverlay() && /^#?\/?(?:home(?:\.html)?)?(?:\?.*)?$/.test(String(location.hash || ""));
+    };
+    window.FireTvNavigation = {
+        back: function () {
+            if (window.FireTvLive && window.FireTvLive.closeGuide && window.FireTvLive.closeGuide()) { return "handled"; }
+            if (hasBackOverlay()) { window.FireTvRemote.send("Escape"); return "handled"; }
+            if (window.FireTvCanExit()) { return "root"; }
+            if (navigatingBack) { return "handled"; }
+            var current = String(location.hash || "");
+            var target = backRoutes.length > 1 ? backRoutes[backRoutes.length - 2] : "#/home.html";
+            if (backRoutes.length > 1) {
+                navigatingBack = true;
+                history.back();
+                backFallback = setTimeout(function () {
+                    if (String(location.hash || "") === current) { location.hash = target; }
+                    navigatingBack = false;
+                }, 500);
+            } else { location.hash = target; }
+            return "handled";
+        }
     };
 
     window.FireTvGuard = function () {
@@ -218,7 +245,7 @@
             deviceId: "firetv-web",
             deviceName: "Fire TV",
             appName: "Jellyfin Fire TV",
-            appVersion: "2.4.6"
+            appVersion: "2.4.7"
         };
     }
 
@@ -752,7 +779,7 @@
                 code: key,
                 bubbles: true,
                 cancelable: true,
-                composed: true
+                composed: true, keyCode: key === "Escape" ? 27 : 0, which: key === "Escape" ? 27 : 0
             };
             try {
                 document.dispatchEvent(new KeyboardEvent("keydown", init));

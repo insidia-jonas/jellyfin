@@ -117,7 +117,7 @@ public static class MediaProbe
         {
             await process.WaitForExitAsync(cts.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
             try
             {
@@ -128,6 +128,8 @@ public static class MediaProbe
                 // ignored
             }
 
+            await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             throw new TimeoutException(fileName + " timed out.");
         }
 

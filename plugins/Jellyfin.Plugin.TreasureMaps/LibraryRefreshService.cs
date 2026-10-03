@@ -14,18 +14,17 @@ namespace Jellyfin.Plugin.TreasureMaps;
 /// Scans the Movies / TV Shows libraries after SABnzbd finishes a Treasure-Maps job, so grabbed
 /// titles appear under those menu entries without a manual "Scan library". Also attaches the
 /// real completed-folder path from SABnzbd history when the configured library folder is empty
-/// or points somewhere else, and runs one delayed scan on startup.
+/// or points somewhere else. Completed paths are retried until discovery succeeds.
 /// </summary>
-public sealed class LibraryRefreshService : IHostedService, IDisposable
+public sealed class LibraryRefreshService : BackgroundService
 {
     private readonly ILibraryManager _libraryManager;
     private readonly SabnzbdClient _sabnzbd;
     private readonly GrabService _grabService;
     private readonly ILogger<LibraryRefreshService> _logger;
     private readonly HashSet<string> _seenCompleted = new(StringComparer.Ordinal);
-    private Timer? _timer;
-    private int _busy;
-    private bool _seeded;
+    private readonly CompletedDownloadImporter _importer;
+    private bool _attached;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LibraryRefreshService"/> class.
@@ -33,35 +32,39 @@ public sealed class LibraryRefreshService : IHostedService, IDisposable
     /// <param name="libraryManager">The library manager.</param>
     /// <param name="sabnzbd">The SABnzbd client.</param>
     /// <param name="grabService">The grab store (only Treasure-Maps jobs trigger an import).</param>
+    /// <param name="importer">Discovers completed files without a global scan.</param>
     /// <param name="logger">The logger.</param>
     public LibraryRefreshService(
         ILibraryManager libraryManager,
         SabnzbdClient sabnzbd,
         GrabService grabService,
+        CompletedDownloadImporter importer,
         ILogger<LibraryRefreshService> logger)
     {
         _libraryManager = libraryManager;
         _sabnzbd = sabnzbd;
         _grabService = grabService;
+        _importer = importer;
         _logger = logger;
     }
 
     /// <inheritdoc />
-    public Task StartAsync(CancellationToken cancellationToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _timer = new Timer(static s => ((LibraryRefreshService)s!).Tick(), this, TimeSpan.FromSeconds(25), TimeSpan.FromSeconds(90));
-        return Task.CompletedTask;
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken).ConfigureAwait(false);
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+            do
+            {
+                try { await ImportCompletedAsync(stoppingToken).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { throw; }
+                catch (Exception ex) { _logger.LogDebug(ex, "Completed download import will retry"); }
+            }
+            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
     }
-
-    /// <inheritdoc />
-    public Task StopAsync(CancellationToken cancellationToken)
-    {
-        _timer?.Change(Timeout.Infinite, 0);
-        return Task.CompletedTask;
-    }
-
-    /// <inheritdoc />
-    public void Dispose() => _timer?.Dispose();
 
     /// <summary>
     /// Scans every media library so newly completed downloads are picked up.
@@ -75,81 +78,25 @@ public sealed class LibraryRefreshService : IHostedService, IDisposable
         await _libraryManager.ValidateMediaLibrary(new Progress<double>(), cancellationToken).ConfigureAwait(false);
     }
 
-    private void Tick()
+    private async Task ImportCompletedAsync(CancellationToken cancellationToken)
     {
-        if (Interlocked.Exchange(ref _busy, 1) == 1)
+        if (!SabnzbdClient.IsConfigured) { return; }
+        var (_, items) = await _sabnzbd.GetDownloadStatusAsync(cancellationToken).ConfigureAwait(false);
+        var completed = items.Where(i => IsCompleted(i) && _grabService.IsTracked(i.Id, i.Name)
+            && !_seenCompleted.Contains(i.Id ?? i.Name ?? string.Empty)).ToList();
+        if (!_attached || completed.Count > 0)
         {
-            return;
+            await AttachCompletedFoldersAsync(completed, cancellationToken).ConfigureAwait(false);
+            _attached = true;
         }
 
-        _ = RunAsync();
-    }
-
-    private async Task RunAsync()
-    {
-        try
+        foreach (var item in completed)
         {
-            if (!_seeded)
+            if (await _importer.ImportAsync(item.Storage, cancellationToken).ConfigureAwait(false))
             {
-                _seeded = true;
-                await SeedAndStartupScanAsync().ConfigureAwait(false);
-                return;
+                _seenCompleted.Add(item.Id ?? item.Name ?? string.Empty);
+                _logger.LogInformation("Completed Treasure-Maps download '{Name}' discovered; metadata queued", item.Name);
             }
-
-            if (!SabnzbdClient.IsConfigured)
-            {
-                return;
-            }
-
-            var (_, items) = await _sabnzbd.GetDownloadStatusAsync(CancellationToken.None).ConfigureAwait(false);
-            var newlyCompleted = false;
-            foreach (var item in items.Where(i => IsCompleted(i) && _grabService.IsTracked(i.Id, i.Name)))
-            {
-                var id = item.Id ?? item.Name ?? string.Empty;
-                if (id.Length > 0 && _seenCompleted.Add(id))
-                {
-                    newlyCompleted = true;
-                    _logger.LogInformation("SABnzbd finished '{Name}' — library import queued", item.Name);
-                }
-            }
-
-            if (newlyCompleted || LibraryLooksEmpty())
-            {
-                await ScanAsync(CancellationToken.None).ConfigureAwait(false);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Library refresh tick failed");
-        }
-        finally
-        {
-            Interlocked.Exchange(ref _busy, 0);
-        }
-    }
-
-    private async Task SeedAndStartupScanAsync()
-    {
-        try
-        {
-            if (SabnzbdClient.IsConfigured)
-            {
-                var (_, items) = await _sabnzbd.GetDownloadStatusAsync(CancellationToken.None).ConfigureAwait(false);
-                foreach (var item in items.Where(i => IsCompleted(i) && _grabService.IsTracked(i.Id, i.Name)))
-                {
-                    var id = item.Id ?? item.Name ?? string.Empty;
-                    if (id.Length > 0)
-                    {
-                        _seenCompleted.Add(id);
-                    }
-                }
-            }
-
-            await ScanAsync(CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Startup library scan failed");
         }
     }
 
@@ -231,23 +178,6 @@ public sealed class LibraryRefreshService : IHostedService, IDisposable
         }
 
         return changed;
-    }
-
-    private bool LibraryLooksEmpty()
-    {
-        return FolderHasNoVideos(CollectionTypeOptions.movies, "Movies")
-            || FolderHasNoVideos(CollectionTypeOptions.tvshows, "TV Shows");
-    }
-
-    private bool FolderHasNoVideos(CollectionTypeOptions collectionType, string name)
-    {
-        var folder = LibrarySetup.Find(_libraryManager, name, collectionType);
-        if (folder?.Locations is null || folder.Locations.Length == 0)
-        {
-            return true;
-        }
-
-        return folder.Locations.All(p => LibraryPaths.CountVideos(p) <= 0);
     }
 
     private static bool IsPathChange(string status)

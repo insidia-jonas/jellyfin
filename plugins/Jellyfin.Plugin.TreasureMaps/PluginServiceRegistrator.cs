@@ -17,6 +17,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     {
         serviceCollection.AddSingleton<TreasureMapsListingCache>();
         serviceCollection.AddSingleton<TreasureMapsApiClient>();
+        serviceCollection.AddSingleton<Management.ServiceManagement>();
         serviceCollection.AddSingleton<SabnzbdClient>();
         serviceCollection.AddSingleton<Recommendations.AiRecommender>();
         serviceCollection.AddSingleton<Metadata.MetadataCatalog>();
@@ -35,6 +36,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddHostedService<TreasureMapsListingWarmupHost>();
         serviceCollection.AddHostedService<WebScriptInjector>();
         serviceCollection.AddHostedService<PeopleImageService>();
+        serviceCollection.AddSingleton<CompletedDownloadImporter>();
         serviceCollection.AddSingleton<LibraryRefreshService>();
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<LibraryRefreshService>());
     }

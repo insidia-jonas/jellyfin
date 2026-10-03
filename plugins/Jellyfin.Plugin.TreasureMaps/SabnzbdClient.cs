@@ -21,6 +21,10 @@ public class SabnzbdClient
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<SabnzbdClient> _logger;
     private volatile DownloadStatusSnapshot? _lastDownloadStatus;
+    private readonly object _statusLock = new();
+    private Task<(string? Speed, IReadOnlyList<SabDownloadStatus> Items)>? _statusPending;
+    private string? _statusScope;
+    private long _statusGeneration;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SabnzbdClient"/> class.
@@ -95,6 +99,7 @@ public class SabnzbdClient
             throw new InvalidOperationException("SABnzbd rejected the NZB (status=false).");
         }
 
+        InvalidateStatus();
         _logger.LogInformation("Queued NZB '{Name}' in SABnzbd as {Ids}", name, string.Join(",", result.NzoIds ?? new List<string>()));
         return result.NzoIds ?? new List<string>();
     }
@@ -123,6 +128,12 @@ public class SabnzbdClient
         });
         using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
+        InvalidateStatus();
+    }
+
+    private void InvalidateStatus()
+    {
+        lock (_statusLock) { _lastDownloadStatus = null; _statusScope = null; _statusGeneration++; }
     }
 
     private static readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
@@ -232,6 +243,34 @@ public class SabnzbdClient
     /// <returns>The overall speed and the download entries.</returns>
     public async Task<(string? Speed, IReadOnlyList<SabDownloadStatus> Items)> GetDownloadStatusAsync(CancellationToken cancellationToken)
     {
+        Task<(string? Speed, IReadOnlyList<SabDownloadStatus> Items)> pending;
+        lock (_statusLock)
+        {
+            var scope = Config.SabnzbdUrl + "|" + Config.SabnzbdApiKey;
+            if (_statusScope != scope)
+            {
+                _statusScope = scope;
+                _lastDownloadStatus = null;
+                _statusPending = null;
+                _statusGeneration++;
+            }
+
+            if (_lastDownloadStatus is { } snapshot && DateTimeOffset.UtcNow - snapshot.At < TimeSpan.FromSeconds(2))
+            {
+                return (snapshot.Speed, snapshot.Items);
+            }
+
+            pending = _statusPending is { IsCompleted: false } ? _statusPending : (_statusPending = ReadStatusAsync(scope, _statusGeneration));
+        }
+
+        // A browser leaving the page must not cancel the shared server import poll.
+        return await pending.WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<(string? Speed, IReadOnlyList<SabDownloadStatus> Items)> ReadStatusAsync(string scope, long generation)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        var cancellationToken = timeout.Token;
         using var client = _httpClientFactory.CreateClient();
 
         var items = new List<SabDownloadStatus>();
@@ -243,7 +282,11 @@ public class SabnzbdClient
             response.EnsureSuccessStatusCode();
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(body);
-            if (doc.RootElement.TryGetProperty("queue", out var queue))
+            if (!doc.RootElement.TryGetProperty("queue", out var queue))
+            {
+                throw new InvalidOperationException("SABnzbd did not return its queue. Check the connection and full API key.");
+            }
+
             {
                 speed = queue.TryGetProperty("speed", out var s) ? s.GetString() : null;
                 if (queue.TryGetProperty("slots", out var slots) && slots.ValueKind == JsonValueKind.Array)
@@ -271,9 +314,12 @@ public class SabnzbdClient
             response.EnsureSuccessStatusCode();
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(body);
-            if (doc.RootElement.TryGetProperty("history", out var history)
-                && history.TryGetProperty("slots", out var slots)
-                && slots.ValueKind == JsonValueKind.Array)
+            if (!doc.RootElement.TryGetProperty("history", out var history)
+                || !history.TryGetProperty("slots", out var slots) || slots.ValueKind != JsonValueKind.Array)
+            {
+                throw new InvalidOperationException("SABnzbd did not return its history. Check the connection and full API key.");
+            }
+
             {
                 foreach (var slot in slots.EnumerateArray())
                 {
@@ -296,7 +342,10 @@ public class SabnzbdClient
             Items = items,
             At = DateTimeOffset.UtcNow
         };
-        _lastDownloadStatus = snapshot;
+        lock (_statusLock)
+        {
+            if (_statusScope == scope && _statusGeneration == generation) { _lastDownloadStatus = snapshot; }
+        }
         return (speed, items);
     }
 
