@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -29,7 +30,7 @@ public sealed partial class ChannelMediaProbe
         }
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        deadline.CancelAfter(TimeSpan.FromSeconds(12));
+        deadline.CancelAfter(TimeSpan.FromSeconds(20));
         var info = new ProcessStartInfo(_encoder.EncoderPath)
         {
             UseShellExecute = false,
@@ -38,7 +39,7 @@ public sealed partial class ChannelMediaProbe
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
-        foreach (var argument in new[] { "-nostdin", "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-threads", "1", "-filter_threads", "1", "-rw_timeout", "8000000", "-analyzeduration", "2000000", "-probesize", "1048576" })
+        foreach (var argument in new[] { "-nostdin", "-hide_banner", "-loglevel", "debug", "-nostats", "-progress", "pipe:1", "-threads", "1", "-filter_threads", "1", "-rw_timeout", "8000000", "-analyzeduration", "2000000", "-probesize", "1048576" })
         {
             info.ArgumentList.Add(argument);
         }
@@ -52,7 +53,7 @@ public sealed partial class ChannelMediaProbe
             info.ArgumentList.Add(string.Concat(headers.Select(p => p.Key + ": " + p.Value + "\r\n")));
         }
 
-        foreach (var argument in new[] { "-i", source.Path, "-t", "1", "-map", "0:v:0?", "-map", "0:a:0?", "-threads", "1", "-f", "null", "-" })
+        foreach (var argument in new[] { "-i", source.Path, "-t", "3", "-map", "0:v:0?", "-map", "0:a:0?", "-threads", "1", "-stats_period", "0.25", "-f", "null", "-" })
         {
             info.ArgumentList.Add(argument);
         }
@@ -61,8 +62,37 @@ public sealed partial class ChannelMediaProbe
         var watch = Stopwatch.StartNew();
         cancellationToken.ThrowIfCancellationRequested();
         process.Start();
-        var output = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
-        var errors = process.StandardError.ReadToEndAsync(CancellationToken.None);
+        long? firstMedia = null;
+        async Task ReadProgress()
+        {
+            while (await process.StandardOutput.ReadLineAsync(CancellationToken.None).ConfigureAwait(false) is { } line)
+            {
+                if (HasDecodedMedia(line, requireVideo))
+                {
+                    firstMedia ??= watch.ElapsedMilliseconds;
+                }
+            }
+        }
+
+        var output = ReadProgress();
+        var destination = uri.Host;
+        async Task<string> ReadErrors()
+        {
+            var tail = new StringBuilder();
+            while (await process.StandardError.ReadLineAsync(CancellationToken.None).ConfigureAwait(false) is { } line)
+            {
+                destination = RedirectHost(line) ?? destination;
+                tail.AppendLine(line);
+                if (tail.Length > 65536)
+                {
+                    tail.Remove(0, tail.Length - 32768);
+                }
+            }
+
+            return tail.ToString();
+        }
+
+        var errors = ReadErrors();
         var timedOut = false;
         try
         {
@@ -89,21 +119,21 @@ public sealed partial class ChannelMediaProbe
             await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
         }
 
-        var progress = await output.ConfigureAwait(false);
+        await output.ConfigureAwait(false);
         var stderr = await errors.ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
-        if (!timedOut && process.ExitCode == 0 && HasDecodedMedia(progress, requireVideo))
+        if (!timedOut && process.ExitCode == 0 && firstMedia.HasValue)
         {
-            return new ProbeResult(true, null, watch.ElapsedMilliseconds);
+            return new ProbeResult(true, null, watch.ElapsedMilliseconds, firstMedia, destination);
         }
 
-        return new ProbeResult(false, FailureFromOutput(stderr, timedOut), watch.ElapsedMilliseconds);
+        return new ProbeResult(false, FailureFromOutput(stderr, timedOut), watch.ElapsedMilliseconds, firstMedia, destination);
     }
 
     internal static ChannelFailure FailureFromOutput(string stderr, bool timedOut)
     {
-        var match = HttpError().Match(stderr);
-        if (match.Success)
+        var match = HttpError().Matches(stderr).LastOrDefault(m => int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture) >= 400);
+        if (match is not null)
         {
             return ChannelFailure.FromStatus(int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture));
         }
@@ -129,5 +159,25 @@ public sealed partial class ChannelMediaProbe
     [GeneratedRegex(@"(?:HTTP error|Server returned|HTTP/[\d.]+)\s+(\d{3})", RegexOptions.IgnoreCase)]
     private static partial Regex HttpError();
 
-    internal sealed record ProbeResult(bool Success, ChannelFailure? Failure, long ElapsedMilliseconds);
+    internal static string? RedirectHost(string line)
+    {
+        // FFmpeg logs the Host header of every actual request at debug level,
+        // including the request after a redirect. Response headers require trace.
+        var header = line.Trim();
+        if (header.StartsWith("Host:", StringComparison.OrdinalIgnoreCase))
+        {
+            return Uri.TryCreate("http://" + header[5..].Trim(), UriKind.Absolute, out var request) ? request.Host : null;
+        }
+
+        var start = line.IndexOf("Location:", StringComparison.OrdinalIgnoreCase);
+        if (start < 0)
+        {
+            return null;
+        }
+
+        var location = line[(start + 9)..].Trim().TrimEnd('\'', '"');
+        return Uri.TryCreate(location, UriKind.Absolute, out var target) && target.Scheme is "http" or "https" ? target.Host : null;
+    }
+
+    internal sealed record ProbeResult(bool Success, ChannelFailure? Failure, long ElapsedMilliseconds, long? FirstMediaMilliseconds = null, string? DestinationHost = null);
 }

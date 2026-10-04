@@ -14,6 +14,25 @@ namespace Jellyfin.LiveTv.Tests.TunerHosts;
 public class ChannelHealthTests
 {
     [Fact]
+    public void ChangingAccessExpiresHealthButKeepsRecentChannelPriorityAndAccountCooldown()
+    {
+        var store = Store(new Clock());
+        store.SynchronizeSource("tuner", "old");
+        store.BeginPlayback("a", "tuner");
+        store.Success("a", "tuner", 6000, decoded: true);
+        Assert.Equal("SlowStart", store.GetHealth("a").Reason);
+        Assert.Equal("DecodedMedia", store.GetHealth("a").StartupMeasurement);
+        store.Failure("a", "tuner", "ProviderBusy", true);
+        store.SynchronizeSource("tuner", "old");
+        Assert.False(store.CanProbe("tuner"));
+        store.SynchronizeSource("tuner", "new");
+        Assert.Equal("Unknown", store.GetHealth("a").Status);
+        Assert.Null(store.GetHealth("a").LastCheckedUtc);
+        Assert.Contains("a", store.RecentChannels());
+        Assert.True(store.CanProbe("tuner"));
+    }
+
+    [Fact]
     public void FailedClientPlaybackStaysVisibleDespiteTransportDataWithoutCondemningChannel()
     {
         var clock = new Clock();
@@ -123,6 +142,23 @@ public class ChannelHealthTests
         playback.Dispose();
         Assert.Null(coordinator.TryAcquireProbe());
         clock.Advance(TimeSpan.FromMinutes(3));
+        using var next = coordinator.TryAcquireProbe();
+        Assert.NotNull(next);
+    }
+
+    [Fact]
+    public void DisablingChecksCancelsButDoesNotReleaseTheRunningDecoder()
+    {
+        var coordinator = new ChannelProbeCoordinator(new Clock());
+        var probe = coordinator.TryAcquireProbe();
+        Assert.NotNull(probe);
+        coordinator.SetProbesEnabled(false);
+        Assert.True(probe.Cancellation.IsCancellationRequested);
+        Assert.False(probe.Finished.Task.IsCompleted);
+        Assert.Null(coordinator.TryAcquireProbe());
+        probe.Dispose();
+        Assert.Null(coordinator.TryAcquireProbe());
+        coordinator.SetProbesEnabled(true);
         using var next = coordinator.TryAcquireProbe();
         Assert.NotNull(next);
     }

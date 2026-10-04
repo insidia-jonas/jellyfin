@@ -40,6 +40,7 @@ namespace Jellyfin.LiveTv.TunerHosts
         private readonly IStreamHelper _streamHelper;
         private readonly ChannelProbeCoordinator _probeCoordinator;
         private readonly ChannelHealthStore _health;
+        private readonly IptvWatchdog _watchdog;
         private (string PlaylistUrl, M3uListingFetchResult Result)? _lastValidated;
 
         public M3UTunerHost(
@@ -52,7 +53,8 @@ namespace Jellyfin.LiveTv.TunerHosts
             INetworkManager networkManager,
             IStreamHelper streamHelper,
             ChannelProbeCoordinator probeCoordinator = null,
-            ChannelHealthStore health = null)
+            ChannelHealthStore health = null,
+            IptvWatchdog watchdog = null)
             : base(config, logger, fileSystem)
         {
             _httpClientFactory = httpClientFactory;
@@ -62,6 +64,7 @@ namespace Jellyfin.LiveTv.TunerHosts
             _streamHelper = streamHelper;
             _probeCoordinator = probeCoordinator;
             _health = health;
+            _watchdog = watchdog;
         }
 
         public override string Type => "m3u";
@@ -138,6 +141,7 @@ namespace Jellyfin.LiveTv.TunerHosts
             var sources = await GetChannelStreamMediaSources(tunerHost, channel, cancellationToken).ConfigureAwait(false);
 
             var mediaSource = sources[0];
+            _health?.SynchronizeSource(tunerHost.Id, IptvWatchdog.SourceId(tunerHost, M3uUrlFailover.GetPrimaryUrl(tunerHost)));
             var reservation = _probeCoordinator is null ? null : await _probeCoordinator.AcquirePlayback(cancellationToken).ConfigureAwait(false);
 
             // MPEG-TS IPTV must go through the HTTP proxy so hang detection can fail over ingest hosts.
@@ -146,10 +150,11 @@ namespace Jellyfin.LiveTv.TunerHosts
                 && !mediaSource.RequiresLooping
                 && !M3uUrlFailover.IsHls(mediaSource.Path, mediaSource.Container))
             {
-                return new SharedHttpStream(mediaSource, tunerHost, streamId, FileSystem, _httpClientFactory, Logger, Config, _appHost, _streamHelper, _health, channel.Id, reservation);
+                return new SharedHttpStream(mediaSource, tunerHost, streamId, FileSystem, _httpClientFactory, Logger, Config, _appHost, _streamHelper, _health, channel.Id, reservation, _watchdog);
             }
 
             _health?.BeginPlayback(channel.Id, tunerHost.Id);
+            _watchdog?.ObservePlayback(tunerHost, M3uUrlFailover.GetPrimaryUrl(tunerHost), channel.Id, Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
             return new LiveStream(mediaSource, tunerHost, FileSystem, Logger, Config, _streamHelper, reservation);
         }
 

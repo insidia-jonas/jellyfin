@@ -27,6 +27,7 @@ namespace Jellyfin.LiveTv.TunerHosts
         private readonly IServerApplicationHost _appHost;
         private readonly TunerHostInfo _tunerHostInfo;
         private readonly ChannelHealthStore? _health;
+        private readonly IptvWatchdog? _watchdog;
         private readonly string _channelId;
         private readonly string? _ingestUrl;
         private int _providerStarted;
@@ -43,13 +44,15 @@ namespace Jellyfin.LiveTv.TunerHosts
             IStreamHelper streamHelper,
             ChannelHealthStore? health = null,
             string? channelId = null,
-            IDisposable? playbackReservation = null)
+            IDisposable? playbackReservation = null,
+            IptvWatchdog? watchdog = null)
             : base(mediaSource, tunerHostInfo, fileSystem, logger, configurationManager, streamHelper, playbackReservation)
         {
             _httpClientFactory = httpClientFactory;
             _appHost = appHost;
             _tunerHostInfo = tunerHostInfo;
             _health = health;
+            _watchdog = watchdog;
             _channelId = channelId ?? originalStreamId;
             OriginalStreamId = originalStreamId;
             // Open() rewrites MediaSource.Path (same object as OriginalMediaSource)
@@ -136,7 +139,6 @@ namespace Jellyfin.LiveTv.TunerHosts
             var watch = Stopwatch.StartNew();
             var originalUrl = url;
             var currentOrigin = M3uUrlFailover.GetPrimaryUrl(_tunerHostInfo);
-            var candidates = M3uUrlFailover.GetHealthCandidates(_tunerHostInfo);
             var recovery = new LiveStreamRecovery();
             var hangTimeout = M3uUrlFailover.GetHangTimeout(_tunerHostInfo);
             long totalBytes = 0;
@@ -147,6 +149,7 @@ namespace Jellyfin.LiveTv.TunerHosts
                 while (!cancellationToken.IsCancellationRequested)
                 {
                     DateTime? firstData = null;
+                    long? firstDataMilliseconds = null;
                     try
                     {
                         using var headerTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -199,6 +202,7 @@ namespace Jellyfin.LiveTv.TunerHosts
 
                                     var now = DateTime.UtcNow;
                                     firstData ??= now;
+                                    firstDataMilliseconds ??= watch.ElapsedMilliseconds;
                                     totalBytes += read;
                                     await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
                                     Resolve(openTaskCompletionSource);
@@ -212,7 +216,9 @@ namespace Jellyfin.LiveTv.TunerHosts
 
                                     if (verified && now - reported >= TimeSpan.FromSeconds(5))
                                     {
-                                        _health?.Success(_channelId, TunerHostId, watch.ElapsedMilliseconds, totalBytes);
+                                        _health?.Success(_channelId, TunerHostId, firstDataMilliseconds, totalBytes);
+                                        _watchdog?.Record(_tunerHostInfo, currentOrigin, _channelId, UniqueId, true, false, firstDataMilliseconds, totalBytes, destinationHost: response.RequestMessage?.RequestUri?.Host);
+                                        _watchdog?.ObservePlayback(_tunerHostInfo, currentOrigin, _channelId, UniqueId);
                                         reported = now;
                                     }
                                 }
@@ -231,6 +237,7 @@ namespace Jellyfin.LiveTv.TunerHosts
                     {
                         var failure = ChannelFailure.FromException(ex);
                         _health?.Failure(_channelId, TunerHostId, failure.Reason, failure.ProviderWide, firstData.HasValue);
+                        _watchdog?.Record(_tunerHostInfo, currentOrigin, _channelId, UniqueId, false, false, bytes: totalBytes, reason: failure.Reason, interrupted: firstData.HasValue);
                         Logger.LogWarning("Live channel {ChannelId}: {Reason}; recovery attempt {Attempt}", _channelId, failure.Reason, recovery.Failures + 1);
                         var keepTrying = recovery.Failed(DateTime.UtcNow, firstData.HasValue ? DateTime.UtcNow - firstData.Value : TimeSpan.Zero);
                         if (failure.StopRetries || !keepTrying)
@@ -238,12 +245,16 @@ namespace Jellyfin.LiveTv.TunerHosts
                             break;
                         }
 
-                        if (recovery.ShouldSwitch && candidates.Count > 1)
+                        if (recovery.ShouldSwitch)
                         {
-                            currentOrigin = M3uUrlFailover.GetNextUrl(candidates, currentOrigin);
-                            url = M3uUrlFailover.RewriteStreamUrl(originalUrl, currentOrigin);
-                            // A failing channel must not change the configured origin for every other channel.
-                            Logger.LogInformation("Trying configured alternate host {SourceHost} for channel {ChannelId}", new Uri(url).Host, _channelId);
+                            var alternate = _watchdog?.GetVerifiedAlternate(_tunerHostInfo, _channelId, currentOrigin);
+                            if (alternate is not null)
+                            {
+                                currentOrigin = alternate;
+                                url = M3uUrlFailover.RewriteStreamUrl(originalUrl, currentOrigin);
+                                // A failing channel must not change the configured origin for every other channel.
+                                Logger.LogInformation("Trying verified alternate host {SourceHost} for channel {ChannelId}", new Uri(url).Host, _channelId);
+                            }
                         }
 
                         await Task.Delay(TimeSpan.FromSeconds(Math.Min(recovery.Failures, 3)), cancellationToken).ConfigureAwait(false);

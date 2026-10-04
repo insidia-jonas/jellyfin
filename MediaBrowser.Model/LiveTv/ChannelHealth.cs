@@ -23,6 +23,9 @@ public sealed class ChannelHealth
     /// <summary>Gets or sets milliseconds until the first media data arrived.</summary>
     public long? StartMilliseconds { get; set; }
 
+    /// <summary>Gets or sets the measurement: MediaData or DecodedMedia.</summary>
+    public string? StartupMeasurement { get; set; }
+
     /// <summary>Gets or sets the bytes received in the latest observed playback.</summary>
     public long BytesReceived { get; set; }
 

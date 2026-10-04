@@ -17,6 +17,17 @@ public class ChannelMediaProbeTests
 {
     public static bool HasFfmpeg => File.Exists(Environment.GetEnvironmentVariable("JELLYFIN_TEST_FFMPEG"));
 
+    [Fact]
+    public void RedirectDiagnosticsOnlyExposeHostsAndUseTheFinalHttpError()
+    {
+        Assert.Equal("cdn.example", ChannelMediaProbe.RedirectHost("[https] header='Location: https://user:secret@cdn.example:4443/private?token=secret'"));
+        Assert.Equal("cdn.example", ChannelMediaProbe.RedirectHost("Host: cdn.example:4443"));
+        Assert.Null(ChannelMediaProbe.RedirectHost("[https] Location: /private?secret"));
+        var result = ChannelMediaProbe.FailureFromOutput("HTTP/1.1 302 Found\nHTTP/1.1 200 OK\nHTTP error 403 Forbidden", false);
+        Assert.Equal("ProviderAuthentication", result.Reason);
+        Assert.True(result.StopRetries);
+    }
+
     [Theory]
     [InlineData("Error opening input: Connection timed out", "ProviderNetwork", true)]
     [InlineData("Connection refused", "ProviderNetwork", true)]
@@ -41,7 +52,11 @@ public class ChannelMediaProbeTests
         await using var server = new Server(video);
         var probe = CreateProbe();
         var valid = await probe.ProbeAsync(Source(server.Url + "video"), TestContext.Current.CancellationToken);
-        Assert.True(valid.Success);
+        Assert.True(valid.Success, "Direct fixture: " + valid.Failure?.Reason);
+        Assert.NotNull(valid.FirstMediaMilliseconds);
+        var redirected = await probe.ProbeAsync(Source(server.Url + "redirect"), TestContext.Current.CancellationToken);
+        Assert.True(redirected.Success, "Redirect fixture: " + redirected.Failure?.Reason);
+        Assert.Equal("localhost", redirected.DestinationHost);
         var html = await probe.ProbeAsync(Source(server.Url + "html"), TestContext.Current.CancellationToken);
         Assert.False(html.Success);
         var denied = await probe.ProbeAsync(Source(server.Url + "denied"), TestContext.Current.CancellationToken);
@@ -104,6 +119,7 @@ public class ChannelMediaProbeTests
             port.Stop();
             Url = "http://127.0.0.1:" + number + "/";
             _listener.Prefixes.Add(Url);
+            _listener.Prefixes.Add(Url.Replace("127.0.0.1", "localhost", StringComparison.Ordinal));
             _listener.Start();
             _loop = Run(video);
         }
@@ -136,6 +152,13 @@ public class ChannelMediaProbeTests
                 Connected.TrySetResult();
                 using var response = context.Response;
                 var route = context.Request.Url!.AbsolutePath;
+                if (route == "/redirect")
+                {
+                    response.StatusCode = 302;
+                    response.RedirectLocation = Url.Replace("127.0.0.1", "localhost", StringComparison.Ordinal) + "video";
+                    continue;
+                }
+
                 if (route == "/slow")
                 {
                     await Task.Delay(Timeout.InfiniteTimeSpan, _stop.Token);
