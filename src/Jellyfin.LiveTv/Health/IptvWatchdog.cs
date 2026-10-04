@@ -19,7 +19,7 @@ public sealed class IptvWatchdog : IIptvWatchdog
 {
     private readonly object _sync = new();
     private readonly Dictionary<string, Observation> _history = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, (TunerHostInfo Tuner, string Source, string Attempt, DateTime Until)> _playbacks = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (TunerHostInfo Tuner, string Source, string Attempt, DateTime Until, bool Ended)> _playbacks = new(StringComparer.Ordinal);
     private readonly string? _path;
     private readonly TimeProvider _clock;
     private readonly Func<LiveTvOptions> _options;
@@ -95,7 +95,20 @@ public sealed class IptvWatchdog : IIptvWatchdog
                 _playbacks.Remove(id);
             }
 
-            _playbacks[channel] = (tuner, source, attempt, _clock.GetUtcNow().UtcDateTime.AddMinutes(2));
+            _playbacks[channel] = (tuner, source, attempt, _clock.GetUtcNow().UtcDateTime.AddMinutes(2), false);
+        }
+    }
+
+    internal void EndPlayback(string channel, string attempt)
+    {
+        lock (_sync)
+        {
+            if (_playbacks.TryGetValue(channel, out var playback) && playback.Attempt == attempt)
+            {
+                // Late progress must not revive a failed source. Retain a short
+                // window for the client's final failure report after stream close.
+                _playbacks[channel] = playback with { Ended = true, Until = _clock.GetUtcNow().UtcDateTime.AddSeconds(30) };
+            }
         }
     }
 
@@ -103,7 +116,7 @@ public sealed class IptvWatchdog : IIptvWatchdog
     {
         lock (_sync)
         {
-            if (_playbacks.TryGetValue(channel, out var playback) && playback.Until >= _clock.GetUtcNow().UtcDateTime)
+            if (_playbacks.TryGetValue(channel, out var playback) && playback.Until >= _clock.GetUtcNow().UtcDateTime && (failed || !playback.Ended))
             {
                 Record(playback.Tuner, playback.Source, channel, playback.Attempt, !failed, !failed, reason: failed ? "ClientPlaybackFailed" : null, interrupted: failed);
                 if (failed)

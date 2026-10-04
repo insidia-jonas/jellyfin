@@ -3,6 +3,7 @@
 
 using System;
 using System.Buffers;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
@@ -142,6 +143,7 @@ namespace Jellyfin.LiveTv.TunerHosts
             var recovery = new LiveStreamRecovery();
             var hangTimeout = M3uUrlFailover.GetHangTimeout(_tunerHostInfo);
             long totalBytes = 0;
+            var sourceBytes = new Dictionary<string, long>(StringComparer.Ordinal);
             try
             {
                 var destination = new FileStream(TempFilePath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read, IODefaults.FileStreamBufferSize, FileOptions.Asynchronous);
@@ -204,6 +206,7 @@ namespace Jellyfin.LiveTv.TunerHosts
                                     firstData ??= now;
                                     firstDataMilliseconds ??= watch.ElapsedMilliseconds;
                                     totalBytes += read;
+                                    sourceBytes[currentOrigin] = sourceBytes.GetValueOrDefault(currentOrigin) + read;
                                     await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
                                     Resolve(openTaskCompletionSource);
                                     if (!verified && sampled < sample.Length)
@@ -217,7 +220,7 @@ namespace Jellyfin.LiveTv.TunerHosts
                                     if (verified && now - reported >= TimeSpan.FromSeconds(5))
                                     {
                                         _health?.Success(_channelId, TunerHostId, firstDataMilliseconds, totalBytes);
-                                        _watchdog?.Record(_tunerHostInfo, currentOrigin, _channelId, UniqueId, true, false, firstDataMilliseconds, totalBytes, destinationHost: response.RequestMessage?.RequestUri?.Host);
+                                        _watchdog?.Record(_tunerHostInfo, currentOrigin, _channelId, UniqueId, true, false, firstDataMilliseconds, sourceBytes[currentOrigin], destinationHost: response.RequestMessage?.RequestUri?.Host);
                                         _watchdog?.ObservePlayback(_tunerHostInfo, currentOrigin, _channelId, UniqueId);
                                         reported = now;
                                     }
@@ -237,7 +240,8 @@ namespace Jellyfin.LiveTv.TunerHosts
                     {
                         var failure = ChannelFailure.FromException(ex);
                         _health?.Failure(_channelId, TunerHostId, failure.Reason, failure.ProviderWide, firstData.HasValue);
-                        _watchdog?.Record(_tunerHostInfo, currentOrigin, _channelId, UniqueId, false, false, bytes: totalBytes, reason: failure.Reason, interrupted: firstData.HasValue);
+                        _watchdog?.Record(_tunerHostInfo, currentOrigin, _channelId, UniqueId, false, false, bytes: sourceBytes.GetValueOrDefault(currentOrigin), reason: failure.Reason, interrupted: firstData.HasValue);
+                        _watchdog?.EndPlayback(_channelId, UniqueId);
                         Logger.LogWarning("Live channel {ChannelId}: {Reason}; recovery attempt {Attempt}", _channelId, failure.Reason, recovery.Failures + 1);
                         var keepTrying = recovery.Failed(DateTime.UtcNow, firstData.HasValue ? DateTime.UtcNow - firstData.Value : TimeSpan.Zero);
                         if (failure.StopRetries || !keepTrying)
@@ -271,6 +275,7 @@ namespace Jellyfin.LiveTv.TunerHosts
             }
             finally
             {
+                _watchdog?.EndPlayback(_channelId, UniqueId);
                 openTaskCompletionSource.TrySetResult(false);
                 EnableStreamSharing = false;
                 await DeleteTempFiles(TempFilePath).ConfigureAwait(false);

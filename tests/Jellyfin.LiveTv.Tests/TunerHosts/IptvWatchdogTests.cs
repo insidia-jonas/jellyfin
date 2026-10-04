@@ -35,6 +35,23 @@ public class IptvWatchdogTests
     }
 
     [Fact]
+    public void LateClientProgressCannotReviveFailedSourceButFinalFailureStillCounts()
+    {
+        var (store, tuner, _) = Create();
+        store.Record(tuner, Backup, "a", "play", true, false, bytes: 1234);
+        store.ObservePlayback(tuner, Backup, "a", "play");
+        store.Record(tuner, Backup, "a", "play", false, false, reason: "Interrupted");
+        store.EndPlayback("a", "play");
+        store.ObserveClient("a", false);
+        Assert.Null(store.GetVerifiedAlternate(tuner, "a", Primary));
+        store.ObserveClient("a", true);
+        var source = Assert.Single(store.GetStatus().Tuners).Sources.Single(s => !s.Active);
+        Assert.Equal("ClientPlaybackFailed", source.Reason);
+        Assert.Equal(1, source.Interruptions);
+        Assert.Equal(1234, source.BytesReceived);
+    }
+
+    [Fact]
     public void SourceFailureDoesNotBlockOtherOriginsAndFailureRevokesVerification()
     {
         var (store, tuner, clock) = Create();
