@@ -80,3 +80,14 @@ test('refresh keeps the expanded comparison open and restores focused controls',
     assert.equal(e.panel().open, true);
     assert.equal(e.w.document.activeElement.getAttribute('data-control'), 'toggle');
 });
+
+test('Live TV rebuilding its list after a config change keeps the comparison expanded', async t => {
+    const e = setup(t, p => Promise.resolve(p.startsWith('Users/') ? { Policy: { IsAdministrator: true } } : status()));
+    await e.clock.tickAsync(500);
+    e.panel().open = true;
+    await e.clock.tickAsync(200);
+    e.w.document.getElementById('jf-livetv-overview').replaceChildren();
+    await e.clock.tickAsync(500);
+    assert.ok(e.panel());
+    assert.equal(e.panel().open, true);
+});
