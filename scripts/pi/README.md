@@ -189,3 +189,40 @@ with a full Today/Tomorrow programme drawer, favourites and bounded page renderi
 Guide queries use native channel IDs; they never open provider streams. Missing EPG
 and failed requests are distinguished. Fire TV 2.4.9 improves D-pad navigation through
 movie details, Indexer downloads and expandable subtitle controls.
+
+## IPTV watchdog
+
+The Live TV overview shows an expandable **IPTV-Watchdog** panel to administrators.
+`GET /LiveTv/Watchdog` exposes the same credential-free observations. Opening either
+view never starts playback or a provider request.
+
+Use one main M3U listing and the existing EPG configuration. Explicit host-only
+entry servers belong in the tuner's `AlternateUrls`; `ActiveUrl` selects the primary.
+Different export formats and different entry hostnames are not evidence of independent
+backup capacity. The watchdog records actual delivery hosts and warns about overlap.
+
+Idle checks use one short decoder process per minute, with a 20-second deadline.
+They rotate favorite/recent channels, up to eight representative channels on configured
+alternatives, and the remaining catalog. Large playlists take hours to sweep; untested
+or expired channels stay unknown. Playback and recording reservations preempt checks.
+The pause control is needed when another application uses the same provider account.
+
+Live TV configuration fields (preserved by the installer):
+
+| Field | Default | Purpose |
+| --- | --- | --- |
+| `EnableChannelHealthProbes` | `true` | Enable idle decoder checks; passive observations continue when paused. |
+| `EnableChannelHealthSweep` | `true` | Include other channels in the rotation. |
+| `ChannelHealthPriorityIds` | `[]` | External tuner channel IDs to prioritize in source comparisons. |
+
+Channel badges expire after 30 minutes. Source comparison and per-channel backup
+verification expire after six hours. Transport flow and client decoder evidence are
+kept distinct. Startup comparisons use decoder measurements, not the client's progress
+reporting interval. Retries and repeated progress events do not inflate the sample count.
+
+A source recommendation requires at least six primary observations across three of
+the same channels on both entries, with significantly fewer failures or faster decoded
+startup on the alternative. Shared delivery hosts suppress an independence recommendation.
+Recommendations never change the configured primary. MPEG-TS recovery may use an
+alternative only after successful decoding/playback of that same channel on it, within
+the existing retry/time budget. HLS retains its existing player reconnect handling.

@@ -29,6 +29,9 @@
         if (state === 'Unstable' && health.Reason === 'ClientPlaybackFailed') {
             text = de ? 'Wiedergabe fehlgeschlagen' : 'Playback failed';
         }
+        if (state === 'Unstable' && health.Reason === 'SlowStart') {
+            text = de ? 'Langsamer Start' : 'Slow start';
+        }
         if (/^Provider/.test(health.Reason || '')) {
             state = 'Unknown';
             text = health.Reason === 'ProviderAuthentication' ? (de ? 'Anbieter-Anmeldung prüfen' : 'Check provider login')
@@ -50,9 +53,17 @@
         if (!target) { return; }
         var badge = target.querySelector('.jf-channel-health');
         if (!badge) { badge = document.createElement('span'); badge.className = 'jf-channel-health'; target.appendChild(badge); }
-        var value = describe((cache[row.getAttribute('data-id')] || {}).health || {});
+        var health = (cache[row.getAttribute('data-id')] || {}).health || {};
+        var value = describe(health);
         if (badge.textContent !== value.text) { badge.textContent = value.text; }
         if (badge.getAttribute('data-state') !== value.state) { badge.setAttribute('data-state', value.state); }
+        var details = [];
+        if (health.StartMilliseconds != null) {
+            details.push((health.StartupMeasurement === 'DecodedMedia' ? (german() ? 'Decodiertes Bild/Ton: ' : 'Decoded media: ')
+                : (german() ? 'Erste Mediendaten: ' : 'First media data: ')) + (health.StartMilliseconds / 1000).toFixed(1) + ' s');
+        }
+        if (health.Interruptions) { details.push(health.Interruptions + (german() ? ' Unterbrechungen' : ' interruptions')); }
+        badge.title = details.join(' · ');
     }
     function refresh() {
         timer = 0;

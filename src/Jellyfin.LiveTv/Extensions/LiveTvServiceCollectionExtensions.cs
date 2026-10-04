@@ -45,6 +45,8 @@ public static class LiveTvServiceCollectionExtensions
         services.AddSingleton<ITunerHost, M3UTunerHost>();
         services.AddSingleton<M3uPlaylistHealthChecker>();
         services.AddSingleton<ChannelHealthStore>();
+        services.AddSingleton<IptvWatchdog>();
+        services.AddSingleton<IIptvWatchdog>(s => s.GetRequiredService<IptvWatchdog>());
         services.AddSingleton<ILiveTvChannelHealth>(s => s.GetRequiredService<ChannelHealthStore>());
         services.AddSingleton<ChannelProbeCoordinator>();
         services.AddSingleton<ChannelMediaProbe>();

@@ -18,6 +18,12 @@ namespace MediaBrowser.Model.LiveTv
         /// <summary>Gets or sets a value indicating whether idle checks may decode favorite and recent channels.</summary>
         public bool EnableChannelHealthProbes { get; set; } = true;
 
+        /// <summary>Gets or sets a value indicating whether idle checks also rotate through other channels.</summary>
+        public bool EnableChannelHealthSweep { get; set; } = true;
+
+        /// <summary>Gets or sets external channel identifiers to prioritize in idle source comparisons.</summary>
+        public string[] ChannelHealthPriorityIds { get; set; } = [];
+
         public int? GuideDays { get; set; }
 
         public string RecordingPath { get; set; }

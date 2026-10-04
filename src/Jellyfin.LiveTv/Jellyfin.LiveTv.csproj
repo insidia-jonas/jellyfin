@@ -26,5 +26,6 @@
     <EmbeddedResource Include="Web\livetv-overview.js" />
     <EmbeddedResource Include="Web\livetv-guide.css" />
     <EmbeddedResource Include="Web\channel-health.js" />
+    <EmbeddedResource Include="Web\iptv-watchdog.js" />
   </ItemGroup>
 </Project>

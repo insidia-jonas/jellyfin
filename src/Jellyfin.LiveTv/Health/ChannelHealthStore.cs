@@ -16,6 +16,7 @@ public sealed class ChannelHealthStore : ILiveTvChannelHealth
     private readonly object _sync = new();
     private readonly Dictionary<string, Observation> _channels = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (string Reason, DateTime Until)> _providerProblems = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _sourceScopes = new(StringComparer.Ordinal);
     private readonly string? _path;
     private readonly TimeProvider _clock;
     private readonly ILogger<ChannelHealthStore> _logger;
@@ -74,6 +75,7 @@ public sealed class ChannelHealthStore : ILiveTvChannelHealth
                 LastSuccessUtc = item.Health.LastSuccessUtc,
                 LastPlayedUtc = item.Health.LastPlayedUtc,
                 StartMilliseconds = item.Health.StartMilliseconds,
+                StartupMeasurement = item.Health.StartupMeasurement,
                 BytesReceived = item.Health.BytesReceived,
                 Interruptions = item.Health.Interruptions
             };
@@ -88,11 +90,12 @@ public sealed class ChannelHealthStore : ILiveTvChannelHealth
             item.Health.LastPlayedUtc = _clock.GetUtcNow().UtcDateTime;
             item.Health.BytesReceived = 0;
             item.Health.StartMilliseconds = null;
+            item.Health.StartupMeasurement = null;
             item.Health.Interruptions = 0;
         }
     }
 
-    internal void Success(string channelId, string tunerId, long? startMilliseconds = null, long? bytes = null)
+    internal void Success(string channelId, string tunerId, long? startMilliseconds = null, long? bytes = null, bool decoded = false)
     {
         lock (_sync)
         {
@@ -103,7 +106,24 @@ public sealed class ChannelHealthStore : ILiveTvChannelHealth
             item.Health.Reason = unstable ? item.Health.Reason == "ClientPlaybackFailed" ? "ClientPlaybackFailed" : "Interrupted" : null;
             item.Health.LastCheckedUtc = now;
             item.Health.LastSuccessUtc = now;
-            item.Health.StartMilliseconds ??= startMilliseconds;
+            if (decoded)
+            {
+                item.Health.StartMilliseconds = startMilliseconds;
+            }
+            else
+            {
+                item.Health.StartMilliseconds ??= startMilliseconds;
+            }
+            if (startMilliseconds.HasValue)
+            {
+                item.Health.StartupMeasurement = decoded ? "DecodedMedia" : "MediaData";
+            }
+
+            if (!unstable && item.Health.StartMilliseconds >= 4000)
+            {
+                item.Health.Status = "Unstable";
+                item.Health.Reason = "SlowStart";
+            }
             if (bytes.HasValue)
             {
                 item.Health.BytesReceived = bytes.Value;
@@ -152,6 +172,29 @@ public sealed class ChannelHealthStore : ILiveTvChannelHealth
         lock (_sync)
         {
             return _providerProblems.GetValueOrDefault(tunerId).Until <= _clock.GetUtcNow().UtcDateTime;
+        }
+    }
+
+    internal void SynchronizeSource(string tunerId, string fingerprint)
+    {
+        lock (_sync)
+        {
+            if (_sourceScopes.GetValueOrDefault(tunerId) == fingerprint)
+            {
+                return;
+            }
+
+            _sourceScopes[tunerId] = fingerprint;
+            foreach (var item in _channels.Values.Where(o => o.TunerId == tunerId && o.SourceFingerprint != fingerprint))
+            {
+                item.Health = new ChannelHealth { LastPlayedUtc = item.Health.LastPlayedUtc };
+                item.Failures = 0;
+                item.LastFailureUtc = null;
+                item.LastInterruptionUtc = null;
+                item.SourceFingerprint = fingerprint;
+            }
+
+            _providerProblems.Remove(tunerId);
         }
     }
 
@@ -229,12 +272,15 @@ public sealed class ChannelHealthStore : ILiveTvChannelHealth
         }
 
         item.TunerId = tunerId;
+        item.SourceFingerprint = _sourceScopes.GetValueOrDefault(tunerId);
         return item;
     }
 
     internal sealed class Observation
     {
         public string TunerId { get; set; } = string.Empty;
+
+        public string? SourceFingerprint { get; set; }
 
         public ChannelHealth Health { get; set; } = new();
 

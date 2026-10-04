@@ -132,6 +132,17 @@ public class SharedHttpStreamRecoveryTests
         Assert.Equal(0, fixture.Handler.ActiveConnections);
     }
 
+    [Fact]
+    public async Task UnverifiedAlternateIsNeverUsedForRecovery()
+    {
+        using var fixture = new Fixture(HttpStatusCode.NotFound, verifyBackup: false);
+        await fixture.Stream.Open(TestContext.Current.CancellationToken);
+        using var reader = fixture.Stream.GetStream();
+        await WaitUntil(() => !fixture.Stream.EnableStreamSharing);
+        Assert.Equal(["primary.example", "primary.example", "primary.example", "primary.example"], fixture.Handler.Hosts);
+        await fixture.Stream.Close();
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.Forbidden, "ProviderAuthentication")]
     [InlineData(HttpStatusCode.TooManyRequests, "ProviderBusy")]
@@ -164,7 +175,7 @@ public class SharedHttpStreamRecoveryTests
         private readonly DirectoryInfo _directory = Directory.CreateTempSubdirectory();
         private readonly HttpClient _client;
 
-        internal Fixture(HttpStatusCode primaryStatus, byte[]? media = null, HttpStatusCode alternateStatus = HttpStatusCode.OK)
+        internal Fixture(HttpStatusCode primaryStatus, byte[]? media = null, HttpStatusCode alternateStatus = HttpStatusCode.OK, bool verifyBackup = true)
         {
             Handler = new ProviderHandler(primaryStatus, media, alternateStatus);
             _client = new HttpClient(Handler);
@@ -177,7 +188,13 @@ public class SharedHttpStreamRecoveryTests
             host.Setup(h => h.GetApiUrlForLocalAccess(null, true)).Returns("http://127.0.0.1:8096");
             Tuner = new TunerHostInfo { Id = "tuner", Url = "http://listing.example/list.m3u", ActiveUrl = "http://primary.example", AlternateUrls = ["http://primary.example", "http://secondary.example"] };
             Health = new ChannelHealthStore(null, TimeProvider.System, NullLogger<ChannelHealthStore>.Instance);
-            Stream = new SharedHttpStream(new MediaSourceInfo { Path = "http://primary.example/live.ts", Protocol = MediaProtocol.Http }, Tuner, "stream", Mock.Of<IFileSystem>(), http.Object, NullLogger.Instance, configuration.Object, host.Object, new StreamHelper(), Health, "channel");
+            var watchdog = new IptvWatchdog(null, TimeProvider.System, () => new LiveTvOptions { TunerHosts = [Tuner] }, NullLogger<IptvWatchdog>.Instance);
+            if (verifyBackup)
+            {
+                watchdog.Record(Tuner, "http://secondary.example", "channel", "probe", true, true, 100);
+            }
+
+            Stream = new SharedHttpStream(new MediaSourceInfo { Path = "http://primary.example/live.ts", Protocol = MediaProtocol.Http }, Tuner, "stream", Mock.Of<IFileSystem>(), http.Object, NullLogger.Instance, configuration.Object, host.Object, new StreamHelper(), Health, "channel", watchdog: watchdog);
         }
 
         internal ProviderHandler Handler { get; }

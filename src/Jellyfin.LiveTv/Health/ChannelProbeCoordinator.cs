@@ -15,6 +15,7 @@ public sealed class ChannelProbeCoordinator
     private int _playbacks;
     private DateTimeOffset _lastPlayback;
     private ProbeLease? _probe;
+    private bool _probesEnabled = true;
 
     /// <summary>Initializes a new instance of the <see cref="ChannelProbeCoordinator"/> class.</summary>
     public ChannelProbeCoordinator()
@@ -23,6 +24,17 @@ public sealed class ChannelProbeCoordinator
     }
 
     internal ChannelProbeCoordinator(TimeProvider clock) => _clock = clock;
+
+    internal void SetProbesEnabled(bool enabled)
+    {
+        lock (_sync)
+        {
+            _probesEnabled = enabled;
+            // Configuration changes preempt old-source work too. Keep the lease
+            // until the decoder actually exits, exactly as for foreground demand.
+            _probe?.Cancellation.Cancel();
+        }
+    }
 
     internal async Task<IDisposable> AcquirePlayback(CancellationToken cancellationToken)
     {
@@ -60,7 +72,7 @@ public sealed class ChannelProbeCoordinator
     {
         lock (_sync)
         {
-            if (_playbacks != 0 || _probe is not null || _clock.GetUtcNow() - _lastPlayback < TimeSpan.FromMinutes(2))
+            if (!_probesEnabled || _playbacks != 0 || _probe is not null || _clock.GetUtcNow() - _lastPlayback < TimeSpan.FromMinutes(2))
             {
                 return null;
             }
