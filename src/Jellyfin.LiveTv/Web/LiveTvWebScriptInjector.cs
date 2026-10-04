@@ -16,7 +16,7 @@ namespace Jellyfin.LiveTv.Web;
 /// </summary>
 public sealed class LiveTvWebScriptInjector : IHostedService
 {
-    internal const string ScriptVersion = "11";
+    internal const string ScriptVersion = "12";
 
     private const string ScriptMarker = "plugin=\"LiveTvOverview\"";
 

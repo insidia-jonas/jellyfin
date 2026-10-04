@@ -10,6 +10,7 @@
     var snapshot = null;
     var admin = null;
     var scheduled = 0;
+    var panelExpanded = false;
     var style = document.createElement('style');
     style.textContent = '.jf-watchdog{margin:0 0 1.2rem;border:1px solid #344055;border-radius:16px;background:linear-gradient(125deg,#182233,#101823);color:#edf2fa;overflow:hidden}' +
         '.jf-watchdog summary{padding:1rem 1.25rem;cursor:pointer;font-weight:700;letter-spacing:.02em}.jf-watchdog summary:focus-visible,.jf-watchdog button:focus-visible{outline:3px solid #63c9ff;outline-offset:-3px}' +
@@ -43,10 +44,15 @@
         if (!snapshot || admin !== true) { return; }
         var panel = host.querySelector('.jf-watchdog');
         if (panel && panel._snapshot === snapshot) { return; }
-        var expanded = panel && panel.open;
+        var expanded = panel ? panel.open : panelExpanded;
         var focused = panel && panel.contains(document.activeElement) ? document.activeElement.getAttribute('data-control') : null;
         var fresh = node('details', 'jf-watchdog');
         fresh.open = !!expanded;
+        panelExpanded = fresh.open;
+        var owner = generation;
+        fresh.addEventListener('toggle', function () {
+            if (owner === generation && fresh.isConnected) { panelExpanded = fresh.open; }
+        });
         fresh._snapshot = snapshot;
         var states = {
             Disabled: tr('Prüfungen pausiert', 'Checks paused'), Checking: tr('Prüfung läuft', 'Checking'),
@@ -131,7 +137,7 @@
         scheduled = 0;
         var current = identity();
         if (current !== scope) {
-            scope = current; generation++; pending = false; nextRefresh = 0; snapshot = null; admin = null;
+            scope = current; generation++; pending = false; nextRefresh = 0; snapshot = null; admin = null; panelExpanded = false;
             Array.prototype.forEach.call(document.querySelectorAll('.jf-watchdog'), function (p) { p.remove(); });
         }
         var host = document.getElementById('jf-livetv-overview');
