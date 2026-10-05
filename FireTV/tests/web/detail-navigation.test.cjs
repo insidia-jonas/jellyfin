@@ -53,6 +53,14 @@ test('native dispatch consumes both edges before WebView caret selection and act
     w.history.pushState({},'','#/livetv');el('play').focus();
     assert.equal(nav.handleNative('ArrowDown',false,false),false,'live TV retains its own navigation');
 });
+
+test('inline tag and credit links cannot become text-looking D-pad stops', t => {
+    const {w,el,key}=setup(t);
+    const metadata=w.document.createElement('div');metadata.className='detailsGroupItem';metadata.innerHTML='<a class="button-link" href="#/person">Director name</a>';
+    w.document.body.appendChild(metadata);const link=metadata.firstChild;
+    link.getBoundingClientRect=()=>({left:100,right:400,top:70,bottom:95,width:300,height:25});link.scrollIntoView=()=>{};
+    el('play').focus();key('ArrowDown');assert.equal(w.document.activeElement,el('language'));
+});
 test('closed subtitle language selector can be left with D-pad while Enter retains its native picker', t => {
     const {w,el,key}=setup(t);const select=w.document.createElement('select');select.innerHTML='<option>Deutsch</option><option>English</option>';
     w.document.body.appendChild(select);select.getBoundingClientRect=()=>({left:0,right:80,top:400,bottom:450,width:80,height:50});select.scrollIntoView=()=>{};

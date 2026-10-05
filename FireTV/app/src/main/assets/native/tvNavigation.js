@@ -8,6 +8,9 @@
     function visible(el) {
         // Jellyfin uses roving tabindex=-1 for real buttons. They remain D-pad targets.
         if (!el || el.disabled || el.getAttribute('aria-disabled') === 'true') { return false; }
+        // Inline metadata looks like selected prose on a TV. Keep the remote on
+        // actions and poster cards; genres/tags/credits remain mouse-accessible.
+        if (el.matches('a.button-link') && el.closest('.itemTags,.detailsGroupItem')) { return false; }
         if (el.closest('[hidden],[inert],[aria-hidden="true"],.hide')) { return false; }
         var parent = el.parentElement;
         while (parent) {
