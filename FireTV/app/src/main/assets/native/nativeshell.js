@@ -199,6 +199,7 @@
     };
     window.FireTvNavigation = {
         back: function () {
+            if (window.EvolutionSubtitleJobs && window.EvolutionSubtitleJobs.close()) { return "handled"; }
             if (window.FireTvLive && window.FireTvLive.closeGuide && window.FireTvLive.closeGuide()) { return "handled"; }
             if (hasBackOverlay()) { window.FireTvRemote.send("Escape"); return "handled"; }
             if (window.FireTvCanExit()) { return "root"; }
@@ -250,7 +251,7 @@
             deviceId: "firetv-web",
             deviceName: "Fire TV",
             appName: "Jellyfin Fire TV",
-            appVersion: "2.5.1"
+            appVersion: "2.5.2"
         };
     }
 

@@ -8,6 +8,12 @@ Das ist bewusst **kein** API-only-Client wie [jellyfin-androidtv](https://github
 
 Fire TV client that hosts the full Jellyfin web UI (same architecture as the official iOS app: WebView + NativeShell). Video playback uses ExoPlayer so selecting a movie cannot freeze Amazon WebView. Downloads use Android DownloadManager. The 1920 CSS-pixel TV layout is scaled to the actual window, with automatic viewport height.
 
+## Änderungen in 2.5.2
+
+- Die Filmansicht behandelt Richtungstasten vor der Textnavigation der Fire-OS-WebView; Eingabefelder, Sprachauswahl und andere Ansichten behalten ihre eigene Bedienung.
+- Ausgewählte Filmknöpfe haben einen hellen Hintergrund und dunkle Schrift. Zurück schließt zuerst die neue Untertitel-Auftragsübersicht.
+- Mit Evolution 1.2.1 laufen bestätigte KI-Untertitel als Serverauftrag weiter. „KI-Aufträge“ zeigt Fortschritt, Abbruch und Fortsetzen; ein offener Film ist dafür nicht mehr erforderlich.
+
 ## Änderungen in 2.5.1
 
 Die Live-TV-Senderliste verwendet etwas größere Sendernamen (24 statt 21 Pixel), Sendungstitel (19 statt 17 Pixel) und Logos (72 statt 64 Pixel). Die Zeilenhöhe wächst passend mit; das seitliche EPG bleibt unverändert.

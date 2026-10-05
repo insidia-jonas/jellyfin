@@ -226,6 +226,28 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val direction = when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP -> "ArrowUp"
+            KeyEvent.KEYCODE_DPAD_DOWN -> "ArrowDown"
+            KeyEvent.KEYCODE_DPAD_LEFT -> "ArrowLeft"
+            KeyEvent.KEYCODE_DPAD_RIGHT -> "ArrowRight"
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> "Enter"
+            else -> null
+        }
+        if (direction != null && binding.webView.hasFocus() &&
+            !binding.menuOverlay.isVisible && !binding.downloadsOverlay.isVisible &&
+            (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP)
+        ) {
+            val original = KeyEvent(event)
+            binding.webView.evaluateJavascript(
+                "!!(window.FireTvDetailNavigation&&window.FireTvDetailNavigation.handleNative('$direction'," +
+                    "${event.action == KeyEvent.ACTION_UP},${event.repeatCount > 0}))",
+            ) { handled ->
+                // Text fields, native selectors and all other routes retain Android handling.
+                if (handled != "true" && !isFinishing && !isDestroyed) dispatchUnhandledWebKey(original)
+            }
+            return true
+        }
         if (event.action == KeyEvent.ACTION_DOWN && event.keyCode == KeyEvent.KEYCODE_MENU) {
             if (binding.downloadsOverlay.isVisible) {
                 hideDownloads()
@@ -240,6 +262,10 @@ class WebClientActivity : AppCompatActivity(), NativeInterface.Host {
             return true
         }
         return super.dispatchKeyEvent(event)
+    }
+
+    private fun dispatchUnhandledWebKey(event: KeyEvent) {
+        super.dispatchKeyEvent(event)
     }
 
     private fun handleWebBack() {

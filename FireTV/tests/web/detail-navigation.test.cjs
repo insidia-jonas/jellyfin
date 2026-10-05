@@ -38,6 +38,21 @@ test('native roving tabindex and Android unidentified D-pad still reach real act
     key('Unidentified',{keyCode:20}); assert.equal(w.document.activeElement,el('download'));
     assert.equal(String(w.getSelection()),'');
 });
+
+test('native dispatch consumes both edges before WebView caret selection and activates only once', t => {
+    const {w,el} = setup(t); el('play').focus();
+    const nav=w.FireTvDetailNavigation;
+    assert.equal(nav.handleNative('ArrowDown',false,false),true);
+    assert.equal(w.document.activeElement,el('language'));
+    assert.equal(nav.handleNative('ArrowDown',true,false),true);
+    let clicks=0;el('download').onclick=()=>clicks++;el('download').focus();
+    assert.equal(nav.handleNative('Enter',false,false),true);
+    nav.handleNative('Enter',false,true);nav.handleNative('Enter',true,false);assert.equal(clicks,1);
+    const input=w.document.createElement('input');w.document.body.appendChild(input);input.focus();
+    assert.equal(nav.handleNative('ArrowDown',false,false),false,'editable fields retain native handling');
+    w.history.pushState({},'','#/livetv');el('play').focus();
+    assert.equal(nav.handleNative('ArrowDown',false,false),false,'live TV retains its own navigation');
+});
 test('closed subtitle language selector can be left with D-pad while Enter retains its native picker', t => {
     const {w,el,key}=setup(t);const select=w.document.createElement('select');select.innerHTML='<option>Deutsch</option><option>English</option>';
     w.document.body.appendChild(select);select.getBoundingClientRect=()=>({left:0,right:80,top:400,bottom:450,width:80,height:50});select.scrollIntoView=()=>{};

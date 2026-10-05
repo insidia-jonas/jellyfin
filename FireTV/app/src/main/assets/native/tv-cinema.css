@@ -118,6 +118,7 @@ html.layout-tv,
 
 /* D-pad focus belongs to actions, not the WebView's text selection handles. */
 .layout-tv { -webkit-user-select: none; user-select: none; }
+.layout-tv #itemDetailPage :not(input):not(textarea):not([contenteditable="true"]) { -webkit-user-select:none; user-select:none; }
 .layout-tv input, .layout-tv textarea, .layout-tv [contenteditable="true"] { -webkit-user-select: text; user-select: text; }
 .layout-tv #tmSubtitles summary:focus, .layout-tv #tmSubtitles button:focus,
 .layout-tv #tmReleases button:focus, .layout-tv #tmReleases summary:focus,

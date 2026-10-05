@@ -4,6 +4,7 @@
     if (window.FireTvDetailNavigation) { return; }
     var targets = 'button,a[href],input,select,textarea,summary,[role="button"],[data-action][tabindex],.card[tabindex],.listItem[tabindex]';
     var lastEnter = false;
+    var nativeDown = {};
     function visible(el) {
         // Jellyfin uses roving tabindex=-1 for real buttons. They remain D-pad targets.
         if (!el || el.disabled || el.getAttribute('aria-disabled') === 'true') { return false; }
@@ -19,10 +20,11 @@
         return box.width > 0 && box.height > 0 && ownStyle.display !== 'none' && ownStyle.visibility !== 'hidden';
     }
     function scope() {
-        if (!/#\/(?:details|itemdetails)(?:[.?/]|$)/i.test(location.hash)) { return null; }
         var dialogs = Array.prototype.filter.call(document.querySelectorAll('[role="dialog"],dialog[open],.dialog'), function (d) {
             var box = d.getBoundingClientRect(); return box.width && box.height && !d.closest('[hidden],.hide');
         });
+        if (dialogs.length && dialogs[dialogs.length - 1].id === 'evolution-subtitle-jobs') { return dialogs[dialogs.length - 1]; }
+        if (!/#\/(?:details|itemdetails)(?:[.?/]|$)/i.test(location.hash)) { return null; }
         return dialogs.length ? dialogs[dialogs.length - 1] : document.querySelector('#itemDetailPage:not(.hide)') || document;
     }
     function choose(elements, current, key) {
@@ -73,5 +75,21 @@
     window.addEventListener('keyup', function (event) {
         if ((event.key === 'Enter' || event.keyCode === 13) && lastEnter) { lastEnter = false; stop(event); }
     }, true);
-    window.FireTvDetailNavigation = { choose: choose };
+    // Dispatch before Android WebView's caret navigation. Some Fire OS versions move
+    // selection before the DOM's keydown listener can prevent the native default.
+    function handleNative(key, up, repeat) {
+        if (up) {
+            if (!nativeDown[key]) { return false; }
+            delete nativeDown[key];
+            window.dispatchEvent(new KeyboardEvent('keyup', {key:key,bubbles:true,cancelable:true}));
+            return true;
+        }
+        if (!scope()) { return false; }
+        var event = new KeyboardEvent('keydown', {key:key,bubbles:true,cancelable:true,repeat:repeat});
+        (document.activeElement || document.body).dispatchEvent(event);
+        if (!event.defaultPrevented) { return false; }
+        nativeDown[key] = true;
+        return true;
+    }
+    window.FireTvDetailNavigation = { choose: choose, handleNative: handleNative };
 })();

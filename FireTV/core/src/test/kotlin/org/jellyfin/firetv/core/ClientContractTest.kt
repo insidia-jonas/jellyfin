@@ -103,7 +103,7 @@ class JellyfinHttpContractTest {
         assertTrue(DeviceProfile.JSON.contains("VideoRotation"))
         assertTrue(DeviceProfile.JSON.contains("vobsub"))
         assertTrue(DeviceProfile.JSON.contains("\"Container\":\"mp4\""))
-        assertEquals("2.5.1", FireTvClient.APP_VERSION)
+        assertEquals("2.5.2", FireTvClient.APP_VERSION)
         assertEquals("tv", FireTvClient.DEFAULT_LAYOUT)
     }
 }
