@@ -68,8 +68,33 @@
             style="@style/Widget.JellyfinFireTv.Title"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:ellipsize="end"
             android:textSize="26sp"
             tools:text="Arrival" />
+
+        <TextView
+            android:id="@+id/osdEpisode"
+            style="@style/Widget.JellyfinFireTv.Body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textSize="20sp"
+            android:visibility="gone"
+            tools:text="S01E06 · Die Entscheidung" />
+
+        <TextView
+            android:id="@+id/osdOverview"
+            style="@style/Widget.JellyfinFireTv.Caption"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:visibility="gone"
+            tools:text="Die Familie sucht nach Antworten." />
 
         <TextView
             android:id="@+id/osdMeta"
@@ -132,6 +157,33 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
             android:text="@string/player_hints" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/rebuffering"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="28dp"
+        android:background="@drawable/bg_panel"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="14dp"
+        android:visibility="gone">
+
+        <ProgressBar
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:indeterminate="true"
+            android:indeterminateTint="@color/accent" />
+
+        <TextView
+            android:id="@+id/rebufferingHint"
+            style="@style/Widget.JellyfinFireTv.Body"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:text="@string/playback_buffering" />
     </LinearLayout>
 
     <LinearLayout

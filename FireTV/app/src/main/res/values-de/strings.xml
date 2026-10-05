@@ -71,5 +71,6 @@
     </plurals>
     <string name="live_unavailable">Sender nicht erreichbar. Bitte einen anderen Sender wählen oder später erneut versuchen.</string>
     <string name="live_buffering">Verbindung stockt – puffere…</string>
+    <string name="playback_buffering">Wiedergabe lädt nach…</string>
     <string name="live_retry_status">Verbindung wird wiederhergestellt (%1$d/%2$d)…</string>
 </resources>

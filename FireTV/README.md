@@ -8,6 +8,18 @@ Das ist bewusst **kein** API-only-Client wie [jellyfin-androidtv](https://github
 
 Fire TV client that hosts the full Jellyfin web UI (same architecture as the official iOS app: WebView + NativeShell). Video playback uses ExoPlayer so selecting a movie cannot freeze Amazon WebView. Downloads use Android DownloadManager. The 1920 CSS-pixel TV layout is scaled to the actual window, with automatic viewport height.
 
+## Änderungen in 2.5.4
+
+- Filme und Serien laden bei weniger als 30 Sekunden Reserve nach und puffern bis zu 60 Sekunden; das Datenziel bleibt auf 64 MiB begrenzt. Der Start verlangt weiterhin nur eine Sekunde Puffer, nach einem Leerlauf werden fünf Sekunden gesammelt. Vorübergehende Dateizugriffsfehler werden innerhalb des bestehenden Zeitlimits über Media3 erneut versucht, ohne die Wiedergabeposition zurückzusetzen.
+- Während kurzer Ladepausen bleibt das Videobild sichtbar. Erst nach 750 ms erscheint ein kleiner Hinweis. Der bildfüllende Startbildschirm erscheint nur beim Öffnen einer Wiedergabe.
+- Serienname, Staffel, Episodennummer, Episodentitel und vorhandene Beschreibung werden im Player angezeigt und beim Folgenwechsel weitergegeben. Fehlende Angaben werden unabhängig vom Wiedergabestart vom Jellyfin-Server nachgeladen; Abbruch und Wechsel verwerfen alte Antworten, höchstens 24 Einträge bleiben pro Player-Activity im Cache.
+- Die Wiedergabeprotokolle enthalten Pufferreserve, Position, Datenrate und Fehlercodes ohne Stream-URLs oder Zugangsdaten. Größere Puffer ersetzen keinen Praxistest bei anhaltenden Netzwerk- oder Speicherproblemen.
+
+## Änderungen in 2.5.3
+
+- Live-TV-Wiederverbindungen warten auf den abschließenden Wiedergabebericht, der die alte Tuner-Verbindung bereits schließt. Kein zweiter Schließaufruf darf die neue Verbindung oder einen anderen Zuschauer treffen.
+- Der passende Serverstand verwendet eine Kennung pro geöffneter Stream-Instanz. Der Wiederholungszähler bleibt auch während des Pufferns sichtbar; das gesamte Wiederherstellungszeitlimit bleibt 45 Sekunden.
+
 ## Änderungen in 2.5.2
 
 - Die Filmansicht behandelt Richtungstasten vor der Textnavigation der Fire-OS-WebView; Eingabefelder, Sprachauswahl und andere Ansichten behalten ihre eigene Bedienung.

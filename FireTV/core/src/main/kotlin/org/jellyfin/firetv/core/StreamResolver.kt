@@ -23,6 +23,7 @@ data class ResolvedPlayback(
     val liveStreamId: String? = null,
     val container: String? = null,
     val isAudio: Boolean = false,
+    val metadata: PlaybackMetadata = PlaybackMetadata(name = title),
 )
 
 /**
@@ -39,11 +40,12 @@ object StreamResolver {
     ): ResolvedPlayback {
         val requestedId = PlaybackPayload.itemId(payload) ?: error("No items to play")
         val tunerId = LivePlayback.tunerChannelId(payload)
-        val title = LiveTvNowNextText.channelTitle(
+        val metadata = PlaybackMetadata.fromPayload(payload)
+        val title = if (LivePlayback.isLivePayload(payload)) LiveTvNowNextText.channelTitle(
             PlaybackPayload.itemName(payload),
             PlaybackPayload.itemOriginalTitle(payload),
             PlaybackPayload.itemOverview(payload),
-        ).ifBlank { PlaybackPayload.itemName(payload) }
+        ).ifBlank { PlaybackPayload.itemName(payload) } else metadata.title
         val server = PlaybackPayload.serverAddress(payload) ?: error("Missing server address")
         val token = PlaybackPayload.accessToken(payload)
         val userId = PlaybackPayload.userId(payload)
@@ -149,6 +151,7 @@ object StreamResolver {
             liveStreamId = jsonStringField(source, "LiveStreamId"),
             container = jsonStringField(source, "Container"),
             isAudio = PlaybackPayload.isAudio(payload),
+            metadata = metadata,
         )
     }
 

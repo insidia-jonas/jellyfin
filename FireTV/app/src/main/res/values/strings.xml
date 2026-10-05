@@ -71,5 +71,6 @@
     </plurals>
     <string name="live_unavailable">Channel unavailable. Try another channel or try again later.</string>
     <string name="live_buffering">Connection interrupted – buffering…</string>
+    <string name="playback_buffering">Buffering playback…</string>
     <string name="live_retry_status">Reconnecting (%1$d/%2$d)…</string>
 </resources>

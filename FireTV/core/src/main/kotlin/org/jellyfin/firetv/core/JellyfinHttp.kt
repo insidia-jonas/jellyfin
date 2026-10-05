@@ -27,6 +27,7 @@ object JellyfinHttp {
         appVersion: String = FireTvClient.APP_VERSION,
         connectTimeoutMs: Int = 12_000,
         readTimeoutMs: Int = 20_000,
+        cancellation: HttpCancellation? = null,
     ): Response {
         return request(
             url = url,
@@ -40,6 +41,7 @@ object JellyfinHttp {
             appVersion = appVersion,
             connectTimeoutMs = connectTimeoutMs,
             readTimeoutMs = readTimeoutMs,
+            cancellation = cancellation,
         )
     }
 

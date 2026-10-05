@@ -6,6 +6,7 @@ data class PlaybackBuffers(
     val maxMs: Int,
     val startMs: Int,
     val rebufferMs: Int,
+    val targetBytes: Int = 64 * 1024 * 1024,
 ) {
     init {
         require(startMs >= 0 && rebufferMs >= 0)
@@ -14,6 +15,9 @@ data class PlaybackBuffers(
 
     companion object {
         fun forPlayback(live: Boolean): PlaybackBuffers =
-            PlaybackBuffers(if (live) 2_500 else 3_000, if (live) 15_000 else 20_000, 1_000, 2_500)
+            // Start promptly, but refill files well before they run dry. The byte cap
+            // bounds memory for high-bitrate video on older Fire TV devices.
+            if (live) PlaybackBuffers(2_500, 15_000, 1_000, 2_500)
+            else PlaybackBuffers(30_000, 60_000, 1_000, 5_000)
     }
 }

@@ -22,6 +22,17 @@ class PlaybackLifecycleTest {
     }
 
     @Test
+    fun `file playback keeps a network outage reserve without waiting for it at startup`() {
+        val file = PlaybackBuffers.forPlayback(false)
+        // A stalled read can take 12 seconds before Media3 resumes its HTTP range.
+        assertTrue(file.minMs >= 2 * 12_000)
+        assertTrue(file.startMs <= 1_500)
+        assertTrue(file.rebufferMs > file.startMs)
+        assertTrue(file.targetBytes <= 64 * 1024 * 1024)
+        assertTrue(PlaybackBuffers.forPlayback(true).minMs < file.minMs)
+    }
+
+    @Test
     fun `cancellation disconnects off the caller thread and rejects future work`() {
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)

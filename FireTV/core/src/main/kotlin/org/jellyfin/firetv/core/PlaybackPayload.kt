@@ -105,7 +105,7 @@ object PlaybackPayload {
         val match = jsonArrayObjects(json, "items").firstOrNull { item ->
             (jsonStringField(item, "Id") ?: jsonStringField(item, "id")) == itemId
         }
-        val name = match?.let { jsonStringField(it, "Name") ?: jsonStringField(it, "name") } ?: itemId
+        val name = match?.let { jsonStringField(it, "Name") ?: jsonStringField(it, "name") }
         val original = match?.let { jsonStringField(it, "OriginalTitle") ?: jsonStringField(it, "originalTitle") }
         val overview = match?.let { jsonStringField(it, "Overview") ?: jsonStringField(it, "overview") }
         val type = match?.let { jsonStringField(it, "Type") ?: jsonStringField(it, "type") }
@@ -120,8 +120,18 @@ object PlaybackPayload {
             append(itemIds(json).joinToString(",") { jsonEscape(it) }.ifBlank { jsonEscape(itemId) })
             append("],")
             append("\"items\":[{")
-            append("\"Id\":").append(jsonEscape(itemId)).append(',')
-            append("\"Name\":").append(jsonEscape(name))
+            append("\"Id\":").append(jsonEscape(itemId))
+            if (!name.isNullOrBlank()) append(",\"Name\":").append(jsonEscape(name))
+            if (match != null) {
+                for (field in listOf("SeriesName", "SeriesId")) {
+                    (jsonStringField(match, field) ?: jsonStringField(match, field.replaceFirstChar { it.lowercase() }))
+                        ?.let { append(',').append(jsonEscape(field)).append(':').append(jsonEscape(it)) }
+                }
+                for (field in listOf("ParentIndexNumber", "IndexNumber", "IndexNumberEnd", "ProductionYear", "RunTimeTicks")) {
+                    (jsonLongField(match, field) ?: jsonLongField(match, field.replaceFirstChar { it.lowercase() }))
+                        ?.let { append(',').append(jsonEscape(field)).append(':').append(it) }
+                }
+            }
             if (!original.isNullOrBlank()) {
                 append(",\"OriginalTitle\":").append(jsonEscape(original))
             }
