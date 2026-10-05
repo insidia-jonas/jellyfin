@@ -40,6 +40,19 @@ object MediaTracks {
 
     fun subtitles(tracks: List<MediaTrack>): List<MediaTrack> = tracks.filter { it.type == MediaTrack.Kind.SUBTITLE }
 
+    fun matchesSubtitleId(formatId: String?, index: Int?): Boolean =
+        index != null && index >= 0 && formatId?.substringAfterLast(':') == "jellyfin-subtitle-$index"
+
+    /** Give a selected embedded text track its own identity, including same-language variants. */
+    fun selectedSidecar(tracks: List<MediaTrack>, index: Int?): MediaTrack? {
+        val track = tracks.firstOrNull { it.type == MediaTrack.Kind.SUBTITLE && it.index == index } ?: return null
+        if (track.isTextSidecar) return track
+        if (track.deliveryMethod.equals("Encode", true) || track.deliveryMethod.equals("Drop", true)) return null
+        return if (track.codec?.lowercase() in setOf("subrip", "srt", "ass", "ssa", "webvtt", "vtt", "mov_text", "text")) {
+            track.copy(deliveryMethod = "External")
+        } else null
+    }
+
     fun sidecarUri(
         serverAddress: String,
         itemId: String,

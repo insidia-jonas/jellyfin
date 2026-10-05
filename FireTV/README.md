@@ -8,6 +8,15 @@ Das ist bewusst **kein** API-only-Client wie [jellyfin-androidtv](https://github
 
 Fire TV client that hosts the full Jellyfin web UI (same architecture as the official iOS app: WebView + NativeShell). Video playback uses ExoPlayer so selecting a movie cannot freeze Amazon WebView. Downloads use Android DownloadManager. The 1920 CSS-pixel TV layout is scaled to the actual window, with automatic viewport height.
 
+## Änderungen in 2.5.0 und Evolution 1.2
+
+- Zurück schließt zuerst die Wiedergabesteuerung, danach die Wiedergabe. Gedrückthalten überspringt keine Ebene. Nach Puffern oder Fortsetzen blendet sich die Steuerung wieder automatisch aus.
+- Wiedergabemeldungen laufen geordnet über das Ende der Player-Activity hinaus. Neue Server speichern auch frühe Positionen; bestehende Installationen behalten ihre konfigurierte Fortsetzen-Schwelle. Auf dem eingerichteten Raspberry wurde diese ausdrücklich auf 0 Prozent gesetzt.
+- Untertitel stehen mit 5,5 Prozent Abstand näher am unteren Bildrand. Eine ausgewählte Textspur erhält eine eindeutige Identität; vollständige und erzwungene Spuren derselben Sprache werden getrennt ausgewählt. Es wird höchstens eine zusätzliche Untertiteldatei geladen. Ein Spurwechsel behält die aktuelle Position.
+- Einheitliche dunkle Oberflächen, neue Vektorsymbole für Filme, Serien, Indexer und Live TV, kurze Fokusübergänge und direkte Sprungtasten zu Fassungen und Untertiteln. Die Fernbedienung erreicht auch native Knöpfe mit `tabindex=-1`, ohne Beschreibungstext auszuwählen.
+- Die kompakte TV-Senderliste zeigt rechts die aktuelle Sendung mit Beschreibung und Folgeprogramm. Zweimal rechts erreicht die Programminfo; Zurück schließt sie und stellt den Fokus wieder her. Der Browser verwendet ein kompakteres Senderkartenraster.
+- Indexer-Titel laden deutsche Beschreibungen und klar bezeichnete IMDb-/TMDb-Bewertungen unabhängig von den Downloads. Sichtbare Kategorie-Titel werden begrenzt im Hintergrund vorbereitet. Zwei Hintergrundaufträge lassen Kapazität für direkte Aufrufe frei; Metadaten werden im Speicher und begrenzt auf dem Server zwischengespeichert. Browsen startet weder Downloads noch kostenpflichtige KI-Aufträge.
+
 ## Änderungen in 2.4.8 und Plugin 1.0.6
 
 - Kino-Startseite mit Titelmotiv, Fortsetzen und manuell auswählbaren Titeln aus der eigenen Bibliothek. Einheitliche dunkle Bibliotheks- und Detailansichten mit warmen Akzenten; bedienbar auf TV, Desktop und Handy.

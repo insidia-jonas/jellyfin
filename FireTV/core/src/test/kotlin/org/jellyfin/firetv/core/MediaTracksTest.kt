@@ -8,6 +8,16 @@ import org.junit.jupiter.api.Test
 
 class MediaTracksTest {
     @Test
+    fun `merged media source prefixes preserve exact subtitle identity`() {
+        assertTrue(MediaTracks.matchesSubtitleId("jellyfin-subtitle-4", 4))
+        assertTrue(MediaTracks.matchesSubtitleId("1:jellyfin-subtitle-4", 4))
+        assertTrue(MediaTracks.matchesSubtitleId("0:1:jellyfin-subtitle-4", 4))
+        assertFalse(MediaTracks.matchesSubtitleId("0:4", 4))
+        assertFalse(MediaTracks.matchesSubtitleId("1:jellyfin-subtitle-3", 4))
+        assertFalse(MediaTracks.matchesSubtitleId(null, -1))
+    }
+
+    @Test
     fun `parses audio and subtitle streams from a media source`() {
         val source = """
             {
@@ -51,6 +61,21 @@ class MediaTracksTest {
         )
         assertFalse(track.isTextSidecar)
         assertNull(MediaTracks.sidecarUri("http://s", "1", "1", track))
+    }
+
+    @Test
+    fun `selecting full German subtitles extracts only that track beside German forced subtitles`() {
+        val source = """{"MediaStreams":[
+            {"Index":3,"Type":"Subtitle","Language":"deu","Codec":"subrip","IsForced":true,"DeliveryMethod":"Embed"},
+            {"Index":4,"Type":"Subtitle","Language":"deu","Codec":"subrip","DeliveryMethod":"Embed"},
+            {"Index":5,"Type":"Subtitle","Language":"eng","Codec":"hdmv_pgs_subtitle","DeliveryMethod":"Embed"}
+        ]}"""
+        val tracks = MediaTracks.fromMediaSource(source)
+        val selected = MediaTracks.selectedSidecar(tracks, 4)!!
+        assertFalse(selected.isForced)
+        assertEquals("http://s/Videos/movie/source/Subtitles/4/Stream.srt", MediaTracks.sidecarUri("http://s", "movie", "source", selected))
+        assertNull(MediaTracks.selectedSidecar(tracks, -1))
+        assertNull(MediaTracks.selectedSidecar(tracks, 5), "Bitmap tracks must not be requested as text")
     }
 }
 

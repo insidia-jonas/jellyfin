@@ -27,6 +27,9 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.text.CueGroup
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
@@ -42,6 +45,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.jellyfin.firetv.R
+import org.jellyfin.firetv.BuildConfig
 import org.jellyfin.firetv.core.HttpCancellation
 import org.jellyfin.firetv.core.LiveTuneState
 import org.jellyfin.firetv.core.LiveTvChannels
@@ -350,12 +354,31 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         )
         val requestGeneration = tune.generation
         val listener = object : Player.Listener {
+            private var reportedSubtitleCue = false
+
             override fun onRenderedFirstFrame() {
                 if (!tune.accepts(requestGeneration)) return
                 Log.i("FireTvPlayback", "first_frame request=$requestGeneration ms=${SystemClock.elapsedRealtime() - tuneStartedAt}")
             }
+            override fun onTracksChanged(tracks: Tracks) {
+                if (!tune.accepts(requestGeneration)) return
+                playback?.let { applyPreferredTracks(exo, it) }
+                if (BuildConfig.DEBUG) {
+                    val selected = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }.any { group ->
+                        (0 until group.length).any { group.isTrackSelected(it) && MediaTracks.matchesSubtitleId(group.getTrackFormat(it).id, playback?.selectedSubtitleIndex) }
+                    }
+                    Log.i("FireTvPlayback", "subtitle exact_selected=$selected")
+                }
+            }
+
+            override fun onCues(cueGroup: CueGroup) {
+                if (BuildConfig.DEBUG && !reportedSubtitleCue && cueGroup.cues.isNotEmpty()) {
+                    reportedSubtitleCue = true
+                    Log.i("FireTvPlayback", "subtitle first_cue count=${cueGroup.cues.size} position_ms=${exo.currentPosition}")
+                }
+            }
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (!tune.accepts(requestGeneration) || playback !== resolved) return
+                if (!tune.accepts(requestGeneration) || playback == null) return
                 if (playbackState == Player.STATE_READY) {
                     binding.loading.isVisible = false
                     mainHandler.removeCallbacks(stallWatchdog)
@@ -364,7 +387,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                         Log.i("FireTvPlayback", "buffer_end request=$requestGeneration ms=${stableSince - bufferingStartedAt}")
                         bufferingStartedAt = 0
                     }
-                    applyPreferredTracks(exo, resolved)
+                    playback?.let { applyPreferredTracks(exo, it) }
                     emitSync("durationchange")
                     emitSync("playing")
                 }
@@ -388,14 +411,14 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (!tune.accepts(requestGeneration) || playback !== resolved) return
+                if (!tune.accepts(requestGeneration) || playback == null) return
                 emitSync(if (isPlaying) "playing" else "pause")
                 scheduleOsdHide()
                 reporter?.progress(exo.currentPosition, !isPlaying)
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                if (!tune.accepts(requestGeneration) || playback !== resolved) return
+                if (!tune.accepts(requestGeneration) || playback == null) return
                 Log.i("FireTvPlayback", "error request=$requestGeneration code=${error.errorCode}")
                 emitSync("error")
                 if (resolved.isLive) {
@@ -438,7 +461,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     }
 
     private fun mediaItemFor(resolved: ResolvedPlayback): MediaItem {
-        val configs = resolved.subtitleTracks.mapNotNull { track ->
+        val configs = listOfNotNull(MediaTracks.selectedSidecar(resolved.subtitleTracks, resolved.selectedSubtitleIndex)).mapNotNull { track ->
             val uri = MediaTracks.sidecarUri(
                 resolved.serverAddress,
                 resolved.itemId,
@@ -454,13 +477,14 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                 .setMimeType(MediaTracks.mimeType(track))
                 .setLanguage(track.language ?: "und")
                 .setLabel(track.displayTitle)
-                .setId(track.index.toString())
+                .setId("jellyfin-subtitle-${track.index}")
                 .setSelectionFlags(flags)
                 .build()
         }
         val builder = MediaItem.Builder()
             .setUri(resolved.url)
             .setSubtitleConfigurations(configs)
+        if (BuildConfig.DEBUG) Log.i("FireTvPlayback", "subtitle requested=${resolved.selectedSubtitleIndex} sidecars=${configs.size}")
         LivePlayback.mimeType(resolved.container, resolved.url)?.let { builder.setMimeType(it) }
         if (resolved.isLive) {
             builder.setLiveConfiguration(MediaItem.LiveConfiguration.Builder()
@@ -506,11 +530,21 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         }
         val selectedSub = resolved.selectedSubtitleIndex
         val subtitle = resolved.subtitleTracks.firstOrNull { it.index == selectedSub }
+        builder.clearOverridesOfType(C.TRACK_TYPE_TEXT)
         if (subtitle == null || selectedSub == null || selectedSub < 0) {
             builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
         } else {
             builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
             subtitle.language?.let { builder.setPreferredTextLanguage(it) }
+            // Language alone can choose a forced track instead of the requested full subtitles.
+            for (group in exo.currentTracks.groups) {
+                if (group.type != C.TRACK_TYPE_TEXT) continue
+                val index = (0 until group.length).firstOrNull {
+                    MediaTracks.matchesSubtitleId(group.getTrackFormat(it).id, selectedSub)
+                } ?: continue
+                builder.setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, index))
+                break
+            }
         }
         exo.trackSelectionParameters = builder.build()
     }
@@ -849,6 +883,10 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         val index = track?.index ?: -1
         playback = current.copy(selectedSubtitleIndex = index)
         val exo = player
+        if (track != null && index != current.selectedSubtitleIndex && MediaTracks.selectedSidecar(current.subtitleTracks, index) != null) {
+            reloadTracks(current.selectedAudioIndex, index)
+            return
+        }
         if (exo != null && (track == null || track.isTextSidecar || hasTextTracks(exo))) {
             applyPreferredTracks(exo, playback!!)
             renderTrackPanel()
