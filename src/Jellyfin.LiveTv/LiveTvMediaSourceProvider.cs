@@ -300,7 +300,10 @@ namespace Jellyfin.LiveTv
 
             var idPrefix = service.GetType().FullName!.GetMD5().ToString("N", CultureInfo.InvariantCulture) + "_";
 
-            info.LiveStreamId = idPrefix + info.Id;
+            // A channel/source id survives reconnects. The close handle must instead
+            // identify this stream lifetime, or a late stop can close its replacement.
+            // Shared viewers retain the same handle because they reuse this instance.
+            info.LiveStreamId = idPrefix + liveStream.UniqueId;
 
             Normalize(info, service, isVideo);
 
