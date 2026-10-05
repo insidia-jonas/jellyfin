@@ -114,15 +114,15 @@ public class AiRecommender
     /// <param name="prompt">The user prompt.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The model reply text.</returns>
-    public async Task<string> CompleteAsync(string prompt, CancellationToken cancellationToken)
+    public async Task<string> CompleteAsync(string prompt, CancellationToken cancellationToken, TimeSpan? timeout = null)
     {
         var config = _configuration();
         var provider = (config.AiProvider ?? "openai").Trim().ToLowerInvariant();
 
         return provider switch
         {
-            "anthropic" => await CompleteAnthropicAsync(config, prompt, cancellationToken).ConfigureAwait(false),
-            _ => await CompleteOpenAiStyleAsync(config, provider, prompt, cancellationToken).ConfigureAwait(false)
+            "anthropic" => await CompleteAnthropicAsync(config, prompt, cancellationToken, timeout).ConfigureAwait(false),
+            _ => await CompleteOpenAiStyleAsync(config, provider, prompt, cancellationToken, timeout).ConfigureAwait(false)
         };
     }
 
@@ -192,7 +192,7 @@ public class AiRecommender
         }
     }
 
-    private async Task<string> CompleteOpenAiStyleAsync(PluginConfiguration config, string provider, string prompt, CancellationToken cancellationToken)
+    private async Task<string> CompleteOpenAiStyleAsync(PluginConfiguration config, string provider, string prompt, CancellationToken cancellationToken, TimeSpan? timeout)
     {
         var baseUrl = !string.IsNullOrWhiteSpace(config.AiBaseUrl)
             ? config.AiBaseUrl.TrimEnd('/')
@@ -209,7 +209,7 @@ public class AiRecommender
         };
 
         using var client = _httpClientFactory.CreateClient();
-        client.Timeout = TimeSpan.FromSeconds(60);
+        client.Timeout = timeout ?? TimeSpan.FromSeconds(60);
         using var request = new HttpRequestMessage(HttpMethod.Post, baseUrl + "/chat/completions");
         request.Headers.Add("Authorization", "Bearer " + config.AiApiKey);
         request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
@@ -225,7 +225,7 @@ public class AiRecommender
         return doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? string.Empty;
     }
 
-    private async Task<string> CompleteAnthropicAsync(PluginConfiguration config, string prompt, CancellationToken cancellationToken)
+    private async Task<string> CompleteAnthropicAsync(PluginConfiguration config, string prompt, CancellationToken cancellationToken, TimeSpan? timeout)
     {
         var baseUrl = !string.IsNullOrWhiteSpace(config.AiBaseUrl)
             ? config.AiBaseUrl.TrimEnd('/')
@@ -240,7 +240,7 @@ public class AiRecommender
         };
 
         using var client = _httpClientFactory.CreateClient();
-        client.Timeout = TimeSpan.FromSeconds(60);
+        client.Timeout = timeout ?? TimeSpan.FromSeconds(60);
         using var request = new HttpRequestMessage(HttpMethod.Post, baseUrl + "/messages");
         request.Headers.Add("x-api-key", config.AiApiKey);
         request.Headers.Add("anthropic-version", "2023-06-01");

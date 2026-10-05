@@ -361,6 +361,16 @@
             aiBox.appendChild(hintEl);
             aiBox.appendChild(genBtn);
             box.appendChild(aiBox);
+            var jobStatus = document.createElement('div');
+            jobStatus.className = 'tmSubJobStatus';
+            jobStatus.setAttribute('role', 'status');
+            jobStatus.hidden = true;
+            var jobProgress = document.createElement('progress'); jobProgress.max = 100;
+            var jobText = document.createElement('p');
+            var jobsButton = document.createElement('button'); jobsButton.type = 'button';
+            jobsButton.textContent = 'Alle Untertitelaufträge';
+            jobsButton.addEventListener('click', function () { if (window.EvolutionSubtitleJobs) { window.EvolutionSubtitleJobs.open(); } });
+            jobStatus.appendChild(jobProgress); jobStatus.appendChild(jobText); jobStatus.appendChild(jobsButton); box.appendChild(jobStatus);
 
             var list = document.createElement('div');
             list.className = 'tmSubList';
@@ -370,6 +380,24 @@
             anchor.appendChild(box);
 
             var lastQuote = null;
+            var currentJobs = [], searchGeneration = 0;
+            function updateJob(records) {
+                currentJobs = records;
+                var job = records.filter(function (j) { return j.itemId.replace(/-/g, '') === item.Id.replace(/-/g, '') && j.language === sel.value; })[0];
+                jobStatus.hidden = !job;
+                h.textContent = 'Untertitel suchen & erstellen' + (job && job.active ? ' · In Arbeit' : job && job.state === 'completed' ? ' · Fertig' : '');
+                if (!job) { return; }
+                jobText.textContent = job.message;
+                jobProgress.value = job.percent;
+                if (job.active) {
+                    genBtn.disabled = true; genBtn.textContent = 'Auftrag läuft · ' + job.percent + ' %';
+                    hintEl.textContent = 'Du kannst diesen Film verlassen. Der Server arbeitet weiter.';
+                } else if (lastQuote && lastQuote.ok) {
+                    genBtn.disabled = lastQuote.enabled === false;
+                    genBtn.textContent = job.state === 'completed' ? 'Vorhandene verwenden' : 'Fortsetzen / erneut versuchen';
+                }
+            }
+            if (window.EvolutionSubtitleJobs) { window.EvolutionSubtitleJobs.subscribe(box, updateJob); }
 
             function setQuote(res) {
                 lastQuote = res && res.quote;
@@ -391,6 +419,7 @@
                     quoteEl.textContent = 'KI-Untertitel sind aus oder ohne API-Key.';
                     genBtn.disabled = true;
                 }
+                updateJob(currentJobs);
             }
 
             function formatUsd(n) {
@@ -446,12 +475,15 @@
             }
 
             function search() {
+                var ticket = ++searchGeneration, language = sel.value;
+                lastQuote = null; genBtn.disabled = true; updateJob(currentJobs);
                 searchBtn.disabled = true;
                 quoteEl.textContent = 'Suche und Kostenschätzung…';
                 api().ajax({
                     url: api().getUrl('TreasureMaps/Subtitles/Search', { itemId: item.Id, language: sel.value }),
                     type: 'GET', dataType: 'json'
                 }).then(function (res) {
+                    if (!box.isConnected || ticket !== searchGeneration || language !== sel.value) { return; }
                     searchBtn.disabled = false;
                     if (!res || !res.ok) {
                         quoteEl.textContent = (res && res.message) || 'Suche fehlgeschlagen.';
@@ -462,6 +494,7 @@
                     setQuote(res);
                     renderHits(res.opensubtitles);
                 }, function () {
+                    if (!box.isConnected || ticket !== searchGeneration) { return; }
                     searchBtn.disabled = false;
                     quoteEl.textContent = 'Suche fehlgeschlagen.';
                 });
@@ -473,20 +506,19 @@
                 var q = lastQuote || {};
                 if (genBtn.disabled || q.ok !== true || !Number.isFinite(q.totalUsd)) { return; }
                 var line = q.summary || ('ca. ' + formatUsd(q.totalUsd));
-                if (!window.confirm('KI-Untertitel jetzt erzeugen?\n\n' + line + '\n\nDie Erstellung kann bei langen Filmen mehrere Minuten dauern.')) {
+                if (!window.confirm('KI-Untertitel im Hintergrund erstellen?\n\n' + line + '\n\nFertige Schritte werden wiederverwendet. Du kannst den Film danach verlassen.')) {
                     return;
                 }
                 genBtn.disabled = true;
-                genBtn.textContent = 'Erzeugt…';
-                hintEl.textContent = 'Untertitel werden verarbeitet. Bitte das Fenster offen lassen.';
+                genBtn.textContent = 'Auftrag wird gestartet…';
+                hintEl.textContent = 'Auftrag wird an den Server übergeben…';
                 api().ajax({
-                    url: api().getUrl('TreasureMaps/Subtitles/Generate', { itemId: item.Id, language: sel.value, force: 'false' }),
+                    url: api().getUrl('TreasureMaps/Subtitles/Generate', { itemId: item.Id, language: sel.value, force: 'false', confirmed: 'true', maxEstimatedUsd: q.totalUsd }),
                     type: 'POST', dataType: 'json'
                 }).then(function (res) {
                     if (res && res.ok) {
-                        genBtn.textContent = 'Fertig';
-                        hintEl.textContent = (res.alreadyExists ? 'Vorhandene Datei geladen. ' : '')
-                            + (res.sidecar ? 'Gespeichert: ' + res.sidecar : 'Untertitel gespeichert.');
+                        if (res.job && window.EvolutionSubtitleJobs) { window.EvolutionSubtitleJobs.accept(res.job); }
+                        else { genBtn.textContent = 'Fertig'; hintEl.textContent = 'Vorhandene Untertitel sind verfügbar. Es entstehen keine neuen Kosten.'; }
                     } else {
                         genBtn.disabled = false;
                         genBtn.textContent = 'KI erzeugen';
@@ -495,7 +527,8 @@
                 }, function () {
                     genBtn.disabled = false;
                     genBtn.textContent = 'KI erzeugen';
-                    hintEl.textContent = 'Erzeugung fehlgeschlagen (Timeout bei sehr langen Filmen möglich).';
+                    hintEl.textContent = 'Serverantwort fehlt. Prüfe „KI-Aufträge“, bevor du erneut startest.';
+                    if (window.EvolutionSubtitleJobs) { window.EvolutionSubtitleJobs.refresh(); }
                 });
             });
 
