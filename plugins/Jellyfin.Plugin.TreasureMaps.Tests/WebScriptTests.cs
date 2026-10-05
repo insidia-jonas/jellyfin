@@ -88,12 +88,12 @@ public class WebScriptTests
         var html = "<html><body>hi</body></html>";
         var first = WebScriptInjector.ApplyScriptTag(html);
         Assert.NotNull(first);
-        Assert.Contains("TreasureMaps/ClientScript?v=18", first, StringComparison.Ordinal);
+        Assert.Contains("TreasureMaps/ClientScript?v=19", first, StringComparison.Ordinal);
 
-        var stale = first!.Replace("ClientScript?v=18", "ClientScript?v=3", StringComparison.Ordinal);
+        var stale = first!.Replace("ClientScript?v=19", "ClientScript?v=3", StringComparison.Ordinal);
         var upgraded = WebScriptInjector.ApplyScriptTag(stale);
         Assert.NotNull(upgraded);
-        Assert.Contains("ClientScript?v=18", upgraded, StringComparison.Ordinal);
+        Assert.Contains("ClientScript?v=19", upgraded, StringComparison.Ordinal);
         Assert.Equal(1, CountOccurrences(upgraded!, "plugin=\"TreasureMaps\""));
     }
 

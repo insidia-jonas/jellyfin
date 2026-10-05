@@ -56,6 +56,18 @@ public sealed class UserDataManagerTests : IDisposable
         _connection.Dispose();
     }
 
+    [Theory]
+    [InlineData(10)]
+    [InlineData(120)]
+    public void UpdatePlayState_DefaultKeepsEarlyMovieProgress(int seconds)
+    {
+        var movie = new MediaBrowser.Controller.Entities.Movies.Movie { RunTimeTicks = TimeSpan.FromHours(2).Ticks };
+        var data = new UserItemData { Key = "early-progress" };
+        var completed = _userDataManager.UpdatePlayState(movie, data, TimeSpan.FromSeconds(seconds).Ticks);
+        Assert.False(completed);
+        Assert.Equal(TimeSpan.FromSeconds(seconds).Ticks, data.PlaybackPositionTicks);
+    }
+
     private JellyfinDbContext CreateDbContext()
     {
         return new JellyfinDbContext(

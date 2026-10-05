@@ -450,3 +450,29 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
 - Fire TV 2.4.9/code28 loads `tvNavigation.js` for detail-page directional focus, including
   native buttons and injected download/subtitle summaries. Keep text inputs, modals and
   non-detail routes scoped; never generate subtitles or start downloads during focus tests.
+
+### Evolution discovery and Fire TV 2.5 (2026-10-05)
+
+- Fire TV 2.5.0/code30 consumes both edges and repeats of Back. Close subtitle/track panels,
+  then the OSD, then playback on separate presses. Re-arm the OSD timer when buffering ends
+  or playback resumes. Dialogue has 5.5% bottom clearance. PlaybackReportQueue coalesces
+  progress and serializes start/progress/stop beyond Activity destruction; never send a
+  late progress report after stop. New servers default MinResumePct to zero; preserve explicit
+  existing settings during ordinary upgrades (the owner's Raspberry was explicitly changed).
+- Evolution 1.2.0 / script v19 adds `discovery.js`: local vector home identities, detail
+  action shortcuts, bounded visible-card metadata warmup and independent detail metadata.
+  `MetadataCatalog.FillAsync` now returns cached data immediately and warms up to 24 titles
+  without mutating returned groups. Two background slots leave one for foreground requests.
+  Up to 256 credential-free metadata files survive restarts for seven days. Memory freshness
+  is 24h; negative misses back off two minutes. Never warm indexer searches by default.
+- German descriptions reuse Jellyfin's configured TheMovieDb provider and exact IMDb/TMDB
+  identity; the German iTunes storefront is a fallback. OMDb supplies IMDb ratings using
+  plugin credentials or the existing server provider. TMDb ratings must be labeled TMDb.
+  No paid translation or subtitle generation is triggered by browsing or prefetching.
+- `GET TreasureMaps/Metadata/{itemId}` and `POST .../Warm` resolve visible items server-side;
+  clients cannot supply provider URLs or arbitrary identities. Shared work survives a single
+  cancelled viewer. Route/account generations guard all rendering and cached client data.
+- TV focus includes real buttons with roving tabindex=-1 and Android keycode fallbacks;
+  description text remains noninteractive. Live TV keeps a virtualized compact list and
+  an EPG detail pane; selecting/focusing a row never opens an IPTV connection. Static gradients
+  and short transform transitions provide the shared finish without expensive TV backdrop blur.

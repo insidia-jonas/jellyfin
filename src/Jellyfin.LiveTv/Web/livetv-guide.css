@@ -70,3 +70,32 @@ html.jf-guide-open { overflow:hidden; }
  #jf-livetv-guide .jf-guide-programs { padding:12px 20px 30px; }
 }
 @media(prefers-reduced-motion:reduce) { #jf-livetv-overview .jf-livetv-card { transition:none; } }
+
+/* Match the shared Evolution surfaces and give channel/programme a distinct hierarchy. */
+html.jf-livetv-list-on { --live-bg:#0b1020; --live-panel:#172338; --live-text:#f1f5fc; --live-muted:#9dacca; --live-accent:#b6d1ff; }
+#jf-livetv-overview { max-width:1580px; padding:0 3vw; }
+#jf-livetv-overview,#jf-livetv-guide { font-family:system-ui,"Segoe UI",sans-serif; text-shadow:none; }
+#jf-livetv-overview .jf-live-eyebrow { color:#a4c4fa; }
+#jf-livetv-overview .jf-livetv-title { font-size:34px; }
+#jf-livetv-overview .jf-live-intro { margin-bottom:22px; }
+#jf-livetv-overview .jf-livetv-list { grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
+#jf-livetv-overview .jf-livetv-card { border-radius:18px; border-color:#ffffff16; background:linear-gradient(140deg,#20304a,#131e31 80%); transition:transform 160ms ease-out,border-color 160ms ease-out; }
+#jf-livetv-overview .jf-livetv-card:hover,#jf-livetv-overview .jf-livetv-card:focus-within { border-color:#b6ccff80; transform:translateY(-3px); }
+#jf-livetv-overview .jf-livetv-row { grid-template-columns:46px minmax(0,1fr); padding:18px 20px 12px; gap:12px; }
+#jf-livetv-overview .jf-livetv-logo { width:46px; height:43px; border-radius:10px; background-color:#f5f7fc; }
+#jf-livetv-overview .jf-livetv-sender { font-size:14px; color:#c4d3eb; }
+#jf-livetv-overview .jf-livetv-show { font-size:20px; font-weight:650; letter-spacing:-.025em; }
+#jf-livetv-overview .jf-livetv-plot { font-size:13px; min-height:3.2em; line-height:1.6; -webkit-line-clamp:2; color:#adbed9; }
+#jf-livetv-overview .jf-livetv-times { margin:6px 0 9px; font-size:12px; }
+#jf-livetv-overview .jf-livetv-bar { margin-top:13px; }
+#jf-livetv-overview .jf-live-actions { padding:0 20px 16px; }
+#jf-livetv-overview .jf-live-info,.jf-live-pill { border-radius:10px; border-color:#ffffff22; background:linear-gradient(145deg,#ffffff10,#ffffff03); }
+.jf-live-pill.active { background:#b6d1ff; color:#122039; }
+#jf-livetv-overview .jf-livetv-search { background:#152239; border-color:#ffffff25; border-radius:12px; }
+#jf-livetv-guide .jf-guide-panel { background:linear-gradient(145deg,#21324c,#111c2e); border-color:#ffffff22; }
+#jf-livetv-guide .jf-guide-time { color:#b6d1ff; }
+#jf-livetv-guide .jf-guide-program.is-running { background:#b6d1ff0a; border-color:#b6d1ff44; }
+#jf-livetv-guide .jf-live-watch { background:#b6d1ff; color:#122039; border-radius:10px; }
+@media(max-width:1150px) { #jf-livetv-overview .jf-livetv-list { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:720px) { #jf-livetv-overview .jf-livetv-list { grid-template-columns:1fr; } }
+@media(prefers-reduced-motion:reduce) { #jf-livetv-overview .jf-livetv-card { transition:none!important; transform:none!important; } }

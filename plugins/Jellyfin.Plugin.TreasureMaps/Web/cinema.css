@@ -139,3 +139,77 @@ html.cinema-ui { --cinema-bg:#111315; --cinema-panel:#1c1f22; --cinema-accent:#e
 .layout-tv.cinema-details #firetv-imdb-meta { display:none; }
 .layout-tv.cinema-details .detailPageWrapperContainer { margin-top:-160px; }
 @media(prefers-reduced-motion:reduce) { .cinema-ui .card .cardBox { transition:none!important; } }
+
+/* Evolution 2: a shared visual system. Gloss comes from static light and borders;
+   only transforms and opacity animate, so Fire TV does not repaint blurred layers. */
+html.cinema-ui { --cinema-bg:#0b1020; --cinema-panel:#151d31; --cinema-accent:#b6ccff; --cinema-text:#f5f7fd; color-scheme:dark; background:var(--cinema-bg)!important; }
+.cinema-ui .skinHeader,.cinema-ui header.MuiAppBar-root { background:linear-gradient(180deg,#1d2940f5,#10182beF)!important; border-bottom:1px solid #d6e2ff16; }
+.cinema-ui .mainDrawer { background:#111a2c!important; }
+.cinema-ui .card .cardBox { border-radius:16px!important; overflow:hidden; transition:transform 160ms ease-out!important; }
+.cinema-ui .card:focus .cardBox,.cinema-ui .card.focused .cardBox { transform:scale(1.025); outline:3px solid #d5e2ff!important; outline-offset:3px; }
+.cinema-ui .sectionTitle,.cinema-ui .sectionTitleTextButton { font-weight:650!important; letter-spacing:-.025em!important; }
+.cinema-ui .cinema-button,.cinema-ui .cinema-arrow { border-radius:14px; transition:transform 140ms ease-out,background-color 140ms ease-out; }
+.cinema-ui .cinema-primary { background:linear-gradient(135deg,#eef4ff,#accbff); color:#111c35; box-shadow:0 1px 0 #fff8 inset; }
+.cinema-ui .cinema-secondary,.cinema-ui .cinema-arrow { background:linear-gradient(150deg,#ffffff18,#ffffff07); border-color:#ffffff25; }
+.cinema-ui .cinema-button:active { transform:scale(.97); }
+.cinema-ui .cinema-hero { background:#0b1020; margin:12px 2.8vw 24px; border-radius:24px; border:1px solid #ffffff12; min-height:460px; }
+.cinema-ui .cinema-hero:after { background:linear-gradient(90deg,#0b1020 0%,#0b1020e6 30%,#0b102052 65%,#0b102008),linear-gradient(0deg,#0b1020a8,transparent 50%); }
+.cinema-ui .cinema-hero-art { width:85%; }
+.cinema-ui .cinema-hero-title { letter-spacing:-.045em!important; }
+.cinema-ui .cinema-hero-meta { color:#c7d5f1; }
+.cinema-ui .cinema-hero-overview { color:#c0cbe0; }
+.cinema-ui .cinema-hero-navigation { bottom:28px; }
+.cinema-home #homeTab .section0 .cardPadder { padding-bottom:52%!important; }
+.cinema-home #homeTab .section0 .evolution-hub .cardScalable { position:relative; }
+.evolution-hub .cardImageContainer,.evolution-hub .cardPadder>* { visibility:hidden!important; }
+.evolution-hub-art { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; color:#d3e4ff; background:linear-gradient(130deg,#273d66,#101a30 80%); border:1px solid #ffffff24; border-radius:16px; overflow:hidden; }
+.evolution-hub-art:before { content:""; position:absolute; width:80%; height:180%; top:-120%; left:-10%; border-radius:50%; background:#ffffff0a; transform:rotate(-20deg); }
+.evolution-hub-art svg { width:27%; max-width:85px; height:auto; filter:none; }
+.evolution-hub-label { margin-top:7px; font-size:1.05em; font-weight:650; letter-spacing:-.015em; }
+.evolution-hub[data-hub="tv"] .evolution-hub-art { background:linear-gradient(130deg,#3b3062,#1b152e 80%); color:#dfd3ff; }
+.evolution-hub[data-hub="indexer"] .evolution-hub-art { background:linear-gradient(130deg,#254e58,#10262e 80%); color:#b6f0ea; }
+.evolution-hub[data-hub="live"] .evolution-hub-art { background:linear-gradient(130deg,#633342,#30141e 80%); color:#ffd1dd; }
+.cinema-ui .evolution-hub .cardText-first { display:none; }
+.cinema-details .detailPagePrimaryContainer { background:linear-gradient(0deg,#0b1020 80%,#0b1020b8)!important; }
+.cinema-details .backgroundContainer.withBackdrop { background:linear-gradient(0deg,#0b1020 30%,#0b102050 90%)!important; }
+.cinema-details .backdropContainer,.cinema-details .detailPageSecondaryContainer { background:#0b1020!important; }
+.cinema-details .mainDetailButtons .detailButton { background:linear-gradient(145deg,#ffffff15,#ffffff08)!important; border:1px solid #ffffff1c; border-radius:12px!important; }
+.cinema-details .mainDetailButtons .btnPlay { background:linear-gradient(135deg,#eef4ff,#accbff)!important; color:#101a30!important; }
+.evolution-detail-actions { display:flex; flex-wrap:wrap; align-items:center; margin:0 0 22px; }
+.evolution-detail-actions button,.evolution-read-more { appearance:none; font:inherit; cursor:pointer; color:#eaf0ff; border:1px solid #ffffff28; background:linear-gradient(150deg,#ffffff17,#ffffff07); border-radius:12px; padding:13px 18px; margin:0 10px 10px 0; }
+.evolution-detail-actions button:first-child { color:#101a30; background:linear-gradient(135deg,#eaf2ff,#b3caff); border-color:transparent; font-weight:650; }
+.evolution-detail-actions button:focus,.evolution-read-more:focus { outline:3px solid #d6e4ff; outline-offset:3px; }
+.evolution-detail-actions[hidden],.evolution-detail-actions button[hidden] { display:none; }
+.evolution-metadata { margin:0 0 25px; min-height:80px; max-width:65em; }
+.evolution-metadata[aria-busy="true"] { color:#9faec8; font-size:.9em; }
+.evolution-metadata-facts { display:flex; align-items:center; flex-wrap:wrap; margin:0 0 16px; color:#b8c9e7; font-size:.88em; }
+.evolution-metadata-facts>span { margin:0 18px 6px 0; }
+.evolution-rating { background:#e9c56419; color:#f0d57f; border:1px solid #e9c56433; padding:6px 10px; border-radius:8px; font-weight:650; }
+.evolution-synopsis { color:#ced8e9; line-height:1.65; margin:0 0 12px; white-space:pre-line; }
+.evolution-synopsis.is-clamped { display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; }
+.evolution-read-more { padding:8px 12px; font-size:.8em; }
+.evolution-metadata-note { color:#a7b6d0; font-size:.9em; }
+.evolution-enriched .detailSectionContent .overview,.evolution-enriched .tagline,.evolution-enriched #firetv-imdb-meta { display:none!important; }
+.cinema-ui .tmLanguageGroup { padding:0; border-radius:16px; border:1px solid #b6ccff20; background:linear-gradient(140deg,#1b2940,#121c2c); overflow:hidden; margin:12px 0; }
+.cinema-ui .tmLanguageGroup>summary { padding:20px 22px; font-size:1em; }
+.cinema-ui .tmLanguageGroup>summary:focus { outline:3px solid #c8dcff; outline-offset:-3px; background:#ffffff0d; }
+.cinema-ui #tmReleases .tmRelRow { align-items:center; margin:0; padding:16px 22px; background:transparent; border:0; border-top:1px solid #ffffff0c; border-radius:0; }
+.cinema-ui #tmReleases .tmRelRow:focus-within { background:#b6ccff10; }
+.cinema-ui #tmReleases .tmRelName { line-height:1.55; color:#dae2f2; font-size:.92em; }
+.cinema-ui #tmReleases .tmDl,.cinema-ui #tmArrRequest .tmDl { border-radius:10px; background:linear-gradient(135deg,#dce9ff,#b0c9f8); color:#122039; padding:12px 18px; }
+.cinema-details #tmSubtitles { background:linear-gradient(145deg,#1b2940,#121b2d); border:1px solid #ffffff20; border-radius:16px; }
+.cinema-ui #tmDownloads .tmDlRow { background:linear-gradient(145deg,#1b2940,#121b2d); border-color:#ffffff18; }
+.layout-tv.cinema-ui { background:#0b1020!important; }
+.layout-tv.cinema-ui .card .cardBox { transition:transform 130ms ease-out!important; }
+.layout-tv.cinema-ui .cinema-hero { min-height:420px; padding:42px 3vw 52px; }
+.layout-tv.cinema-details .detailPagePrimaryContainer { grid-template-columns:220px minmax(0,1fr); column-gap:40px; }
+.layout-tv.cinema-details .itemName { font-size:2.3rem!important; }
+.layout-tv.cinema-details .detailPagePrimaryContent { font-size:22px; }
+.layout-tv .evolution-detail-actions button { padding:16px 20px; min-height:56px; }
+.layout-tv .evolution-metadata { max-width:58em; }
+.layout-tv .evolution-synopsis { font-size:22px; line-height:1.5; }
+.layout-tv.cinema-ui #tmReleases .tmRelRow { padding:18px 22px; }
+.layout-tv.cinema-ui .detailPageSecondaryContainer { padding-top:20px!important; }
+@media(hover:hover) { .cinema-ui .card:hover .cardBox { transform:translateY(-4px); } }
+@media(max-width:700px) { .cinema-ui .cinema-hero { margin:8px 12px 22px; min-height:540px; border-radius:20px; } .cinema-ui .cinema-hero:after { background:linear-gradient(0deg,#0b1020 25%,#0b1020de 48%,#0b102010); } .cinema-ui .cinema-hero-art { width:100%; } .evolution-detail-actions button { padding:12px; font-size:.88em; } .evolution-hub-label { font-size:.9em; } }
+@media(prefers-reduced-motion:reduce) { .cinema-ui .card .cardBox,.cinema-ui .cinema-button,.cinema-ui .cinema-arrow { transition:none!important; transform:none!important; } }

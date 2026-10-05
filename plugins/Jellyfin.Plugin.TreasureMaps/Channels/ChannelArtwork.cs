@@ -36,7 +36,7 @@ public static class ChannelArtwork
 
         lock (Lock)
         {
-            var dir = Path.Combine(Path.GetTempPath(), "treasuremaps", "posters-v2");
+            var dir = Path.Combine(Path.GetTempPath(), "treasuremaps", "posters-v3");
             Directory.CreateDirectory(dir);
             var file = Path.Combine(dir, Sanitize(key) + ".png");
             if (File.Exists(file) && new FileInfo(file).Length > 200)
@@ -46,6 +46,7 @@ public static class ChannelArtwork
 
             var artworkKey = key switch
             {
+                "channel" => "indexer",
                 "movies-de" or "trending-movie" => "movies",
                 "tv-de" or "trending-tv" => "tv",
                 var value when value.StartsWith("genre:", StringComparison.Ordinal) => "genres",
