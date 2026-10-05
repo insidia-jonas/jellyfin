@@ -190,6 +190,15 @@ html.cinema-ui { --cinema-bg:#0b1020; --cinema-panel:#151d31; --cinema-accent:#b
 .evolution-read-more { padding:8px 12px; font-size:.8em; }
 .evolution-metadata-note { color:#a7b6d0; font-size:.9em; }
 .evolution-enriched .detailSectionContent .overview,.evolution-enriched .tagline,.evolution-enriched #firetv-imdb-meta { display:none!important; }
+/* Indexer titles have posters but no native backdrop; reserve space for content. */
+.cinema-details .tmTitlePage #itemBackdrop { height:48px!important; min-height:0!important; }
+.cinema-details .tmTitlePage .detailPageWrapperContainer { margin-top:0!important; }
+.cinema-details .tmTitlePage .detailImageContainer .card { margin-top:0!important; top:0!important; transform:none!important; }
+.cinema-details .tmTitlePage .detailPagePrimaryContainer { align-items:start; }
+@media(max-width:700px) {
+ .cinema-details .tmTitlePage #itemBackdrop { height:24px!important; }
+ .cinema-details .tmTitlePage .detailImageContainer { display:none!important; }
+}
 .cinema-ui .tmLanguageGroup { padding:0; border-radius:16px; border:1px solid #b6ccff20; background:linear-gradient(140deg,#1b2940,#121c2c); overflow:hidden; margin:12px 0; }
 .cinema-ui .tmLanguageGroup>summary { padding:20px 22px; font-size:1em; }
 .cinema-ui .tmLanguageGroup>summary:focus { outline:3px solid #c8dcff; outline-offset:-3px; background:#ffffff0d; }
