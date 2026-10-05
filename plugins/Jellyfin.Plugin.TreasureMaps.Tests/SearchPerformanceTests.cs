@@ -234,11 +234,13 @@ public class SearchPerformanceTests
         var name = Guid.NewGuid().ToString();
         var groups = Enumerable.Range(0, 20).Select(_ => new ReleaseGroup { Title = name }).ToArray();
         await catalog.FillAsync(groups, CancellationToken.None);
+        await catalog.GetAsync(groups[0], CancellationToken.None);
         Assert.Equal(1, handler.Calls);
         await catalog.FillAsync([new ReleaseGroup { Title = name }], CancellationToken.None);
         Assert.Equal(1, handler.Calls); // Negative results also have a finite cache lifetime.
         var distinct = Enumerable.Range(0, 20).Select(i => new ReleaseGroup { Title = name + i }).ToArray();
         await catalog.FillAsync(distinct, CancellationToken.None);
+        await Task.WhenAll(distinct.Select(g => catalog.GetAsync(g, CancellationToken.None)));
         Assert.InRange(handler.Maximum, 1, 3);
     }
 

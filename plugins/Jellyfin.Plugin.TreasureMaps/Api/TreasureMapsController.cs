@@ -763,6 +763,7 @@ public class TreasureMapsController : ControllerBase
     {
         using var stream = GetType().Assembly.GetManifestResourceStream("Jellyfin.Plugin.TreasureMaps.Web.treasuremaps.js");
         using var cinema = GetType().Assembly.GetManifestResourceStream("Jellyfin.Plugin.TreasureMaps.Web.cinema.js");
+        using var discovery = GetType().Assembly.GetManifestResourceStream("Jellyfin.Plugin.TreasureMaps.Web.discovery.js");
         using var styles = GetType().Assembly.GetManifestResourceStream("Jellyfin.Plugin.TreasureMaps.Web.cinema.css");
         if (stream is null || cinema is null || styles is null)
         {
@@ -775,7 +776,8 @@ public class TreasureMapsController : ControllerBase
         using var styleReader = new StreamReader(styles);
         var css = System.Text.Json.JsonSerializer.Serialize(styleReader.ReadToEnd());
         var styleScript = "(function(){if(document.getElementById('jellyfin-cinema-style'))return;var s=document.createElement('style');s.id='jellyfin-cinema-style';s.textContent=" + css + ";document.head.appendChild(s);})();\n";
-        return Content(scriptReader.ReadToEnd() + "\n" + styleScript + cinemaReader.ReadToEnd(), "application/javascript");
+        using var discoveryReader = new StreamReader(discovery!);
+        return Content(scriptReader.ReadToEnd() + "\n" + styleScript + cinemaReader.ReadToEnd() + "\n" + discoveryReader.ReadToEnd(), "application/javascript");
     }
 
     /// <summary>

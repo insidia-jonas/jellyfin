@@ -130,7 +130,7 @@ public class ServerConfiguration : BaseApplicationConfiguration
     /// Gets or sets the minimum percentage of an item that must be played in order for playstate to be updated.
     /// </summary>
     /// <value>The min resume PCT.</value>
-    public int MinResumePct { get; set; } = 5;
+    public int MinResumePct { get; set; }
 
     /// <summary>
     /// Gets or sets the maximum percentage of an item that can be played while still saving playstate. If this percentage is crossed playstate will be reset to the beginning and the item will be marked watched.

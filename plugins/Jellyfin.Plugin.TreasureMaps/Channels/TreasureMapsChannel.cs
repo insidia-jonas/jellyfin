@@ -1320,9 +1320,8 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
             };
 
             var hint = string.Equals(group.Kind, "tv", StringComparison.Ordinal)
-                ? "Open the cover for every episode. Mark a quality as a favorite (\u2764) to download it."
-                : count + (count == 1 ? " release available." : " releases available.")
-                    + " Mark a release below as a favorite (\u2764) to download it.";
+                ? "Staffeln, Folgen und verfügbare Fassungen findest du weiter unten."
+                : count + (count == 1 ? " Fassung verfügbar." : " Fassungen verfügbar.");
             card.Overview = string.IsNullOrWhiteSpace(group.Plot) ? hint : group.Plot + "\n\n" + hint;
             if (!string.IsNullOrWhiteSpace(group.Tagline))
             {
@@ -1350,6 +1349,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
             {
                 card.ProviderIds["Imdb"] = ReleaseMapper.NormalizeImdbId(group.Imdb!);
             }
+            if (!string.IsNullOrWhiteSpace(group.Tmdb)) card.ProviderIds["EvolutionTmdb"] = group.Tmdb;
 
             // Favouriting the title card (the poster) grabs the best release in the group.
             var best = ReleaseGrouper.PickBestRelease(group.Releases);

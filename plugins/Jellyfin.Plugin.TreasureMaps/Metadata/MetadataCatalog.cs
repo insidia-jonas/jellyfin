@@ -3,6 +3,9 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
@@ -11,6 +14,8 @@ using Jellyfin.Plugin.TreasureMaps.Channels;
 using Jellyfin.Plugin.TreasureMaps.Listing;
 using Jellyfin.Plugin.TreasureMaps.Search;
 using Microsoft.Extensions.Logging;
+using MediaBrowser.Common.Configuration;
+using MediaBrowser.Controller.Providers;
 
 namespace Jellyfin.Plugin.TreasureMaps.Metadata;
 
@@ -35,14 +40,18 @@ public sealed class CatalogHit
     /// <summary>Gets or sets the community rating (0–10).</summary>
     public double? Rating { get; set; }
 
+    public string? RatingSource { get; set; }
+
+    public string? Language { get; set; }
+
     /// <summary>Gets or sets the director.</summary>
     public string? Director { get; set; }
 
     /// <summary>Gets the genres.</summary>
-    public List<string> Genres { get; } = new();
+    public List<string> Genres { get; set; } = new();
 
     /// <summary>Gets the actors.</summary>
-    public List<string> Actors { get; } = new();
+    public List<string> Actors { get; set; } = new();
 }
 
 /// <summary>
@@ -53,6 +62,11 @@ public sealed class MetadataCatalog
 {
     private static readonly TreasureMapsListingCache Cache = new(identity: MetadataSettingsKey);
     private static readonly SemaphoreSlim Slots = new(3, 3);
+    private readonly ConcurrentDictionary<string, byte> _warming = new();
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _missing = new();
+    private static readonly SemaphoreSlim WarmSlots = new(2, 2);
+    private readonly IProviderManager? _providers;
+    private readonly string? _cacheDirectory;
 
     /// <summary>
     /// Drops cached IMDb/iTunes hits (language / image settings changed).
@@ -67,10 +81,13 @@ public sealed class MetadataCatalog
     /// </summary>
     /// <param name="httpClientFactory">The HTTP client factory.</param>
     /// <param name="logger">The logger.</param>
-    public MetadataCatalog(IHttpClientFactory httpClientFactory, ILogger<MetadataCatalog> logger)
+    public MetadataCatalog(IHttpClientFactory httpClientFactory, ILogger<MetadataCatalog> logger,
+        IProviderManager? providers = null, IApplicationPaths? paths = null)
     {
         _httpClientFactory = httpClientFactory;
         _logger = logger;
+        _providers = providers;
+        _cacheDirectory = paths is null ? null : Path.Combine(paths.CachePath, "evolution-metadata-v1");
     }
 
     /// <summary>
@@ -80,7 +97,7 @@ public sealed class MetadataCatalog
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <param name="allowNetwork">Whether optional remote metadata may delay this listing.</param>
     /// <returns>A task that completes when the lookups finish.</returns>
-    public async Task FillAsync(IReadOnlyList<ReleaseGroup> groups, CancellationToken cancellationToken, bool allowNetwork = true)
+    public Task FillAsync(IReadOnlyList<ReleaseGroup> groups, CancellationToken cancellationToken, bool allowNetwork = true)
     {
         cancellationToken.ThrowIfCancellationRequested();
         foreach (var group in groups)
@@ -92,21 +109,88 @@ public sealed class MetadataCatalog
             }
         }
 
-        if (allowNetwork)
+        if (allowNetwork) Warm(groups);
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Prepare a bounded visible page without holding up indexer listings.</summary>
+    public void Warm(IEnumerable<ReleaseGroup> groups)
+    {
+        foreach (var group in groups.Take(24))
         {
-            using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            budget.CancelAfter(TimeSpan.FromSeconds(2));
+            var key = CatalogKey(group);
+            if (_warming.Count >= 48 || Cache.TryGetFresh<CatalogEntry>(key, out _, out _) || !_warming.TryAdd(key, 0)) continue;
+            // Never mutate a listing after returning it to ChannelManager.
+            var identity = new ReleaseGroup { Title = group.Title, Kind = group.Kind, Imdb = group.Imdb, Tmdb = group.Tmdb, Year = group.Year };
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+                    // Leave one network slot for a title opened by the viewer.
+                    await WarmSlots.WaitAsync(deadline.Token).ConfigureAwait(false);
+                    try { await GetAsync(identity, deadline.Token).ConfigureAwait(false); }
+                    finally { WarmSlots.Release(); }
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { _logger.LogDebug("Optional metadata warmup unavailable ({Type})", ex.GetType().Name); }
+                finally { _warming.TryRemove(key, out _); }
+            });
+        }
+    }
+
+    /// <summary>Coalesced detail lookup; a cancelled client does not cancel another viewer's lookup.</summary>
+    public async Task<CatalogHit?> GetAsync(ReleaseGroup group, CancellationToken ct)
+    {
+        var key = CatalogKey(group);
+        if (_missing.TryGetValue(key, out var until) && until > DateTimeOffset.UtcNow) return null;
+        var entry = await Cache.GetOrFetchAsync<CatalogEntry>(key, TimeSpan.FromHours(24), async (_, token) =>
+        {
+            await Slots.WaitAsync(token).ConfigureAwait(false);
             try
             {
-                await Task.WhenAll(groups.Where(NeedsFill).Take(24).Select(g => FillOneAsync(g, budget.Token))).ConfigureAwait(false);
+                var disk = ReadDisk(key);
+                if (disk is not null) return ListingFetch<CatalogEntry>.Store(new CatalogEntry(disk));
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                deadline.CancelAfter(TimeSpan.FromSeconds(12));
+                var hit = await LookupAsync(group, deadline.Token).ConfigureAwait(false);
+                if (hit is null)
+                {
+                    _missing[key] = DateTimeOffset.UtcNow.AddMinutes(2);
+                    foreach (var old in _missing.OrderByDescending(x => x.Value).Skip(256)) _missing.TryRemove(old.Key, out var ignored);
+                    return ListingFetch<CatalogEntry>.DoNotStore(null);
+                }
+                WriteDisk(key, hit);
+                return ListingFetch<CatalogEntry>.Store(new CatalogEntry(hit));
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                // Optional metadata must not hold up an otherwise usable listing.
-            }
-        }
+            finally { Slots.Release(); }
+        }, ct).ConfigureAwait(false);
+        return entry?.Hit;
+    }
 
-        cancellationToken.ThrowIfCancellationRequested();
+    private string? DiskPath(string key) => _cacheDirectory is null ? null : Path.Combine(_cacheDirectory,
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key))) + ".json");
+
+    private CatalogHit? ReadDisk(string key)
+    {
+        var path = DiskPath(key);
+        try { return path is not null && File.Exists(path) && File.GetLastWriteTimeUtc(path) > DateTime.UtcNow.AddDays(-7)
+            ? JsonSerializer.Deserialize<CatalogHit>(File.ReadAllText(path)) : null; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return null; }
+    }
+
+    private void WriteDisk(string key, CatalogHit hit)
+    {
+        var path = DiskPath(key);
+        if (path is null) return;
+        try
+        {
+            Directory.CreateDirectory(_cacheDirectory!);
+            File.WriteAllText(path + ".tmp", JsonSerializer.Serialize(hit));
+            File.Move(path + ".tmp", path, true);
+            foreach (var old in new DirectoryInfo(_cacheDirectory!).GetFiles("*.json").OrderByDescending(f => f.LastWriteTimeUtc).Skip(256)) old.Delete();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* Optional persistent cache. */ }
     }
 
     /// <summary>
@@ -156,48 +240,6 @@ public sealed class MetadataCatalog
             .Replace("200x200", "600x600", StringComparison.Ordinal);
     }
 
-    private static bool NeedsFill(ReleaseGroup group)
-        => string.IsNullOrWhiteSpace(group.Cover)
-           || string.IsNullOrWhiteSpace(group.Plot)
-           || group.Actors.Count == 0
-           || !group.Rating.HasValue;
-
-    private async Task FillOneAsync(ReleaseGroup group, CancellationToken cancellationToken)
-    {
-        try
-        {
-            ApplyPicbit(group);
-            if (!NeedsFill(group))
-            {
-                return;
-            }
-
-            var entry = await Cache.GetOrFetchAsync<CatalogEntry>(
-                CatalogKey(group), TimeSpan.FromMinutes(5),
-                async (_, token) =>
-                {
-                    await Slots.WaitAsync(token).ConfigureAwait(false);
-                    try
-                    {
-                        return ListingFetch<CatalogEntry>.Store(new CatalogEntry(await LookupAsync(group, token).ConfigureAwait(false)));
-                    }
-                    finally
-                    {
-                        Slots.Release();
-                    }
-                }, cancellationToken).ConfigureAwait(false);
-            ApplyHit(group, entry?.Hit);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Metadata catalog fill failed for {Title}", group.Title);
-        }
-    }
-
     private sealed record CatalogEntry(CatalogHit? Hit);
 
     private static void ApplyHit(ReleaseGroup group, CatalogHit? hit)
@@ -205,9 +247,9 @@ public sealed class MetadataCatalog
         if (hit is not null)
         {
             group.Cover ??= hit.Cover;
-            group.Plot ??= hit.Plot;
+            if (!string.IsNullOrWhiteSpace(hit.Plot)) group.Plot = hit.Plot;
             group.Year ??= hit.Year;
-            group.Rating ??= hit.Rating;
+            if (hit.Rating.HasValue) group.Rating = hit.Rating;
             group.Director ??= hit.Director;
             if (group.Genres.Count == 0)
             {
@@ -260,21 +302,33 @@ public sealed class MetadataCatalog
     private static string MetadataSettingsKey()
     {
         var c = Plugin.Instance?.Configuration;
-        var lang = c?.PrimaryLanguage ?? string.Empty;
+        var lang = "de-DE-v1";
         var omdb = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(c?.OmdbApiKey ?? string.Empty)));
         return lang + "|" + omdb;
     }
 
     private async Task<CatalogHit?> LookupAsync(ReleaseGroup group, CancellationToken cancellationToken)
     {
-        var omdb = await LookupOmdbAsync(group, cancellationToken).ConfigureAwait(false);
-        if (omdb is not null && !string.IsNullOrWhiteSpace(omdb.Cover) && !string.IsNullOrWhiteSpace(omdb.Plot))
+        CatalogHit? localized = null, omdb = null;
+        try { localized = await LocalizedCatalog.LookupAsync(_providers, group, cancellationToken).ConfigureAwait(false); }
+        catch (HttpRequestException) { /* Another provider may still have data. */ }
+        try
         {
-            return omdb;
+            omdb = !string.IsNullOrWhiteSpace(Plugin.Instance?.Configuration.OmdbApiKey)
+                ? await LookupOmdbAsync(group, cancellationToken).ConfigureAwait(false)
+                : await LocalizedCatalog.LookupAsync(_providers, group, cancellationToken, "The Open Movie Database").ConfigureAwait(false);
+        }
+        catch (HttpRequestException) { /* A missing IMDb rating must not hide the synopsis. */ }
+        if (localized is not null && !string.IsNullOrWhiteSpace(localized.Plot))
+        {
+            if (omdb?.Rating is not null) { localized.Rating = omdb.Rating; localized.RatingSource = "IMDb"; }
+            return Merge(localized, omdb);
         }
 
         var itunes = await LookupItunesAsync(group, cancellationToken).ConfigureAwait(false);
-        return Merge(omdb, itunes);
+        // German storefront supplies the description; OMDb supplies IMDb ratings only.
+        return Merge(Merge(itunes, localized), omdb is null ? null : new CatalogHit
+        { Title = omdb.Title, Cover = omdb.Cover, Year = omdb.Year, Rating = omdb.Rating, RatingSource = omdb.RatingSource, Actors = omdb.Actors, Genres = omdb.Genres });
     }
 
     private static CatalogHit? Merge(CatalogHit? first, CatalogHit? second)
@@ -292,7 +346,7 @@ public sealed class MetadataCatalog
         first.Cover ??= second.Cover;
         first.Plot ??= second.Plot;
         first.Year ??= second.Year;
-        first.Rating ??= second.Rating;
+        if (!first.Rating.HasValue) { first.Rating = second.Rating; first.RatingSource = second.RatingSource; }
         first.Director ??= second.Director;
         first.Title ??= second.Title;
         if (first.Genres.Count == 0)
@@ -343,7 +397,8 @@ public sealed class MetadataCatalog
             Cover = N(Get(root, "Poster")),
             Director = N(Get(root, "Director")),
             Year = ParseYear(Get(root, "Year")),
-            Rating = ParseRating(Get(root, "imdbRating"))
+            Rating = ParseRating(Get(root, "imdbRating")),
+            RatingSource = "IMDb"
         };
         SplitInto(hit.Genres, Get(root, "Genre"));
         SplitInto(hit.Actors, Get(root, "Actors"));
@@ -354,7 +409,7 @@ public sealed class MetadataCatalog
     {
         var entity = string.Equals(group.Kind, "tv", StringComparison.OrdinalIgnoreCase) ? "tvSeason" : "movie";
         var url = "https://itunes.apple.com/search?entity=" + entity
-                  + "&limit=8&term=" + Uri.EscapeDataString(group.Title);
+                  + "&country=DE&lang=de_de&limit=8&term=" + Uri.EscapeDataString(group.Title);
         using var client = _httpClientFactory.CreateClient();
         client.Timeout = TimeSpan.FromSeconds(8);
         using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
@@ -384,7 +439,8 @@ public sealed class MetadataCatalog
                 Title = name,
                 Plot = Get(row, "longDescription") ?? Get(row, "shortDescription"),
                 Cover = UpgradeArtwork(Get(row, "artworkUrl100")),
-                Year = ParseYear(Get(row, "releaseDate"))
+                Year = ParseYear(Get(row, "releaseDate")),
+                Language = "de"
             };
             SplitInto(hit.Genres, Get(row, "primaryGenreName"));
             hits.Add(hit);
