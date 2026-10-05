@@ -576,6 +576,9 @@
         info.textContent = "ⓘ"; info.hidden = isGroup(item);
         info.setAttribute("aria-label", "Programminfo: " + item.Name);
         info.addEventListener("click", function () { openGuide(item.Id, info); });
+        [favorite, info].forEach(function (button) {
+            button.addEventListener("focus", function () { saved.focusId = item.Id; persist(); previewChannel(byId[item.Id]); });
+        });
         entry.appendChild(info);
         return entry;
     }
@@ -595,7 +598,7 @@
         var description = String(program.Overview || '').replace(/<[^>]*>/g, '').trim();
         line('p', 'firetv-preview-plot', description || (isGroup(item) ? 'Öffne die Gruppe, um Sender und Sendungen zu entdecken.' : 'Die EPG-Beschreibung erscheint hier, sobald der Anbieter sie liefert.'));
         if (upcoming) { line('p', 'firetv-preview-next', upcoming); }
-        var hint = line('div', 'firetv-preview-hint', isGroup(item) ? 'OK  Gruppe öffnen' : 'OK  Ansehen     ·     Menü  Programminfo');
+        var hint = line('div', 'firetv-preview-hint', isGroup(item) ? 'OK  Gruppe öffnen' : 'OK  Ansehen     ·     2× rechts  Programminfo');
         hint.setAttribute('aria-hidden', 'true');
     }
 
@@ -699,19 +702,20 @@
         }
     }
 
-    function focusIndex(index, favorite) {
+    function focusIndex(index, action) {
         if (index < 0 || index >= shown.length || !viewport) { return; }
         var height = viewport.clientHeight || 650;
         if (index * rowHeight < viewport.scrollTop) { viewport.scrollTop = index * rowHeight; }
         else if ((index + 1) * rowHeight > viewport.scrollTop + height) { viewport.scrollTop = (index + 1) * rowHeight - height; }
         paintWindow();
         var entry = rows[shown[index].Id];
-        if (entry) { entry.querySelector(favorite && !isGroup(shown[index]) ? ".firetv-live-favorite" : ".firetv-live-row").focus({ preventScroll: true }); }
+        var column = isGroup(shown[index]) ? 0 : Math.max(0, Math.min(2, Number(action) || 0));
+        if (entry) { entry.querySelector([".firetv-live-row", ".firetv-live-favorite", ".firetv-live-info"][column]).focus({ preventScroll: true }); }
     }
 
     function navigate(event) {
         var entry = event.target.closest && event.target.closest(".firetv-live-entry");
-        var key = event.key;
+        var key = /^Arrow/.test(event.key || "") ? event.key : ({ 19: "ArrowUp", 20: "ArrowDown", 21: "ArrowLeft", 22: "ArrowRight" }[event.keyCode] || event.key);
         if (!entry) {
             if (key === "ArrowDown" && event.target.closest(".firetv-live-head, .firetv-live-controls") && event.target.tagName !== "SELECT" && shown.length) {
                 event.preventDefault(); event.stopImmediatePropagation(); focusIndex(Math.max(0, shown.findIndex(function (item) { return item.Id === saved.focusId; })), false);
@@ -719,13 +723,13 @@
             return;
         }
         var index = Number(entry.getAttribute("data-index"));
-        var favorite = event.target.classList.contains("firetv-live-favorite");
+        var column = event.target.classList.contains("firetv-live-info") ? 2 : event.target.classList.contains("firetv-live-favorite") ? 1 : 0;
         if (key === "ArrowDown" || key === "ArrowUp") {
             event.preventDefault(); event.stopImmediatePropagation();
             if (key === "ArrowUp" && index === 0) { document.querySelector("#firetv-live .firetv-live-search").focus(); }
-            else { focusIndex(index + (key === "ArrowDown" ? 1 : -1), favorite); }
+            else { focusIndex(index + (key === "ArrowDown" ? 1 : -1), column); }
         } else if (key === "ArrowRight" || key === "ArrowLeft") {
-            event.preventDefault(); event.stopImmediatePropagation(); focusIndex(index, key === "ArrowRight");
+            event.preventDefault(); event.stopImmediatePropagation(); focusIndex(index, column + (key === "ArrowRight" ? 1 : -1));
         }
     }
 

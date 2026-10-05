@@ -56,6 +56,26 @@ for (const [client, script] of Object.entries(scripts)) {
         return { w, clock, calls, overlay, navigate, assertReleased, resolveChannels: () => resolveChannels({ Items: channels }), resolveParent: () => resolveParent() };
     }
 
+    if (client === 'firetv') {
+        test('firetv: D-pad reaches programme info and returns to its channel without playback', async t => {
+            const e = setup(t);
+            await e.clock.tickAsync(800);
+            const document = e.w.document;
+            const key = (name, code) => document.activeElement.dispatchEvent(new e.w.KeyboardEvent('keydown', { key: name, keyCode: code, bubbles: true, cancelable: true }));
+            document.querySelector('.firetv-live-row').focus();
+            key('ArrowRight');
+            assert.ok(document.activeElement.matches('.firetv-live-favorite'));
+            key('Unidentified', 22);
+            assert.ok(document.activeElement.matches('.firetv-live-info'));
+            document.activeElement.click();
+            assert.ok(document.querySelector('#firetv-guide'));
+            e.w.FireTvLive.closeGuide();
+            assert.ok(document.activeElement.matches('.firetv-live-info'));
+            key('ArrowLeft'); key('ArrowLeft');
+            assert.ok(document.activeElement.matches('.firetv-live-row'));
+        });
+    }
+
     for (const method of ['pushState', 'replaceState']) {
         test(client + ': ' + method + ' removes Live TV before rendering movies or series', async t => {
             const e = setup(t);
