@@ -1,3 +1,4 @@
+using Jellyfin.Data;
 using Jellyfin.Plugin.TreasureMaps.Channels;
 using Jellyfin.Plugin.TreasureMaps.Listing;
 using MediaBrowser.Controller;
@@ -31,6 +32,21 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<Subtitles.OpenSubtitlesClient>();
         serviceCollection.AddSingleton<Subtitles.OpenSubtitlesProvider>();
         serviceCollection.AddSingleton<Subtitles.AiSubtitleService>();
+        serviceCollection.AddSingleton(sp => new Subtitles.SubtitleJobQueue(
+            System.IO.Path.Combine(sp.GetRequiredService<MediaBrowser.Common.Configuration.IApplicationPaths>().DataPath, "evolution", "subtitle-jobs.json"),
+            async (job, progress, ct) =>
+            {
+                var item = sp.GetRequiredService<MediaBrowser.Controller.Library.ILibraryManager>().GetItemById(job.ItemId);
+                var user = sp.GetRequiredService<MediaBrowser.Controller.Library.IUserManager>().GetUserById(job.Owner);
+                if (item is null || user is null || !item.IsVisible(user)
+                    || (!user.HasPermission(Jellyfin.Database.Implementations.Enums.PermissionKind.IsAdministrator)
+                        && !user.HasPermission(Jellyfin.Database.Implementations.Enums.PermissionKind.EnableContentDownloading))
+                    || Subtitles.SubtitleFiles.ResolveMediaPath(item) != job.Quote.Path)
+                    throw new System.InvalidOperationException("Subtitle media access changed.");
+                await sp.GetRequiredService<Subtitles.AiSubtitleService>().GenerateAsync(job.Quote, ct, job.Force, progress).ConfigureAwait(false);
+                item.ChangedExternally();
+            }, sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Subtitles.SubtitleJobQueue>>()));
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<Subtitles.SubtitleJobQueue>());
         serviceCollection.AddSingleton<Subtitles.AiSubtitleProvider>();
         serviceCollection.AddSingleton<IChannel, TreasureMapsChannel>();
         serviceCollection.AddSingleton<MediaBrowser.Controller.Subtitles.ISubtitleProvider>(sp => sp.GetRequiredService<Subtitles.OpenSubtitlesProvider>());

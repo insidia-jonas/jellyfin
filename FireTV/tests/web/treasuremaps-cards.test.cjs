@@ -156,3 +156,20 @@ test('a missing subtitle quote cannot advertise zero cost or start generation', 
     const button = panel.querySelector('.tmSubGen'); assert.equal(button.disabled, true);
     assert.doesNotMatch(panel.textContent, /0.00 USD/); button.click(); assert.equal(generated, 0);
 });
+
+test('confirmed generation hands an accepted job to the persistent observer instead of waiting for the film', async t => {
+    const e=setup(t), calls=[];let accepted=null,subscription;
+    e.w.document.querySelector('.page').insertAdjacentHTML('afterbegin','<div class="detailSection"></div>');
+    e.api.getItem=()=>Promise.resolve({Id:id,Name:'Movie',Type:'Movie'});
+    e.api.getCurrentUser=()=>Promise.resolve({});
+    e.api.getUrl=(p,q)=>p+'?'+new URLSearchParams(q);
+    const job={id:'job',itemId:id,language:'de',state:'queued',active:true,percent:0,message:'Du kannst die Filmseite verlassen.'};
+    e.api.ajax=o=>{calls.push(o);return Promise.resolve(o.type==='POST'?{ok:true,job}:{ok:true,quote:{ok:true,enabled:true,summary:'ca. 0.16 USD',totalUsd:.16}});};
+    e.w.EvolutionSubtitleJobs={subscribe:(_,fn)=>{subscription=fn;fn([]);},accept:j=>{accepted=j;subscription([j]);}};
+    e.w.confirm=()=>true;e.w.ApiClient=e.api;e.load();await e.clock.tickAsync(1200);
+    const panel=e.w.document.querySelector('#tmSubtitles');panel.open=true;panel.dispatchEvent(new e.w.Event('toggle'));await e.clock.tickAsync(1);
+    panel.querySelector('.tmSubGen').click();await e.clock.tickAsync(1);
+    assert.equal(accepted,job);assert.match(calls.at(-1).url,/confirmed=true/);assert.match(calls.at(-1).url,/maxEstimatedUsd=0.16/);
+    assert.equal(panel.querySelector('.tmSubGen').disabled,true);assert.match(panel.querySelector('.tmSubHint').textContent,/Film verlassen/);
+    assert.doesNotMatch(panel.textContent,/Fenster offen lassen/);
+});

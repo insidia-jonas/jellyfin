@@ -175,6 +175,33 @@ html.cinema-ui { --cinema-bg:#0b1020; --cinema-panel:#151d31; --cinema-accent:#b
 .cinema-details .backdropContainer,.cinema-details .detailPageSecondaryContainer { background:#0b1020!important; }
 .cinema-details .mainDetailButtons .detailButton { background:linear-gradient(145deg,#ffffff15,#ffffff08)!important; border:1px solid #ffffff1c; border-radius:12px!important; }
 .cinema-details .mainDetailButtons .btnPlay { background:linear-gradient(135deg,#eef4ff,#accbff)!important; color:#101a30!important; }
+/* Pair foreground and background: Jellyfin's focus rule otherwise leaves dark text on glass. */
+.cinema-details .mainDetailButtons .detailButton:not(.btnPlay) { color:#eef4ff!important; }
+.cinema-details .mainDetailButtons .detailButton { transition:transform .12s ease-out,box-shadow .12s ease-out!important; }
+.cinema-details .detailPageWrapperContainer .mainDetailButtons .detailButton:focus,
+.cinema-details .evolution-detail-actions button:focus,
+.cinema-details #tmReleases button:focus,.cinema-details #tmReleases summary:focus,
+.cinema-details #tmSubtitles button:focus,.cinema-details #tmSubtitles summary:focus,
+.cinema-details #tmArrRequest button:focus {
+    background:#e6efff!important; color:#10213b!important; border-color:#fff!important;
+    outline:3px solid #8fbdff!important; outline-offset:4px; box-shadow:0 0 0 6px #80b4ff25!important;
+}
+.cinema-details .mainDetailButtons .detailButton:focus .material-icons { color:inherit!important; }
+.evolution-jobs-trigger { color:#ecf2ff; background:#ffffff12; border:1px solid #ffffff24; border-radius:20px; padding:8px 14px; font:inherit; font-size:.8em; cursor:pointer; }
+.evolution-jobs-dialog { box-sizing:border-box; position:fixed; z-index:100000; inset:5vh 8vw; padding:28px 32px; border:1px solid #718bb552; border-radius:20px; color:#eef4ff; background:linear-gradient(135deg,#17243a,#0c1423); box-shadow:0 24px 100px #000c; overflow:auto; }
+.evolution-jobs-dialog h2 { margin:0 140px 18px 0; }
+.evolution-jobs-close { position:absolute; top:24px; right:24px; }
+.evolution-jobs-dialog button,.tmSubJobStatus button { appearance:none; padding:12px 18px; margin:6px 10px 0 0; font:inherit; border-radius:12px; border:1px solid #ffffff32; background:#26364f; color:#eef4ff; cursor:pointer; }
+.evolution-jobs-dialog button:focus,.evolution-jobs-trigger:focus { background:#e6efff!important; color:#10213b!important; outline:3px solid #8fbdff; outline-offset:3px; }
+.evolution-jobs-dialog button[hidden] { display:none; }
+.evolution-job { padding:20px 0; border-top:1px solid #ffffff20; }
+.evolution-job-title { display:block; font-size:1.1em; margin-bottom:8px; }
+.evolution-job-state { color:#bed5fb; }
+.evolution-job-message,.evolution-jobs-note { color:#c0ccdf; line-height:1.5; }
+.evolution-job progress,.tmSubJobStatus progress { display:block; width:100%; max-width:700px; height:8px; margin-top:12px; accent-color:#8fbdff; }
+.tmSubJobStatus { margin-top:18px; padding:16px; border:1px solid #8fbdff42; border-radius:12px; }
+.tmSubJobStatus[hidden] { display:none; }
+@media(max-width:600px) { .evolution-jobs-dialog { inset:12px; padding:20px; } .evolution-jobs-dialog h2 { margin-right:105px; font-size:1.2em; } .evolution-jobs-close { top:12px; right:8px; } }
 .evolution-detail-actions { display:flex; flex-wrap:wrap; align-items:center; margin:0 0 22px; }
 .evolution-detail-actions button,.evolution-read-more { appearance:none; font:inherit; cursor:pointer; color:#eaf0ff; border:1px solid #ffffff28; background:linear-gradient(150deg,#ffffff17,#ffffff07); border-radius:12px; padding:13px 18px; margin:0 10px 10px 0; }
 .evolution-detail-actions button:first-child { color:#101a30; background:linear-gradient(135deg,#eaf2ff,#b3caff); border-color:transparent; font-weight:650; }

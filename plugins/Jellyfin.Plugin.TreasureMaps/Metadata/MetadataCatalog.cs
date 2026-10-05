@@ -157,7 +157,8 @@ public sealed class MetadataCatalog
                 if (hit is null)
                 {
                     _missing[key] = DateTimeOffset.UtcNow.AddMinutes(2);
-                    foreach (var old in _missing.OrderByDescending(x => x.Value).Skip(256)) _missing.TryRemove(old.Key, out var ignored);
+                    // Snapshot under ConcurrentDictionary's locks before LINQ reads Count/CopyTo.
+                    foreach (var old in _missing.ToArray().OrderByDescending(x => x.Value).Skip(256)) _missing.TryRemove(old.Key, out var ignored);
                     return ListingFetch<CatalogEntry>.DoNotStore(null);
                 }
                 WriteDisk(key, hit);

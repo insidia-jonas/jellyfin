@@ -476,3 +476,9 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
   description text remains noninteractive. Live TV keeps a virtualized compact list and
   an EPG detail pane; selecting/focusing a row never opens an IPTV connection. Static gradients
   and short transform transitions provide the shared finish without expensive TV backdrop blur.
+
+### Background subtitles and detail focus (2026-10-05)
+
+- Evolution 1.2.1 / ClientScript v20 queues `Subtitles/Generate` and returns HTTP 202. Require an explicit `confirmed` and accepted `maxEstimatedUsd`; check item visibility and download permission. Persist private jobs in `data/evolution/subtitle-jobs.json`, expose only the path-free view, and scope listings/cancellation to their owner. One worker, eight active jobs, 100 terminal entries. Request cancellation never cancels accepted work. Interrupted jobs require renewed confirmation after restart, never automatically bill.
+- Transcription/validated translations are checkpointed by media fingerprint, target language and model. Retry reuses completed steps; subtitles are atomically saved only when all cues are valid. Translation batches are smaller and have a three-minute timeout (the Pi's observed failure was the old 60-second chat timeout). Browsing/polling/quotes never call a billable endpoint. Ordinary tests use fake providers; the opt-in real Grok test requires a synthetic sample <=20s and estimate <=0.05 USD.
+- `subtitle-jobs.js` observes server jobs independently of detail pages, preserves focus while polling and clears account state. Fire TV 2.5.2/code32 dispatches detail D-pad through JS before WebView caret navigation, consumes both key edges and falls back to Android for editable controls/native selectors/other routes. Back closes the job overview first. Pair foreground/background colors on focused detail buttons.

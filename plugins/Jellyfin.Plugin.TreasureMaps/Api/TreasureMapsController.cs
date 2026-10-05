@@ -276,71 +276,6 @@ public class TreasureMapsController : ControllerBase
         }
     }
 
-    /// <summary>
-    /// Creates AI subtitles after the client has shown the cost quote. Writes a sidecar next to the video.
-    /// </summary>
-    /// <param name="itemId">The Jellyfin item id.</param>
-    /// <param name="language">The target language.</param>
-    /// <param name="force">When true, regenerates even if a sidecar already exists.</param>
-    /// <param name="ai">The AI subtitle service.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>The generation result.</returns>
-    [HttpPost("Subtitles/Generate")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<IActionResult> GenerateSubtitles(
-        [FromQuery] string itemId,
-        [FromQuery] string? language,
-        [FromQuery] bool force,
-        [FromServices] AiSubtitleService ai,
-        CancellationToken cancellationToken)
-    {
-        var (item, path, error) = ResolveVideo(itemId);
-        if (path is null)
-        {
-            return Ok(new { ok = false, message = error });
-        }
-
-        if (!AiSubtitleService.IsEnabled)
-        {
-            return Ok(new { ok = false, message = "Enable AI subtitles and set a Whisper or AI API key first." });
-        }
-
-        var lang = ResolveSubLanguage(language);
-        try
-        {
-            var quote = await ai.QuoteAsync(path, lang, item?.Name, item?.RunTimeTicks, cancellationToken).ConfigureAwait(false);
-            if (!force && quote.AlreadyExists)
-            {
-                return Ok(new
-                {
-                    ok = true,
-                    alreadyExists = true,
-                    summary = quote.Summary,
-                    totalUsd = 0m,
-                    sidecar = SubtitleFiles.SidecarPath(path, lang)
-                });
-            }
-
-            quote.AlreadyExists = false;
-            var srt = await ai.GenerateAsync(quote, cancellationToken, force).ConfigureAwait(false);
-            item?.ChangedExternally();
-            return Ok(new
-            {
-                ok = true,
-                alreadyExists = false,
-                summary = quote.Summary,
-                totalUsd = quote.TotalUsd,
-                sidecar = SubtitleFiles.SidecarPath(path, lang),
-                bytes = Encoding.UTF8.GetByteCount(srt)
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "AI subtitle generation failed for {Item}", itemId);
-            return Ok(new { ok = false, message = ex.Message });
-        }
-    }
-
     private (BaseItem? Item, string? Path, string Error) ResolveVideo(string? itemId)
     {
         if (!Guid.TryParse(itemId, out var id))
@@ -349,7 +284,8 @@ public class TreasureMapsController : ControllerBase
         }
 
         var item = _libraryManager.GetItemById(id);
-        if (item is null)
+        var user = Guid.TryParse(User.FindFirst("Jellyfin-UserId")?.Value, out var userId) ? _userManager.GetUserById(userId) : null;
+        if (item is null || user is null || !item.IsVisible(user))
         {
             return (null, null, "Item not found.");
         }
@@ -764,6 +700,7 @@ public class TreasureMapsController : ControllerBase
         using var stream = GetType().Assembly.GetManifestResourceStream("Jellyfin.Plugin.TreasureMaps.Web.treasuremaps.js");
         using var cinema = GetType().Assembly.GetManifestResourceStream("Jellyfin.Plugin.TreasureMaps.Web.cinema.js");
         using var discovery = GetType().Assembly.GetManifestResourceStream("Jellyfin.Plugin.TreasureMaps.Web.discovery.js");
+        using var jobs = GetType().Assembly.GetManifestResourceStream("Jellyfin.Plugin.TreasureMaps.Web.subtitle-jobs.js");
         using var styles = GetType().Assembly.GetManifestResourceStream("Jellyfin.Plugin.TreasureMaps.Web.cinema.css");
         if (stream is null || cinema is null || styles is null)
         {
@@ -777,7 +714,8 @@ public class TreasureMapsController : ControllerBase
         var css = System.Text.Json.JsonSerializer.Serialize(styleReader.ReadToEnd());
         var styleScript = "(function(){if(document.getElementById('jellyfin-cinema-style'))return;var s=document.createElement('style');s.id='jellyfin-cinema-style';s.textContent=" + css + ";document.head.appendChild(s);})();\n";
         using var discoveryReader = new StreamReader(discovery!);
-        return Content(scriptReader.ReadToEnd() + "\n" + styleScript + cinemaReader.ReadToEnd() + "\n" + discoveryReader.ReadToEnd(), "application/javascript");
+        using var jobsReader = new StreamReader(jobs!);
+        return Content(jobsReader.ReadToEnd() + "\n" + scriptReader.ReadToEnd() + "\n" + styleScript + cinemaReader.ReadToEnd() + "\n" + discoveryReader.ReadToEnd(), "application/javascript");
     }
 
     /// <summary>
