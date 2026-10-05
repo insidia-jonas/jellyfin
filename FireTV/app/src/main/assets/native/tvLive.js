@@ -481,7 +481,7 @@
         viewport.parentNode.style.top = Math.max(0, Math.min(bottom, window.innerHeight * 0.35)) + 12 + "px";
         var size = parseFloat(getComputedStyle(viewport).fontSize) || 24;
         // Reserve space for name, health, now/next and progress including padding.
-        rowHeight = Math.round(size * 5.45);
+        rowHeight = Math.round(size * 6.1);
         viewport.style.height = Math.max(180, window.innerHeight - viewport.getBoundingClientRect().top - 36) + "px";
     }
 

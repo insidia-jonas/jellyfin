@@ -8,6 +8,10 @@ Das ist bewusst **kein** API-only-Client wie [jellyfin-androidtv](https://github
 
 Fire TV client that hosts the full Jellyfin web UI (same architecture as the official iOS app: WebView + NativeShell). Video playback uses ExoPlayer so selecting a movie cannot freeze Amazon WebView. Downloads use Android DownloadManager. The 1920 CSS-pixel TV layout is scaled to the actual window, with automatic viewport height.
 
+## Änderungen in 2.5.1
+
+Die Live-TV-Senderliste verwendet etwas größere Sendernamen (24 statt 21 Pixel), Sendungstitel (19 statt 17 Pixel) und Logos (72 statt 64 Pixel). Die Zeilenhöhe wächst passend mit; das seitliche EPG bleibt unverändert.
+
 ## Änderungen in 2.5.0 und Evolution 1.2
 
 - Zurück schließt zuerst die Wiedergabesteuerung, danach die Wiedergabe. Gedrückthalten überspringt keine Ebene. Nach Puffern oder Fortsetzen blendet sich die Steuerung wieder automatisch aus.
