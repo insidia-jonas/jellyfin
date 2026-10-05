@@ -2,10 +2,11 @@ package org.jellyfin.firetv.core
 
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
+import java.util.concurrent.CompletableFuture
 
 /** Ordered, activity-independent delivery. A late progress call cannot revive a stopped session. */
 class PlaybackReportQueue(
-    private val deliver: (String, Long, Boolean, Boolean) -> Unit,
+    private val deliver: (String, Long, Boolean, Boolean) -> Boolean,
     private val executor: Executor = sharedExecutor,
 ) {
     private var started = false
@@ -13,6 +14,7 @@ class PlaybackReportQueue(
     private var progressPending = false
     private var latestPosition = 0L
     private var latestPaused = false
+    private val stoppedDelivery = CompletableFuture<Boolean>()
 
     @Synchronized
     fun playing(positionMs: Long) {
@@ -38,10 +40,19 @@ class PlaybackReportQueue(
     }
 
     @Synchronized
-    fun stopped(positionMs: Long, failed: Boolean) {
-        if (!started || closed) return
+    fun stopped(positionMs: Long, failed: Boolean): CompletableFuture<Boolean> {
+        if (closed) return stoppedDelivery
         closed = true
-        executor.execute { deliver("/Stopped", positionMs.coerceAtLeast(0), true, failed) }
+        if (!started) {
+            stoppedDelivery.complete(false)
+        } else {
+            executor.execute {
+                stoppedDelivery.complete(runCatching {
+                    deliver("/Stopped", positionMs.coerceAtLeast(0), true, failed)
+                }.getOrDefault(false))
+            }
+        }
+        return stoppedDelivery
     }
 
     companion object {

@@ -12,9 +12,8 @@ class PlaybackReporter(
     private val queue = PlaybackReportQueue(deliver = { suffix, position, paused, failed ->
         val body = snapshot(paused, position).put("Failed", failed)
         // One bounded retry for the final clock; all reports remain in session order.
-        if (!post("/Sessions/Playing$suffix", body) && suffix == "/Stopped") {
-            post("/Sessions/Playing$suffix", body)
-        }
+        post("/Sessions/Playing$suffix", body) ||
+            (suffix == "/Stopped" && post("/Sessions/Playing$suffix", body))
     })
 
     fun playing(positionMs: Long = playback.startPositionMs) = queue.playing(positionMs)
@@ -23,9 +22,7 @@ class PlaybackReporter(
         queue.progress(positionMs, isPaused)
     }
 
-    fun stopped(positionMs: Long, failed: Boolean = false) {
-        queue.stopped(positionMs, failed)
-    }
+    fun stopped(positionMs: Long, failed: Boolean = false) = queue.stopped(positionMs, failed)
 
     private fun snapshot(isPaused: Boolean, positionMs: Long = playback.startPositionMs): JSONObject {
         return JSONObject()

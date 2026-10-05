@@ -116,7 +116,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         val exo = player ?: return@Runnable
         if (exo.playbackState == Player.STATE_BUFFERING) {
             if (playback?.isLive == true) {
-                retryLive(getString(R.string.live_unavailable))
+                retryLive()
             } else {
                 Toast.makeText(this, R.string.playback_timeout, Toast.LENGTH_LONG).show()
                 stopAndClose()
@@ -216,7 +216,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         nextGuideAt = 0
         binding.loading.isVisible = true
         binding.loadingTitle.text = PlaybackPayload.itemName(payload)
-        binding.loadingHint.setText(if (liveHint) R.string.preparing_live else R.string.preparing_playback)
+        showLoadingHint(liveHint, buffering = false)
         Log.i("FireTvPlayback", "tune request=$generation live=$liveHint retry=${tune.retries}")
         val pending = Runnable {
             pendingTune = null
@@ -237,7 +237,17 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             resolverExecutor.execute {
                 val result = runCatching {
                     // Release the old tuner slot before opening another stream.
-                    cleanup?.get(7, TimeUnit.SECONDS)
+                    // The stop report closes the tuner too. Wait for that HTTP request,
+                    // not a second, racing LiveStreams/Close request. Keep tune cancellation responsive.
+                    while (cleanup != null) {
+                        cancellation.checkActive()
+                        try {
+                            cleanup.get(100, TimeUnit.MILLISECONDS)
+                            break
+                        } catch (_: java.util.concurrent.TimeoutException) {
+                            // The Activity's overall deadline cancels this tune.
+                        }
+                    }
                     cancellation.checkActive()
                     StreamResolver.resolve(payload, ssl, audioStreamIndex, subtitleStreamIndex, cancellation)
                 }
@@ -264,7 +274,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     }
 
     private fun handleResolveFailure(live: Boolean) {
-        if (live) retryLive(getString(R.string.live_unavailable))
+        if (live) retryLive()
         else {
             Toast.makeText(this, R.string.playback_timeout, Toast.LENGTH_LONG).show()
             stopAndClose()
@@ -301,7 +311,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         reporter = PlaybackReporter(resolved, ignoreSsl)
         binding.osdTitle.text = liveChannelTitle() ?: resolved.title
         binding.loadingTitle.text = resolved.title
-        binding.loadingHint.setText(if (resolved.isLive) R.string.preparing_live else R.string.preparing_playback)
+        showLoadingHint(resolved.isLive, buffering = false)
         val headers = linkedMapOf<String, String>()
         headers["Accept-Language"] = JellyfinHttp.acceptLanguage()
         if (resolved.accessToken.isNotBlank()) {
@@ -396,14 +406,14 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                     stableSince = 0
                     bufferingStartedAt = SystemClock.elapsedRealtime()
                     binding.loading.isVisible = true
-                    binding.loadingHint.setText(if (resolved.isLive) R.string.live_buffering else R.string.preparing_playback)
+                    showLoadingHint(resolved.isLive, buffering = true)
                     Log.i("FireTvPlayback", "buffer_start request=$requestGeneration")
                     mainHandler.postDelayed(stallWatchdog, if (resolved.isLive) tune.attemptTimeoutMs(30_000) else 45_000)
                 }
                 if (playbackState == Player.STATE_ENDED) {
                     emitSync("ended")
                     if (resolved.isLive) {
-                        retryLive(getString(R.string.playback_failed))
+                        retryLive()
                     } else if (!playAdjacentFromQueue(next = true)) {
                         stopAndClose()
                     }
@@ -422,7 +432,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                 Log.i("FireTvPlayback", "error request=$requestGeneration code=${error.errorCode}")
                 emitSync("error")
                 if (resolved.isLive) {
-                    retryLive(error.message?.takeIf { it.isNotBlank() } ?: getString(R.string.playback_failed))
+                    retryLive()
                     return
                 }
                 Toast.makeText(
@@ -496,7 +506,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         return builder.build()
     }
 
-    private fun retryLive(message: String) {
+    private fun retryLive() {
         val payload = originalPayload
         val delay = tune.retryDelayMs()
         retirePlayback(keepPlayer = delay != null, failed = true)
@@ -506,8 +516,17 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             binding.loadingHint.text = getString(R.string.live_retry_status, tune.retries, 3)
             return
         }
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        Toast.makeText(this, R.string.live_unavailable, Toast.LENGTH_LONG).show()
         stopAndClose()
+    }
+
+    private fun showLoadingHint(live: Boolean, buffering: Boolean) {
+        binding.loadingHint.text = when {
+            live && tune.retries > 0 -> getString(R.string.live_retry_status, tune.retries, 3)
+            live && buffering -> getString(R.string.live_buffering)
+            live -> getString(R.string.preparing_live)
+            else -> getString(R.string.preparing_playback)
+        }
     }
 
     private fun playAdjacentFromQueue(next: Boolean): Boolean {
@@ -1165,11 +1184,10 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             exo?.clearMediaItems()
         } else releasePlayer()
         if (closing != null) {
-            // Queue the final clock before cleanup or a new session can overtake it.
-            // The reporter owns its executor, so finishing the Activity cannot cancel it.
-            closingReporter?.stopped(position, failed)
-            // Outlives the Activity so Back cannot cancel tuner cleanup.
-            cleanupFuture = cleanupExecutor.submit {
+            // Playing/Stopped already releases this consumer on the server. Closing it
+            // twice can kill a new tune or another viewer sharing the same stream.
+            // Its completion outlives the Activity and gates the next resolve.
+            cleanupFuture = closingReporter?.stopped(position, failed) ?: cleanupExecutor.submit {
                 StreamResolver.closeLiveStream(closing, ssl)
             }
         }
