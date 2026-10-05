@@ -5,7 +5,8 @@
     var targets = 'button,a[href],input,select,textarea,summary,[role="button"],[data-action][tabindex],.card[tabindex],.listItem[tabindex]';
     var lastEnter = false;
     function visible(el) {
-        if (!el || el.disabled || el.getAttribute('aria-disabled') === 'true' || el.tabIndex < 0) { return false; }
+        // Jellyfin uses roving tabindex=-1 for real buttons. They remain D-pad targets.
+        if (!el || el.disabled || el.getAttribute('aria-disabled') === 'true') { return false; }
         if (el.closest('[hidden],[inert],[aria-hidden="true"],.hide')) { return false; }
         var parent = el.parentElement;
         while (parent) {
@@ -22,7 +23,7 @@
         var dialogs = Array.prototype.filter.call(document.querySelectorAll('[role="dialog"],dialog[open],.dialog'), function (d) {
             var box = d.getBoundingClientRect(); return box.width && box.height && !d.closest('[hidden],.hide');
         });
-        return dialogs.length ? dialogs[dialogs.length - 1] : document;
+        return dialogs.length ? dialogs[dialogs.length - 1] : document.querySelector('#itemDetailPage:not(.hide)') || document;
     }
     function choose(elements, current, key) {
         var origin = current && current.getBoundingClientRect();
@@ -44,7 +45,10 @@
     function stop(event) { event.preventDefault(); event.stopImmediatePropagation(); }
     window.addEventListener('keydown', function (event) {
         var root = scope(); if (!root || event.altKey || event.ctrlKey || event.metaKey) { return; }
-        var key = event.key || ({37:'ArrowLeft',38:'ArrowUp',39:'ArrowRight',40:'ArrowDown',13:'Enter'})[event.keyCode];
+        var key = event.key;
+        if (!/^(Arrow(Up|Down|Left|Right)|Enter)$/.test(key)) {
+            key = ({37:'ArrowLeft',38:'ArrowUp',39:'ArrowRight',40:'ArrowDown',13:'Enter',19:'ArrowUp',20:'ArrowDown',21:'ArrowLeft',22:'ArrowRight',23:'Enter',66:'Enter'})[event.keyCode];
+        }
         var current = document.activeElement;
         if (current && (current.matches('input,textarea') || current.isContentEditable)) { return; }
         // Enter opens the native select popup. While closed, D-pad can leave it for Search.
@@ -62,6 +66,7 @@
         var selection = window.getSelection(); if (selection && selection.rangeCount) { selection.removeAllRanges(); }
         if (!next) { return; }
         next.focus({preventScroll:true});
+        // Short transitions belong to focus paint; scrolling stays deterministic on held D-pad.
         next.scrollIntoView({block:'nearest',inline:'nearest',behavior:'auto'});
         if (selection && selection.rangeCount) { selection.removeAllRanges(); }
     }, true);

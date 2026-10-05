@@ -446,6 +446,9 @@
         }, { passive: true });
         box.addEventListener("keydown", navigate, true);
         box.appendChild(head); box.appendChild(controls); box.appendChild(status); box.appendChild(viewport);
+        var preview = document.createElement('aside'); preview.className = 'firetv-live-preview';
+        preview.setAttribute('aria-label', german() ? 'Ausgewählter Sender' : 'Selected channel');
+        box.appendChild(preview);
         // Hosted TV pages restore their own scroll positions and animate using
         // transforms. Keep the channel viewport outside those scrolling hosts.
         document.body.appendChild(box);
@@ -478,7 +481,7 @@
         viewport.parentNode.style.top = Math.max(0, Math.min(bottom, window.innerHeight * 0.35)) + 12 + "px";
         var size = parseFloat(getComputedStyle(viewport).fontSize) || 24;
         // Reserve space for name, health, now/next and progress including padding.
-        rowHeight = Math.round(size * 7.2);
+        rowHeight = Math.round(size * 5.45);
         viewport.style.height = Math.max(180, window.innerHeight - viewport.getBoundingClientRect().top - 36) + "px";
     }
 
@@ -497,6 +500,7 @@
         if (reset) { viewport.scrollTop = 0; }
         else if (!Object.keys(rows).length) { viewport.scrollTop = saved.scroll || 0; }
         paintWindow();
+        previewChannel(byId[saved.focusId] || shown[0]);
     }
 
     function paintWindow() {
@@ -549,7 +553,7 @@
             copy.appendChild(node);
         });
         row.appendChild(copy);
-        row.addEventListener("focus", function () { saved.focusId = item.Id; persist(); });
+        row.addEventListener("focus", function () { saved.focusId = item.Id; persist(); previewChannel(byId[item.Id]); });
         row.addEventListener("click", function (event) { event.preventDefault(); event.stopPropagation(); saved.lastId = item.Id; saved.scroll = viewport.scrollTop; persist(); play(byId[item.Id], shown); });
         var favorite = document.createElement("button"); favorite.type = "button"; favorite.className = "firetv-live-favorite";
         favorite.addEventListener("click", function () {
@@ -574,6 +578,25 @@
         info.addEventListener("click", function () { openGuide(item.Id, info); });
         entry.appendChild(info);
         return entry;
+    }
+
+    function previewChannel(item) {
+        var panel = document.querySelector('#firetv-live .firetv-live-preview');
+        if (!panel || !item) { return; }
+        var program = item.CurrentProgram || {}, upcoming = nextLine(item);
+        var signature = [item.Id, program.Name, program.Overview, program.StartDate, upcoming].join('|');
+        if (panel.dataset.signature === signature) { return; }
+        panel.dataset.signature = signature; panel.textContent = '';
+        function line(tag, cls, text) { var n = document.createElement(tag); n.className = cls; n.textContent = text; panel.appendChild(n); return n; }
+        line('div', 'firetv-preview-eyebrow', isGroup(item) ? 'SENDERGRUPPE' : 'JETZT IM PROGRAMM');
+        line('div', 'firetv-preview-channel', item.Name || 'Live TV');
+        line('h2', 'firetv-preview-title', program.Name || (isGroup(item) ? 'Dein Programm. Deine Auswahl.' : nowLine(item).replace(/^(Jetzt|Now):\s*/, '') || 'Noch keine Programminformation'));
+        if (program.StartDate) { line('p', 'firetv-preview-time', clock(program.StartDate) + ' – ' + clock(program.EndDate)); }
+        var description = String(program.Overview || '').replace(/<[^>]*>/g, '').trim();
+        line('p', 'firetv-preview-plot', description || (isGroup(item) ? 'Öffne die Gruppe, um Sender und Sendungen zu entdecken.' : 'Die EPG-Beschreibung erscheint hier, sobald der Anbieter sie liefert.'));
+        if (upcoming) { line('p', 'firetv-preview-next', upcoming); }
+        var hint = line('div', 'firetv-preview-hint', isGroup(item) ? 'OK  Gruppe öffnen' : 'OK  Ansehen     ·     Menü  Programminfo');
+        hint.setAttribute('aria-hidden', 'true');
     }
 
     function guideChannelId(item) {
@@ -649,6 +672,7 @@
     }
 
     function updateRow(entry, item) {
+        if (saved.focusId === item.Id) { previewChannel(item); }
         var number = item.Number || item.ChannelNumber;
         setText(entry.querySelector(".firetv-live-channel-title"), (number ? number + "  " : "") + String(item.Name || "").split(/ {2}· {2}/)[0]);
         setText(entry.querySelector(".firetv-live-now"), isGroup(item) ? (item.Overview || "Gruppe öffnen") : nowLine(item) || (german() ? "Keine EPG-Daten" : "No guide data"));

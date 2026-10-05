@@ -155,6 +155,16 @@ Lokale Debug-Builds verwenden den lokalen Android-Debug-Schlüssel. Ein Update d
 
 ## Installation auf dem Fire TV Stick
 
+Version 2.5.0 schließt mit Zurück zuerst die Bedienleiste und erst beim nächsten Druck
+die Wiedergabe. Start/Fortschritt/Stop werden geordnet gespeichert; die Zeitleiste blendet
+sich nach dem Puffern zuverlässig aus. Untertitel haben 5,5 % unteren Sicherheitsabstand.
+Live TV bietet eine kompakte Senderliste mit separater Sendungsinfo. Echte Menüknöpfe
+bleiben auch mit Jellyfins `tabindex=-1` per Fernbedienung erreichbar.
+
+Die neue Startseite und Indexer-Metadaten benötigen Evolution 1.2.0 auf dem Server.
+Für Fortsetzen auch innerhalb der ersten Minuten sollte der Server `MinResumePct=0`
+verwenden; bestehende explizite Einstellungen werden durch das Update nicht überschrieben.
+
 ```bash
 adb connect <FIRE-TV-IP>
 adb install -r app/build/outputs/apk/debug/app-debug.apk

@@ -2,20 +2,29 @@ package org.jellyfin.firetv.player
 
 import org.jellyfin.firetv.core.JellyfinHttp
 import org.jellyfin.firetv.core.ResolvedPlayback
+import org.jellyfin.firetv.core.PlaybackReportQueue
 import org.json.JSONObject
 
 class PlaybackReporter(
     private val playback: ResolvedPlayback,
     private val ignoreSslErrors: Boolean,
 ) {
-    fun playing() = post("/Sessions/Playing", snapshot(isPaused = false))
+    private val queue = PlaybackReportQueue(deliver = { suffix, position, paused, failed ->
+        val body = snapshot(paused, position).put("Failed", failed)
+        // One bounded retry for the final clock; all reports remain in session order.
+        if (!post("/Sessions/Playing$suffix", body) && suffix == "/Stopped") {
+            post("/Sessions/Playing$suffix", body)
+        }
+    })
+
+    fun playing(positionMs: Long = playback.startPositionMs) = queue.playing(positionMs)
 
     fun progress(positionMs: Long, isPaused: Boolean) {
-        post("/Sessions/Playing/Progress", snapshot(isPaused = isPaused, positionMs = positionMs))
+        queue.progress(positionMs, isPaused)
     }
 
     fun stopped(positionMs: Long, failed: Boolean = false) {
-        post("/Sessions/Playing/Stopped", snapshot(isPaused = true, positionMs = positionMs).put("Failed", failed))
+        queue.stopped(positionMs, failed)
     }
 
     private fun snapshot(isPaused: Boolean, positionMs: Long = playback.startPositionMs): JSONObject {
@@ -34,7 +43,7 @@ class PlaybackReporter(
             }
     }
 
-    private fun post(path: String, body: JSONObject) {
+    private fun post(path: String, body: JSONObject): Boolean =
         runCatching {
             JellyfinHttp.post(
                 url = playback.serverAddress + path,
@@ -47,7 +56,6 @@ class PlaybackReporter(
                 appVersion = playback.appVersion,
                 connectTimeoutMs = 8_000,
                 readTimeoutMs = 8_000,
-            )
-        }
-    }
+            ).code in 200..299
+        }.getOrDefault(false)
 }

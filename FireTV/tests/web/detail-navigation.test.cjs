@@ -32,6 +32,12 @@ test('Enter activates download once and never bills/generates while merely navig
     el('download').focus(); key('Enter'); key('Enter',{repeat:true});
     assert.equal(downloads,1); assert.equal(generates,0);
 });
+
+test('native roving tabindex and Android unidentified D-pad still reach real actions', t => {
+    const {w,el,key}=setup(t); el('download').tabIndex=-1; el('language').focus();
+    key('Unidentified',{keyCode:20}); assert.equal(w.document.activeElement,el('download'));
+    assert.equal(String(w.getSelection()),'');
+});
 test('closed subtitle language selector can be left with D-pad while Enter retains its native picker', t => {
     const {w,el,key}=setup(t);const select=w.document.createElement('select');select.innerHTML='<option>Deutsch</option><option>English</option>';
     w.document.body.appendChild(select);select.getBoundingClientRect=()=>({left:0,right:80,top:400,bottom:450,width:80,height:50});select.scrollIntoView=()=>{};

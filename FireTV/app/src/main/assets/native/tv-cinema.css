@@ -1,4 +1,4 @@
-/* Plex-grade TV skin for hosted jellyfin-web.
+/* TV skin for hosted jellyfin-web.
    Do not add extra card outline rings — jellyfin-web already draws TV focus.
    Do not rewrite image URLs. */
 html.layout-tv,
@@ -630,3 +630,42 @@ html.jf-livetv-list-on .busy {
 #firetv-guide button { background: #225583; color: white; border: 0; border-radius: 8px; padding: 12px 22px; font: inherit; align-self: flex-start; }
 #firetv-guide .firetv-guide-close { align-self: flex-end; }
 #firetv-guide :focus { outline: 3px solid #56b6ff; outline-offset: -3px; }
+
+/* Compact two-pane guide. Only visible rows are mounted by tvLive.js. */
+#firetv-live { font-size:22px; background:#0b1020; left:3vw; right:3vw; bottom:24px; padding:12px 6px; }
+#firetv-live .firetv-live-head { margin-bottom:8px; }
+#firetv-live .firetv-live-head>* { margin-bottom:10px; }
+#firetv-live .firetv-live-title { font-size:32px; letter-spacing:-.04em; }
+#firetv-live .firetv-live-count { font-size:17px; color:#98aaca; }
+#firetv-live .firetv-live-search { font-size:19px; background:#19253a; border:1px solid #ffffff25; border-radius:12px; padding:12px 18px; }
+#firetv-live .firetv-live-controls { margin:0 0 20px; }
+#firetv-live .firetv-live-controls button,#firetv-live .firetv-live-controls select { font-size:17px; padding:11px 16px; border-radius:11px; background:linear-gradient(145deg,#1c2a42,#141e30); border-color:#ffffff1d; }
+#firetv-live .firetv-live-controls [aria-pressed="true"] { background:#b8d0fc; color:#122039; border-color:#b8d0fc; }
+#firetv-live .firetv-live-viewport { width:59%; scrollbar-width:none; }
+#firetv-live .firetv-live-entry { padding-bottom:10px; }
+#firetv-live .firetv-live-entry .firetv-live-row { padding:12px 14px; border-radius:12px; background:linear-gradient(140deg,#1b273c,#121d2e); border:1px solid #ffffff0d; transition:background-color 130ms ease-out; }
+#firetv-live .firetv-live-entry:focus-within .firetv-live-row { background:linear-gradient(120deg,#304566,#20334f); border-color:#b6ccff6a; }
+#firetv-live .firetv-live-row:focus { outline:2px solid #cbdeff; outline-offset:-2px; }
+#firetv-live .firetv-live-logo { width:64px; height:64px; flex-basis:64px; margin-right:16px; background:#fff; border-radius:10px; overflow:hidden; color:#1c2940; font-size:22px; }
+#firetv-live .firetv-live-logo img { padding:5px; box-sizing:border-box; background:#f5f7fc; }
+#firetv-live .firetv-live-name { font-size:21px; line-height:1.25; font-weight:650; }
+#firetv-live .firetv-live-now { margin-top:5px; font-size:17px; font-weight:400; color:#a9bcd9; }
+#firetv-live .firetv-live-next { display:none; }
+#firetv-live .firetv-live-bar { margin-top:6px; height:3px; max-width:none; background:#ffffff12; }
+#firetv-live .firetv-live-bar>span { background:#a2c7ff; }
+#firetv-live .jf-channel-health { font-size:13px; line-height:1.2; }
+#firetv-live .firetv-live-favorite,#firetv-live .firetv-live-info { flex-basis:36px; width:36px; font-size:21px; border-radius:10px; background:#162238; color:#bfcee7; margin-left:5px; }
+#firetv-live .firetv-live-preview { position:absolute; top:144px; bottom:20px; right:6px; width:37%; box-sizing:border-box; padding:32px; border:1px solid #ffffff1d; border-radius:22px; background:linear-gradient(150deg,#233651,#152139 50%,#0f1a2c); overflow:hidden; }
+.firetv-preview-eyebrow { font-size:13px; letter-spacing:.18em; color:#97bbf0; font-weight:650; margin-bottom:22px; }
+.firetv-preview-channel { color:#d2dded; font-size:21px; margin-bottom:16px; }
+.firetv-preview-title { font-size:35px; line-height:1.18; letter-spacing:-.035em; margin:0 0 18px; color:#f0f5ff; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.firetv-preview-time { color:#acd0ff; font-size:17px; margin:0 0 20px; }
+.firetv-preview-plot { font-size:20px; line-height:1.55; color:#b9cae2; display:-webkit-box; -webkit-line-clamp:6; -webkit-box-orient:vertical; overflow:hidden; }
+.firetv-preview-next { color:#98afd0; font-size:17px; line-height:1.5; border-top:1px solid #ffffff18; padding-top:18px; }
+.firetv-preview-hint { font-size:14px; color:#8da5c9; margin-top:24px; }
+#firetv-guide { background:#060b16ce; padding:40px 9vw; font-size:23px; }
+#firetv-guide .firetv-guide-card { background:linear-gradient(145deg,#22324b,#111c30); border:1px solid #ffffff28; border-radius:22px; }
+#firetv-guide h3 { font-size:25px; color:#bfd7ff; }
+.layout-tv.cinema-ui .card .cardBox { transition:transform 130ms ease-out!important; }
+@media(max-height:800px) { #firetv-live { font-size:19px; } #firetv-live .firetv-live-name { font-size:19px; } #firetv-live .firetv-live-logo { width:50px; height:50px; flex-basis:50px; } #firetv-live .firetv-live-preview { top:132px; padding:24px; } .firetv-preview-title { font-size:28px; } .firetv-preview-plot { font-size:18px; -webkit-line-clamp:4; } }
+@media(prefers-reduced-motion:reduce) { .layout-tv.cinema-ui .card .cardBox { transition:none!important; } }

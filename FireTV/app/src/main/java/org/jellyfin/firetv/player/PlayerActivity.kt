@@ -16,6 +16,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -95,7 +96,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private val hideOsd = Runnable {
         val keepAudio = playback?.isAudio == true
         if (!keepAudio && !binding.trackPanel.isVisible && !binding.searchPanel.isVisible && player?.isPlaying == true) {
-            binding.osd.isVisible = false
+            dismissOsd()
         }
     }
     private val osdTick = object : Runnable {
@@ -131,7 +132,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                     val position = exo.currentPosition
                     val paused = !exo.isPlaying
                     val currentReporter = reporter
-                    lifecycleScope.launch(Dispatchers.IO) { currentReporter?.progress(position, paused) }
+                    currentReporter?.progress(position, paused)
                 }
             }
             if (current?.isLive == true) {
@@ -157,6 +158,9 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         binding.osdSeek.isFocusable = false
         binding.osdSeek.isFocusableInTouchMode = false
         styleSubtitles()
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() = handlePlayerBack()
+        })
         PlayerCommands.listener = this
         ignoreSsl = intent.getBooleanExtra(EXTRA_IGNORE_SSL, false)
         beginResolve(payloadFrom(intent))
@@ -280,7 +284,8 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                 ),
             )
             setFractionalTextSize(0.046f)
-            setBottomPaddingFraction(0.16f)
+            // Leave a safe TV overscan margin without lifting dialogue into the picture.
+            setBottomPaddingFraction(0.055f)
             setApplyEmbeddedFontSizes(false)
         }
     }
@@ -385,6 +390,8 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (!tune.accepts(requestGeneration) || playback !== resolved) return
                 emitSync(if (isPlaying) "playing" else "pause")
+                scheduleOsdHide()
+                reporter?.progress(exo.currentPosition, !isPlaying)
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -419,7 +426,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         }
         exo.playWhenReady = true
         val currentReporter = reporter
-        lifecycleScope.launch(Dispatchers.IO) { currentReporter?.playing() }
+        currentReporter?.playing(keepPosition)
         mainHandler.removeCallbacks(progressTick)
         mainHandler.post(progressTick)
         renderTrackPanel()
@@ -509,6 +516,11 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // Consume the whole Back gesture. A held key must never close two layers.
+        if (event.keyCode == KeyEvent.KEYCODE_BACK || event.keyCode == KeyEvent.KEYCODE_ESCAPE) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) handlePlayerBack()
+            return true
+        }
         if (event.action != KeyEvent.ACTION_DOWN) {
             return super.dispatchKeyEvent(event)
         }
@@ -639,14 +651,33 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private fun showOsd() {
         binding.osd.isVisible = true
         updateOsd()
-        mainHandler.removeCallbacks(hideOsd)
         mainHandler.removeCallbacks(osdTick)
         mainHandler.post(osdTick)
+        scheduleOsdHide()
+    }
+
+    private fun dismissOsd() {
+        mainHandler.removeCallbacks(hideOsd)
+        mainHandler.removeCallbacks(osdTick)
+        binding.osd.isVisible = false
+    }
+
+    private fun handlePlayerBack() {
+        when {
+            binding.searchPanel.isVisible -> hideSearchPanel()
+            binding.trackPanel.isVisible -> hideTrackPanel()
+            binding.osd.isVisible -> dismissOsd()
+            else -> stopAndClose()
+        }
+    }
+
+    private fun scheduleOsdHide() {
+        mainHandler.removeCallbacks(hideOsd)
         val keepOpen = binding.trackPanel.isVisible ||
             binding.searchPanel.isVisible ||
             player?.isPlaying == false ||
             playback?.isAudio == true
-        if (!keepOpen) {
+        if (binding.osd.isVisible && !keepOpen) {
             mainHandler.postDelayed(hideOsd, 4_500)
         }
     }
@@ -1096,10 +1127,12 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             exo?.clearMediaItems()
         } else releasePlayer()
         if (closing != null) {
+            // Queue the final clock before cleanup or a new session can overtake it.
+            // The reporter owns its executor, so finishing the Activity cannot cancel it.
+            closingReporter?.stopped(position, failed)
             // Outlives the Activity so Back cannot cancel tuner cleanup.
             cleanupFuture = cleanupExecutor.submit {
                 StreamResolver.closeLiveStream(closing, ssl)
-                cleanupExecutor.execute { closingReporter?.stopped(position, failed) }
             }
         }
     }
@@ -1131,6 +1164,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             retirePlayback(keepPlayer = false)
         } else if (player?.isPlaying == true) {
             player?.pause()
+            reporter?.progress(player?.currentPosition ?: 0L, true)
             pausedBySystem = true
         }
     }
