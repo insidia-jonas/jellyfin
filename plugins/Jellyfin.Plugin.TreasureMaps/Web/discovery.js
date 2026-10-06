@@ -4,7 +4,7 @@
     if (window.EvolutionDiscovery) { return; }
     window.EvolutionDiscovery = { version: 1 };
     var route = '', owner = '', generation = 0, controller, item = null, loading = false, mounted = null;
-    var warmed = new Set(), results = new Map(), nextRetry = 0, attempts = 0;
+    var warmed = new Set(), results = new Map(), nextRetry = 0, attempts = 0, hubs = [];
     var icons = {
         movies: '<rect x="12" y="18" width="40" height="32" rx="6"/><path d="M12 28h40M22 18l-4 10m17-10-4 10m17-10-4 10"/><path d="m28 34 10 6-10 6z"/>',
         tv: '<rect x="10" y="17" width="44" height="30" rx="7"/><path d="M24 54h16M32 47v7M20 10h24"/><path d="m28 26 11 6-11 6z"/>',
@@ -18,9 +18,19 @@
         } catch (_) { return null; }
     }
     function active(stamp, key) { var a = auth(); return generation === stamp && route === location.hash && a && a.key === key; }
+    function restoreLabel(element, value) {
+        if (!element) { return; }
+        if (value === null) { element.removeAttribute('aria-label'); } else { element.setAttribute('aria-label', value); }
+    }
     function clear() {
         generation++; if (controller) { controller.abort(); controller = null; }
         document.querySelectorAll('[data-discovery-owned]').forEach(function (n) { n.remove(); });
+        hubs.forEach(function (hub) {
+            hub.card.classList.remove('evolution-hub'); delete hub.card.dataset.hub;
+            restoreLabel(hub.card, hub.label); restoreLabel(hub.link, hub.linkLabel);
+            if (hub.text) { hub.text.textContent = hub.caption; }
+        });
+        hubs = [];
         document.querySelectorAll('.evolution-enriched').forEach(function (n) { n.classList.remove('evolution-enriched'); });
         item = null; loading = false; mounted = null; attempts = 0; nextRetry = 0; warmed.clear();
     }
@@ -33,13 +43,18 @@
                 : /^(Indexer|Treasure.?Maps)$/i.test(name) ? 'indexer' : /^Live\s*TV$/i.test(name) ? 'live' : '';
             var host = card.querySelector('.cardScalable');
             if (!kind || !host || host.querySelector('.evolution-hub-art')) { return; }
+            var link = host.querySelector('a.cardImageContainer[data-action="link"]');
+            var text = card.querySelector('.cardText-first bdi');
+            hubs.push({ card: card, link: link, text: text, label: card.getAttribute('aria-label'), linkLabel: link && link.getAttribute('aria-label'), caption: text && text.textContent });
             card.classList.add('evolution-hub'); card.dataset.hub = kind;
             var art = node('div', 'evolution-hub-art'); art.dataset.discoveryOwned = 'art'; art.setAttribute('aria-hidden', 'true');
             // All SVG markup is a fixed first-party asset; metadata is never interpreted as markup.
             art.innerHTML = '<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">' + icons[kind] + '</svg>';
             var label = { movies: 'Filme', tv: 'Serien', indexer: 'Indexer', live: 'Live TV' }[kind];
-            art.appendChild(node('span', 'evolution-hub-label', label)); host.appendChild(art);
-            var text = card.querySelector('.cardText-first bdi'); if (text) { text.textContent = label; }
+            // Keep artwork inside the native link so delegated actions and keyboard navigation survive page reuse.
+            art.appendChild(node('span', 'evolution-hub-label', label)); (link || host).appendChild(art);
+            if (text) { text.textContent = label; }
+            if (link) { link.setAttribute('aria-label', label); }
             card.setAttribute('aria-label', label);
         });
     }

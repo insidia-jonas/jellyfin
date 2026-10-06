@@ -161,7 +161,9 @@ html.cinema-ui { --cinema-bg:#0b1020; --cinema-panel:#151d31; --cinema-accent:#b
 .cinema-ui .cinema-hero-navigation { bottom:28px; }
 .cinema-home #homeTab .section0 .cardPadder { padding-bottom:52%!important; }
 .cinema-home #homeTab .section0 .evolution-hub .cardScalable { position:relative; }
-.evolution-hub .cardImageContainer,.evolution-hub .cardPadder>* { visibility:hidden!important; }
+.evolution-hub .cardImageContainer { background:transparent!important; }
+.evolution-hub .cardPadder>* { visibility:hidden!important; }
+.evolution-hub-art,.evolution-hub-art *,.evolution-hub-art:before { pointer-events:none; }
 .evolution-hub-art { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; color:#d3e4ff; background:linear-gradient(130deg,#273d66,#101a30 80%); border:1px solid #ffffff24; border-radius:16px; overflow:hidden; }
 .evolution-hub-art:before { content:""; position:absolute; width:80%; height:180%; top:-120%; left:-10%; border-radius:50%; background:#ffffff0a; transform:rotate(-20deg); }
 .evolution-hub-art svg { width:27%; max-width:85px; height:auto; filter:none; }
