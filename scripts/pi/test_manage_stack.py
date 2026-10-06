@@ -13,6 +13,21 @@ spec.loader.exec_module(stack)
 
 
 class BundleTests(unittest.TestCase):
+    def test_playing_and_paused_sessions_defer_installation_by_default(self):
+        for paused in (False, True):
+            with self.subTest(paused=paused), patch.object(stack, 'request', return_value=[{'NowPlayingItem': {'Id': 'episode'}, 'PlayState': {'IsPaused': paused}}]):
+                with self.assertRaisesRegex(RuntimeError, 'Playback is active'):
+                    stack.check_playback_before_deploy('http://localhost', 'private')
+
+    def test_explicit_restart_can_interrupt_playback_without_sending_player_commands(self):
+        with patch.object(stack, 'request', return_value=[{'NowPlayingItem': {'Id': 'episode'}}]) as api:
+            stack.check_playback_before_deploy('http://localhost', 'private', interrupt_playback=True)
+            api.assert_called_once_with('http://localhost', 'Sessions', 'private')
+
+    def test_idle_sessions_do_not_need_an_interruption_override(self):
+        with patch.object(stack, 'request', return_value=[{'NowPlayingItem': None}]):
+            stack.check_playback_before_deploy('http://localhost', 'private')
+
     def test_multiple_indexers_preserve_existing_sources_and_do_not_duplicate_on_rerun(self):
         from types import SimpleNamespace
         existing = [{'id': 'legacy', 'url': 'https://one.test', 'apiKey': 'kept'}]

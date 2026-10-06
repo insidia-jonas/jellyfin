@@ -19,6 +19,8 @@ definitions, FFmpeg paths and web builds are reused. For a new installation, pro
 
 The server is built into staging while the old server remains available. The bundle
 contains SHA-256 hashes and the source commit. Active playback defers deployment.
+If the owner explicitly requests a restart now, add `--interrupt-playback` to allow
+interruption of active or paused playback. The default still defers the update.
 The installer stops Jellyfin, backs up its database including WAL, configuration and
 plugin, switches binaries, then verifies `/health` and the management capability.
 Failure restores the previous binaries, database and configuration. Backups remain
