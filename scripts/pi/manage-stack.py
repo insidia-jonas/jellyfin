@@ -177,6 +177,14 @@ def wait_management(base, token, version):
     raise RuntimeError('Management API did not become ready; rolling back')
 
 
+def check_playback_before_deploy(url, token, interrupt_playback=False):
+    if not token or not any(s.get('NowPlayingItem') for s in request(url, 'Sessions', token)):
+        return
+    if not interrupt_playback:
+        raise RuntimeError('Playback is active; installation deferred')
+    print('Proceeding with the explicitly requested restart; existing playback will be interrupted.')
+
+
 def deploy(args, account, bundle):
     root = args.out
     root.mkdir(parents=True, exist_ok=True)
@@ -190,8 +198,7 @@ def deploy(args, account, bundle):
             print('Server and plugin checksums already match; no restart.')
             return manifest
         token = admin_token(args.url, root / 'data')
-        if token and any(s.get('NowPlayingItem') for s in request(args.url, 'Sessions', token)):
-            raise RuntimeError('Playback is active; installation deferred')
+        check_playback_before_deploy(args.url, token, args.interrupt_playback)
         backup = root / 'backups' / ('stack-' + time.strftime('%Y%m%d-%H%M%S'))
         backup.mkdir(parents=True, mode=0o700)
         plugin = root / 'data/plugins/Treasure-Maps'
@@ -420,6 +427,7 @@ def main(argv=None):
     parser.add_argument('--bundle', type=Path)
     parser.add_argument('--plan', action='store_true')
     parser.add_argument('--apply', action='store_true')
+    parser.add_argument('--interrupt-playback', action='store_true', help='Explicitly allow the server restart to interrupt active or paused playback')
     parser.add_argument('--configure-only', action='store_true')
     parser.add_argument('--install-missing', action='store_true')
     parser.add_argument('--setup-config', type=Path, help='Private JSON with mediaRoot, indexer and Usenet credentials for new systems')
