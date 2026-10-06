@@ -487,3 +487,7 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
 
 - A live close handle identifies `ILiveStream.UniqueId`, not the channel's stable media source id. Reopened streams get a new handle; shared viewers keep the same one. Delayed cleanup must never target a replacement stream.
 - Fire TV 2.5.3/code33 waits for ordered `Sessions/Playing/Stopped` delivery before resolving a replacement. That endpoint already releases the tuner consumer: never additionally call `LiveStreams/Close` for a reported playback. Explicit close is only for resolved streams that never acquired a reporter. Waits remain cancellation-aware within the existing 45-second recovery budget. Keep the retry counter visible during both resolve and buffering.
+
+### Home library links (2026-10-06)
+
+- Evolution 1.2.2 / ClientScript v21 keeps home artwork inside the existing `a.cardImageContainer.itemAction` link. Never hide that anchor with `visibility:hidden`: it removes native pointer and keyboard interaction. Decorative artwork ignores pointer events; the original link and menu retain Jellyfin's delegated handlers. Release hub classes, labels and artwork on route/account changes because the home cards are cached and reused. Verify actual mouse and keyboard navigation after returning from a series, not only synthetic DOM clicks.

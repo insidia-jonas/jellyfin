@@ -31,3 +31,30 @@ test('all four home identities replace imagery including a text-only Live TV car
  const e=setup(t,'#/home');e.w.document.body.innerHTML='<div id="homeTab"><div class="section0">'+['Filme','Serien','Indexer','Live TV'].map((name,i)=>'<button class="card" '+(i<2?'data-collectiontype="'+['movies','tvshows'][i]+'"':'')+'><div class="cardScalable"><span>'+name+'</span></div><div class="cardText-first"><bdi>'+name+'</bdi></div></button>').join('')+'</div></div>';
  e.load();await e.clock.tickAsync(10);assert.equal(e.w.document.querySelectorAll('.evolution-hub-art').length,4);assert.equal(e.calls.length,0);
 });
+
+test('library artwork retains native link delegation and restores cached cards across navigation',async t=>{
+ const e=setup(t,'#/home'),d=e.w.document;
+ const style=d.createElement('style');style.textContent=fs.readFileSync(path.resolve(__dirname,'../../../plugins/Jellyfin.Plugin.TreasureMaps/Web/cinema.css'),'utf8');d.head.appendChild(style);
+ d.documentElement.className='cinema-ui cinema-home';
+ d.body.innerHTML='<div id="homeTab"><div class="section0"><div class="card" data-collectiontype="tvshows"><div class="cardScalable"><div class="cardPadder"><span>Original icon</span></div><a class="cardImageContainer itemAction" data-action="link" href="#/tv?topParentId=series" aria-label="TV Shows"></a></div><div class="cardText-first"><bdi>TV Shows</bdi></div></div></div></div>';
+ const card=d.querySelector('.card'),link=card.querySelector('a');let clicks=0;
+ d.getElementById('homeTab').addEventListener('click',event=>{if(event.target.closest('.itemAction')===link){clicks++;}event.preventDefault();});
+ e.load();await e.clock.tickAsync(10);
+ for(let cycle=0;cycle<3;cycle++){
+  const art=card.querySelector('.evolution-hub-art');assert.ok(art);
+  assert.equal(e.w.getComputedStyle(link).visibility,'visible','native anchor must remain keyboard- and pointer-accessible');
+  assert.equal(link.getAttribute('aria-label'),'Serien');
+  art.querySelector('svg').dispatchEvent(new e.w.MouseEvent('click',{bubbles:true,cancelable:true}));
+  assert.equal(clicks,cycle+1,'decoration must participate in the original delegated link action');
+  e.w.history.pushState({},'','#/details?id=series');
+  assert.equal(card.querySelector('.evolution-hub-art'),null);
+  assert.equal(card.classList.contains('evolution-hub'),false);
+  assert.equal(card.hasAttribute('data-hub'),false);
+  assert.equal(card.hasAttribute('aria-label'),false);
+  assert.equal(link.getAttribute('aria-label'),'TV Shows');
+  assert.equal(card.querySelector('bdi').textContent,'TV Shows');
+  e.w.history.pushState({},'','#/home');await e.clock.tickAsync(10);
+  assert.equal(card.querySelectorAll('.evolution-hub-art').length,1);
+  assert.equal(card.querySelector('a'),link,'cached native link and handlers are retained');
+ }
+});
