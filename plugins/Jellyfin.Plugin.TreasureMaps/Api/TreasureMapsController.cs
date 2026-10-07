@@ -1040,7 +1040,7 @@ public class TreasureMapsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Treasure-Maps card search failed for '{Term}'", term);
-            return Ok(new { ok = false, message = ex.Message, items = Array.Empty<object>() });
+            return Ok(new { ok = false, message = "Die Indexer-Suche ist momentan nicht erreichbar. Bitte erneut versuchen.", items = Array.Empty<object>() });
         }
     }
 

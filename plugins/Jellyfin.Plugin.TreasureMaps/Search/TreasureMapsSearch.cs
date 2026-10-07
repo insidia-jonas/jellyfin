@@ -8,6 +8,7 @@ using Jellyfin.Plugin.TreasureMaps.Channels;
 using System.Text;
 using Jellyfin.Data.Enums;
 using MediaBrowser.Controller.Library;
+using Jellyfin.Extensions;
 
 namespace Jellyfin.Plugin.TreasureMaps.Search;
 
@@ -28,6 +29,8 @@ public readonly record struct ParsedSearchQuery(string Text, int? Year)
     public string? ImdbId { get; init; }
     /// <summary>Gets whether quotation marks require an exact title.</summary>
     public bool Exact { get; init; }
+    /// <summary>Gets a canonical title without an informal part number before its subtitle.</summary>
+    public string? AlternateText { get; init; }
 }
 
 /// <summary>
@@ -94,45 +97,11 @@ public static class TreasureMapsSearch
     /// <returns>The parsed query.</returns>
     public static ParsedSearchQuery ParseQuery(string? searchTerm)
     {
-        var term = (searchTerm ?? string.Empty).Trim();
-        if (term.Length > 256) { term = term[..256]; }
-        string? kind = null;
-        var scope = Match(term, @"^(film|movie|serie|series|tv):\s*");
-        if (scope.Success)
+        var parsed = MediaSearch.Parse(searchTerm);
+        return new ParsedSearchQuery(parsed.Text, parsed.Year)
         {
-            kind = scope.Groups[1].Value.ToLowerInvariant() is "film" or "movie" ? "movie" : "tv";
-            term = term[scope.Length..];
-        }
-
-        int? season = null, episode = null, year = null;
-        var se = Match(term, @"(?:^|[\s.])S(\d{1,2})(?:E(\d{1,3}))?\s*$");
-        if (se.Success)
-        {
-            season = int.Parse(se.Groups[1].Value, CultureInfo.InvariantCulture);
-            episode = se.Groups[2].Success ? int.Parse(se.Groups[2].Value, CultureInfo.InvariantCulture) : null;
-            kind = "tv";
-            term = term[..se.Index].Trim();
-        }
-
-        var date = Match(term, @"\s+(?:\((19\d{2}|20\d{2})\)|(19\d{2}|20\d{2}))$");
-        if (date.Success)
-        {
-            var value = int.Parse(date.Groups[1].Success ? date.Groups[1].Value : date.Groups[2].Value, CultureInfo.InvariantCulture);
-            // A number in a title (Blade Runner 2049) is not automatically a production year.
-            if (value <= DateTime.UtcNow.Year + 2)
-            {
-                year = value;
-                term = term[..date.Index].Trim();
-            }
-        }
-
-        var exact = term.Length > 1 && term[0] == '"' && term[^1] == '"';
-        if (exact) { term = term[1..^1].Trim(); }
-        var imdb = Match(term, @"^(?:imdb:)?(tt\d{7,10})$");
-        return new ParsedSearchQuery(imdb.Success ? string.Empty : term, year)
-        {
-            Kind = kind, Season = season, Episode = episode, Exact = exact,
-            ImdbId = imdb.Success ? imdb.Groups[1].Value.ToLowerInvariant() : null
+            Kind = parsed.Kind, Season = parsed.Season, Episode = parsed.Episode,
+            ImdbId = parsed.ImdbId, Exact = parsed.Exact, AlternateText = parsed.AlternateText
         };
     }
 
@@ -140,7 +109,7 @@ public static class TreasureMapsSearch
     public static void ApplyParameters(Dictionary<string, string?> parameters, string? query, string kind)
     {
         var parsed = ParseQuery(query);
-        parameters["q"] = string.IsNullOrWhiteSpace(parsed.Text) ? "*" : parsed.Text;
+        parameters["q"] = string.IsNullOrWhiteSpace(parsed.Text) ? "*" : parsed.AlternateText ?? parsed.Text;
         parameters["year"] = parsed.Year?.ToString(CultureInfo.InvariantCulture);
         parameters["imdbid"] = parsed.ImdbId?[2..];
         if (kind == "tv")
@@ -189,14 +158,32 @@ public static class TreasureMapsSearch
             }
         }
 
-        return ScoreIdentity(DisplayTitle(group, query), query, group.Year, group.Kind, group.Imdb);
+        return ScoreGroup(group, query);
+    }
+
+    /// <summary>Scores title aliases and the actual metadata without losing full-text matches during grouping.</summary>
+    public static float ScoreGroup(ReleaseGroup group, string query)
+        => ScoreDocument(DisplayTitle(group, query), query, group.Year, group.Kind, group.Imdb,
+            string.Join("\n", group.Releases.SelectMany(r => new[] { ReleaseGrouper.TitleOf(r, group.Kind),
+                group.Kind == "tv" ? ReleaseGrouper.ShowNameFromScene(r.Title) : ReleaseGrouper.CleanSceneTitle(r.Title) }).Distinct().Take(12)),
+            group.Plot, string.Join(' ', group.Genres.Concat(group.Actors).Append(group.Director ?? string.Empty)));
+
+    /// <summary>Scores an identity and its searchable document consistently after materialization.</summary>
+    public static float ScoreDocument(string? title, string query, int? year, string? kind, string? imdb, string? aliases, string? overview, string? credits)
+    {
+        var parsed = MediaSearch.Parse(query);
+        if ((parsed.Kind is not null && kind != parsed.Kind) || (parsed.Year.HasValue && year != parsed.Year)) { return 0; }
+        if (parsed.ImdbId is not null) { return ReleaseMapper.NormalizeImdbId(imdb ?? string.Empty) == parsed.ImdbId ? ExactMatchScore : 0; }
+        return MediaSearch.ScoreDocument(parsed, (aliases ?? string.Empty).Split('\n').Prepend(title), overview, credits);
     }
 
     /// <summary>When the requested title exists, omit loose word matches to other titles.</summary>
     public static List<Release> RelevantReleases(IEnumerable<Release> releases, string query)
     {
         var scored = releases.Select(r => (Release: r, Score: ScoreRelease(r, query))).Where(r => r.Score > 0).ToList();
-        var threshold = scored.Any(r => r.Score >= ExactMatchScore - 2) ? ExactMatchScore - 2 : 1;
+        // Retain franchise subtitles (Insidious: Out of the Further) even when the original
+        // film is an exact match. Suppress unrelated middle-word matches such as Masha and the Bear.
+        var threshold = scored.Any(r => r.Score >= ExactMatchScore - 2) ? PrefixMatchScore : 1;
         return scored.Where(r => r.Score >= threshold).OrderByDescending(r => r.Score).Select(r => r.Release).ToList();
     }
 
@@ -223,7 +210,7 @@ public static class TreasureMapsSearch
     {
         var parsed = ParseQuery(searchTerm);
         if (parsed.Year.HasValue && titleYear != parsed.Year) { return 0; }
-        var score = ScoreCore(title, parsed.Text);
+        var score = MediaSearch.ScoreTitle(title, MediaSearch.Parse(searchTerm));
         if (parsed.Exact && score < ExactMatchScore - 2f) { return 0; }
         return parsed.Year.HasValue && score > 0 ? Math.Min(99f, score + 4f) : score;
     }
@@ -250,59 +237,4 @@ public static class TreasureMapsSearch
         return meta.Length > 0 ? meta : scene;
     }
 
-    private static float ScoreCore(string? title, string term)
-    {
-        var name = Key(title ?? string.Empty);
-        term = Key(term);
-        if (name.Length == 0 || term.Length == 0) { return 0; }
-        if (name == term) { return ExactMatchScore; }
-        var strippedName = StripLeadingArticle(name);
-        var strippedTerm = StripLeadingArticle(term);
-        if (strippedName.Length == 0 || strippedTerm.Length == 0) { return 0; }
-        if (strippedName == term || strippedName == strippedTerm) { return ExactMatchScore - 2f; }
-        if (name.StartsWith(term, StringComparison.Ordinal) || strippedName.StartsWith(strippedTerm, StringComparison.Ordinal))
-        {
-            return PrefixMatchScore;
-        }
-
-        if ((" " + name).Contains(" " + term, StringComparison.Ordinal)) { return WordPrefixMatchScore; }
-        var words = strippedName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        var tokens = strippedTerm.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        // Whole tokens, except the final token while typing. Never match 'it' inside 'little'.
-        var remaining = words.ToList();
-        for (var i = 0; i < tokens.Length; i++)
-        {
-            var position = remaining.FindIndex(w => w == tokens[i] || (i == tokens.Length - 1 && tokens[i].Length >= 2 && w.StartsWith(tokens[i], StringComparison.Ordinal)));
-            if (position < 0) { return 0; }
-            remaining.RemoveAt(position);
-        }
-
-        return TokenMatchScore;
-    }
-
-    private static string Key(string value)
-    {
-        var sb = new StringBuilder(value.Length);
-        foreach (var c in value.Replace("ß", "ss", StringComparison.Ordinal).Normalize(NormalizationForm.FormD).ToLowerInvariant())
-        {
-            if (CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.NonSpacingMark) { continue; }
-            if (char.IsLetterOrDigit(c)) { sb.Append(c); }
-            else if (sb.Length > 0 && sb[^1] != ' ') { sb.Append(' '); }
-        }
-
-        return sb.ToString().Trim();
-    }
-
-    private static string StripLeadingArticle(string value)
-    {
-        foreach (var article in new[] { "The ", "A ", "An ", "Der ", "Die ", "Das ", "Le ", "La ", "El ", "Los ", "Las " })
-        {
-            if (value.StartsWith(article, StringComparison.OrdinalIgnoreCase))
-            {
-                return value[article.Length..].TrimStart();
-            }
-        }
-
-        return value;
-    }
 }

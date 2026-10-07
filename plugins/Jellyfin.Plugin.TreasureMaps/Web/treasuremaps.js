@@ -260,8 +260,17 @@
         whenReady('.searchResults,.padded-right,.verticalSection', 16, function (page) {
             if (route !== location.hash || user !== api().getCurrentUserId() || !page || page.getAttribute('data-tm-search') === query) { return; }
             page.setAttribute('data-tm-search', query);
+            var old = page.querySelector('#tmSearchHits'); if (old) { old.remove(); }
+            var box = document.createElement('section'); box.id = 'tmSearchHits'; box.setAttribute('aria-busy', 'true');
+            var h = document.createElement('h2'); h.textContent = 'Indexer'; box.appendChild(h);
+            var status = document.createElement('p'); status.className = 'tmSearchStatus'; status.setAttribute('role', 'status');
+            status.textContent = 'Indexer werden durchsucht …'; box.appendChild(status);
+            var anchor = page.querySelector('.searchResults, .verticalSection, .padded-right') || page;
+            anchor.insertBefore(box, anchor.firstChild);
             var url = api().getUrl('TreasureMaps/Search/Cards', { q: query });
             searchRequest = window.AbortController ? new AbortController() : null;
+            var currentRequest = searchRequest;
+            var deadline = window.setTimeout(function () { if (currentRequest) { currentRequest.abort(); } }, 12000);
             var request = window.fetch && api().accessToken
                 ? window.fetch(url, { signal: searchRequest && searchRequest.signal, headers: { Authorization: 'MediaBrowser Token="' + api().accessToken() + '"'  } }).then(function (response) {
                     if (!response.ok) { throw new Error('Search failed'); }
@@ -272,16 +281,10 @@
                 .then(function (res) {
                     if (route !== location.hash || user !== api().getCurrentUserId()) { return; }
                     searchRequest = null;
-                    if (!res || !res.ok) { page.removeAttribute('data-tm-search'); return; }
+                    if (!res || !res.ok) { throw new Error('Indexer unavailable'); }
                     var items = res.items || [];
-                    var old = page.querySelector('#tmSearchHits');
-                    if (old) { old.remove(); }
-                    if (!items.length) { return; }
-                    var box = document.createElement('div');
-                    box.id = 'tmSearchHits';
-                    var h = document.createElement('h2');
-                    h.textContent = 'Indexer';
-                    box.appendChild(h);
+                    box.setAttribute('aria-busy', 'false');
+                    status.textContent = items.length ? items.length + ' passende Titel' : 'Keine passenden Titel in den erreichbaren Indexern gefunden.';
                     var row = document.createElement('div');
                     row.className = 'tmSearchRow';
                     items.forEach(function (it) {
@@ -299,14 +302,15 @@
                         row.appendChild(a);
                     });
                     box.appendChild(row);
-                    var anchor = page.querySelector('.searchResults, .verticalSection, .padded-right') || page;
-                    anchor.insertBefore(box, anchor.firstChild);
                 })
                 .catch(function () {
                     if (route === location.hash && user === api().getCurrentUserId()) {
-                        searchRequest = null; page.removeAttribute('data-tm-search');
+                        searchRequest = null; box.setAttribute('aria-busy', 'false');
+                        status.textContent = 'Indexer-Suche gerade nicht erreichbar. Bibliothekstreffer bleiben verfügbar.';
+                        var retry = document.createElement('button'); retry.type = 'button'; retry.className = 'raised emby-button'; retry.textContent = 'Erneut suchen';
+                        retry.addEventListener('click', function () { page.removeAttribute('data-tm-search'); enhanceSearchPage(query); }); box.appendChild(retry);
                     }
-                });
+                }).then(function () { window.clearTimeout(deadline); });
         });
     }
 

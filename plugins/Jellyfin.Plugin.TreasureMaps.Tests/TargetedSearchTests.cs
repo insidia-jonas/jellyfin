@@ -91,4 +91,47 @@ public class TargetedSearchTests
         }, TestContext.Current.CancellationToken);
         Assert.Equal(new[] { "tv" }, kinds);
     }
+
+    [Fact]
+    public void SpecificSubtitleSurvivesInformalInstallmentNumber()
+    {
+        var release = new Release { Guid = "six", Title = "Insidious.Out.of.the.Further.2026.German.1080p", Movie = new ReleaseMovie { Title = "Insidious: Out of the Further", Year = "2026" } };
+        Assert.True(TreasureMapsSearch.ScoreRelease(release, "Insidious 6 - Out of the Further") > 90);
+        var parameters = new Dictionary<string, string?>();
+        TreasureMapsSearch.ApplyParameters(parameters, "Insidious 6 - Out of the Further", "movie");
+        Assert.Equal("Insidious Out of the Further", parameters["q"]);
+        Assert.Equal(0, TreasureMapsSearch.ScoreRelease(release, "Insidious 2 - The Red Door"));
+    }
+
+    [Fact]
+    public void FranchiseSearchRetainsSubtitlesAfterAnExactOriginalFilm()
+    {
+        var releases = new[] { "Insidious", "Insidious: Out of the Further", "Insidious: The Red Door", "Something Insidious" }
+            .Select((title, i) => new Release { Guid = i.ToString(System.Globalization.CultureInfo.InvariantCulture), Title = title, Movie = new ReleaseMovie { Title = title } });
+        Assert.Equal(3, TreasureMapsSearch.RelevantReleases(releases, "Insidious").Count);
+    }
+
+    [Fact]
+    public void FullTextMetadataSurvivesEveryRankingStage()
+    {
+        var release = new Release { Guid = "a", Title = "Unknown.Title.2025", Movie = new ReleaseMovie { Title = "Another Day", Year = "2025", Plot = "A mysterious submarine crosses the ocean.", Actors = ["Jane Doe"] } };
+        Assert.True(TreasureMapsSearch.ScoreRelease(release, "mysterious submarine") > 0);
+        Assert.True(TreasureMapsSearch.ScoreGroup(ReleaseGrouper.Group([release]).Single(), "Jane Doe") > 0);
+        Assert.True(TreasureMapsSearch.ScoreDocument("Another Day", "mysterious submarine", 2025, "movie", null, "Unknown Title", release.Movie.Plot, "Jane Doe") > 0);
+    }
+
+    [Fact]
+    public async Task EmptyExactProviderSearchRecoversTypoWithoutAcceptingUnrelatedTitles()
+    {
+        var queries = new List<string>();
+        var release = new Release { Guid = "a", Title = "All.Her.Fault.S01E08", Tv = new ReleaseTv { Title = "All Her Fault", FirstAired = "2025" } };
+        var found = await LiveSearchPages.FetchAsync("serie: All Her Fualt", 24, (_, _, _) => throw new InvalidOperationException(), TestContext.Current.CancellationToken,
+            search: (_, query, _, _) =>
+            {
+                queries.Add(query);
+                return Task.FromResult<(IReadOnlyList<Release>, bool)>((query.Contains("fualt", StringComparison.OrdinalIgnoreCase) ? [] : [release], true));
+            });
+        Assert.Single(TreasureMapsSearch.RelevantReleases(found, "serie: All Her Fualt"));
+        Assert.InRange(queries.Count, 2, 3);
+    }
 }

@@ -89,6 +89,19 @@ test('Treasure Maps rejects responses from a previous search route', async t => 
     assert.equal(e.w.document.querySelector('.tmSearchName').textContent, 'Alien');
 });
 
+test('Indexer search distinguishes loading, no matches and an unavailable provider with retry', async t => {
+    const e = setup(t); e.load('plugins/Jellyfin.Plugin.TreasureMaps/Web/treasuremaps.js'); await e.clock.tickAsync(1000);
+    assert.match(e.w.document.querySelector('.tmSearchStatus').textContent, /durchsucht/);
+    e.calls[0].resolve({ ok: false, items: [] }); await e.clock.tickAsync(1);
+    assert.match(e.w.document.querySelector('.tmSearchStatus').textContent, /nicht erreichbar/);
+    e.w.document.querySelector('#tmSearchHits button').click(); await e.clock.tickAsync(1000);
+    assert.equal(e.calls.length, 2); e.calls[1].resolve({ ok: true, items: [] }); await e.clock.tickAsync(1);
+    assert.match(e.w.document.querySelector('.tmSearchStatus').textContent, /Keine passenden Titel/);
+    assert.equal(e.w.document.querySelector('#tmSearchHits').getAttribute('aria-busy'), 'false');
+});
+
+
+
 
 test('dashboard ignores superseded searches and appends deduplicated pages', async t => {
     const html = fs.readFileSync(path.join(root, 'plugins/Jellyfin.Plugin.TreasureMaps/Configuration/browse.html'), 'utf8');
