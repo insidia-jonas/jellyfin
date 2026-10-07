@@ -24,10 +24,6 @@ namespace Emby.Server.Implementations.Library.Search;
 public class SqlSearchProvider : IInternalSearchProvider
 {
     private const int DefaultSearchLimit = 100;
-    private const float ExactMatchScore = 100f;
-    private const float PrefixMatchScore = 80f;
-    private const float WordPrefixMatchScore = 75f;
-    private const float ContainsMatchScore = 50f;
 
     private static readonly Guid _placeholderId = Guid.Parse("00000000-0000-0000-0000-000000000001");
 
@@ -81,64 +77,104 @@ public class SqlSearchProvider : IInternalSearchProvider
         ArgumentNullException.ThrowIfNull(query);
         ArgumentException.ThrowIfNullOrWhiteSpace(query.SearchTerm);
 
-        var rawSearchTerm = query.SearchTerm.Trim().RemoveDiacritics();
-        if (string.IsNullOrEmpty(rawSearchTerm))
+        var parsed = MediaSearch.Parse(query.SearchTerm);
+        var words = MediaSearch.Keywords(parsed.AlternateText ?? parsed.Text);
+        if (words.Length == 0 && parsed.ImdbId is null)
         {
             return [];
         }
 
-        var cleanSearchTerm = rawSearchTerm.GetCleanValue();
-        if (string.IsNullOrEmpty(cleanSearchTerm))
+        var limit = Math.Clamp(query.Limit ?? DefaultSearchLimit, 1, 200);
+        await using var dbContext = await _dbProvider.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var eligible = dbContext.BaseItems.AsNoTracking().Where(e => e.Id != _placeholderId && !e.IsVirtualItem);
+        eligible = ApplyTypeFilter(eligible, query.IncludeItemTypes, query.ExcludeItemTypes);
+        eligible = ApplyMediaTypeFilter(eligible, query.MediaTypes);
+        eligible = ApplyParentFilter(eligible, query.ParentId);
+        eligible = ApplyUserAccessFilter(dbContext, eligible, query);
+        if (!query.ParentId.HasValue || query.ParentId.Value.IsEmpty())
         {
-            return [];
+            // Cached indexer title cards are query-specific snapshots. Fresh external search owns
+            // them; otherwise every previous spelling contributes a duplicate or a stale result.
+            var boxSets = MapKindsToTypeNames([BaseItemKind.BoxSet]);
+            eligible = eligible.Where(e => e.ChannelId == null || e.ChannelId == Guid.Empty || !boxSets.Contains(e.Type));
         }
 
-        var cleanPrefix = cleanSearchTerm + " ";
-        // OriginalTitle is stored mixed-case and isn't pre-normalized like CleanName,
-        // so match it via a case-insensitive LIKE rather than a per-row case conversion
-        // that may not translate to SQL on every provider.
-        var likeOriginal = $"%{rawSearchTerm}%";
-        var limit = query.Limit ?? DefaultSearchLimit;
-
-        var dbContext = await _dbProvider.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        await using (dbContext.ConfigureAwait(false))
+        if (parsed.Kind == "movie")
         {
-            // Lightweight projection: select only what's needed to score and identify items.
-            var dbQuery = dbContext.BaseItems
-                .AsNoTracking()
-                .Where(e => e.Id != _placeholderId)
-                .Where(e => !e.IsVirtualItem)
-                .Where(e => e.CleanName!.Contains(cleanSearchTerm)
-                    || (e.OriginalTitle != null && EF.Functions.Like(e.OriginalTitle, likeOriginal)));
+            eligible = eligible.Where(e => e.IsMovie);
+        }
+        else if (parsed.Kind == "tv")
+        {
+            eligible = eligible.Where(e => e.IsSeries || e.SeriesId != null);
+        }
 
-            dbQuery = ApplyTypeFilter(dbQuery, query.IncludeItemTypes, query.ExcludeItemTypes);
-            dbQuery = ApplyMediaTypeFilter(dbQuery, query.MediaTypes);
-            dbQuery = ApplyParentFilter(dbQuery, query.ParentId);
-            dbQuery = ApplyUserAccessFilter(dbContext, dbQuery, query);
+        if (parsed.Year.HasValue)
+        {
+            eligible = eligible.Where(e => e.ProductionYear == parsed.Year);
+        }
 
-            // Compute the score in SQL: the ternary translates to a CASE WHEN. CleanName is
-            // the pre-normalized (lowercase, diacritic-stripped) form, so we score against it
-            // directly without any per-row case conversion. Items that match only via
-            // OriginalTitle fall through to the Contains tier.
-            // Tie-break by Id for deterministic ordering so the explicit OrderBy + Take
-            // satisfies EF Core's row-limiting-with-OrderBy requirement.
-            var scored = dbQuery.Select(e => new
+        if (parsed.ImdbId is not null)
+        {
+            eligible = eligible.Where(e => e.Provider!.Any(p => p.ProviderId == "Imdb" && p.ProviderValue == parsed.ImdbId));
+        }
+
+        if (parsed.Season.HasValue)
+        {
+            eligible = eligible.Where(e => (e.ParentIndexNumber == parsed.Season && (!parsed.Episode.HasValue || e.IndexNumber == parsed.Episode))
+                || (e.IsSeries && dbContext.BaseItems.Any(child => child.SeriesId == e.Id && child.ParentIndexNumber == parsed.Season
+                    && (!parsed.Episode.HasValue || child.IndexNumber == parsed.Episode))));
+        }
+
+        var strict = eligible;
+        foreach (var word in words)
+        {
+            var like = "%" + word + "%";
+            strict = strict.Where(e => e.CleanName!.Contains(word)
+                || EF.Functions.Like(e.OriginalTitle!, like) || EF.Functions.Like(e.SeriesName!, like)
+                || EF.Functions.Like(e.Overview!, like) || EF.Functions.Like(e.Genres!, like)
+                || e.Peoples!.Any(p => EF.Functions.Like(p.People.Name!, like)));
+        }
+
+        var ranked = await RankAsync(strict).ConfigureAwait(false);
+        if (ranked.Count == 0 && !parsed.Exact && parsed.ImdbId is null && words.Any(w => w.Length >= 4))
+        {
+            // Retrieve a bounded set of title candidates, then verify every word with the shared
+            // typo matcher. Descriptive text is never fuzzily expanded into unrelated results.
+            var fuzzy = eligible;
+            foreach (var word in words)
             {
-                e.Id,
-                Score =
-                    (e.CleanName == cleanSearchTerm) ? ExactMatchScore
-                    : e.CleanName!.StartsWith(cleanSearchTerm) ? PrefixMatchScore
-                    : e.CleanName!.Contains(cleanPrefix) ? WordPrefixMatchScore
-                    : ContainsMatchScore
-            });
+                var prefix = "%" + (word.Length >= 4 ? word[..2] : word) + "%";
+                var suffix = "%" + (word.Length >= 4 ? word[^2..] : word) + "%";
+                var edges = word.Length >= 4 ? "%" + word[0] + "%" + word[^1] + "%" : prefix;
+                fuzzy = fuzzy.Where(e => EF.Functions.Like(e.CleanName!, prefix) || EF.Functions.Like(e.CleanName!, suffix) || EF.Functions.Like(e.CleanName!, edges)
+                    || EF.Functions.Like(e.OriginalTitle!, prefix) || EF.Functions.Like(e.OriginalTitle!, suffix) || EF.Functions.Like(e.OriginalTitle!, edges)
+                    || EF.Functions.Like(e.SeriesName!, prefix) || EF.Functions.Like(e.SeriesName!, suffix) || EF.Functions.Like(e.SeriesName!, edges));
+            }
 
-            return await scored
-                .OrderByDescending(x => x.Score)
-                .ThenBy(x => x.Id)
-                .Take(limit)
-                .Select(x => new SearchResult(x.Id, x.Score))
-                .ToArrayAsync(cancellationToken)
-                .ConfigureAwait(false);
+            ranked = await RankAsync(fuzzy).ConfigureAwait(false);
+        }
+
+        return ranked.OrderByDescending(r => r.Score).ThenBy(r => r.ItemId).Take(limit).ToArray();
+
+        async Task<List<SearchResult>> RankAsync(IQueryable<BaseItemEntity> candidates)
+        {
+            var name = MediaSearch.Normalize(parsed.AlternateText ?? parsed.Text);
+            var rows = await candidates.OrderByDescending(e => e.CleanName == name)
+                .ThenByDescending(e => e.CleanName!.StartsWith(name)).ThenBy(e => e.Id).Take(512)
+                .Select(e => new
+                {
+                    e.Id,
+                    e.Name,
+                    e.OriginalTitle,
+                    e.SeriesName,
+                    e.Overview,
+                    e.Genres,
+                    People = e.Peoples!.Select(p => p.People.Name).ToArray()
+                })
+                .ToListAsync(cancellationToken).ConfigureAwait(false);
+            return rows.Select(e => new SearchResult(e.Id, parsed.ImdbId is not null ? 100
+                    : MediaSearch.ScoreDocument(parsed, [e.Name, e.OriginalTitle, e.SeriesName], e.Overview, e.Genres, string.Join(' ', e.People)) + 5))
+                .Where(r => r.Score > 5).ToList();
         }
     }
 

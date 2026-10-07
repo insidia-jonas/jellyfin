@@ -71,7 +71,7 @@ public class TreasureMapsSearchProvider : IExternalSearchProvider
                 continue;
             }
 
-            var score = TreasureMapsSearch.ScoreIdentity(item.Name, term, item.ProductionYear, item.ProviderIds.GetValueOrDefault("TreasureMapsKind"), item.ProviderIds.GetValueOrDefault("Imdb"));
+            var score = TreasureMapsSearch.ScoreDocument(item.Name, term, item.ProductionYear, item.ProviderIds.GetValueOrDefault("TreasureMapsKind"), item.ProviderIds.GetValueOrDefault("Imdb"), item.ProviderIds.GetValueOrDefault("EvolutionSearchAliases"), item.Overview, string.Join(' ', item.Genres) + " " + item.ProviderIds.GetValueOrDefault("EvolutionSearchCredits"));
             if (score <= 0f)
             {
                 continue;

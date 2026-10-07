@@ -758,6 +758,8 @@ namespace Jellyfin.LiveTv.Channels
 
             var results = new List<BaseItem>();
             var take = Math.Clamp(limit ?? 100, 1, 100);
+            var attempted = 0;
+            var succeeded = 0;
             searchTerm = searchTerm.Trim();
             foreach (var channel in channels)
             {
@@ -777,6 +779,7 @@ namespace Jellyfin.LiveTv.Channels
                     // Native Items, Search/Hints and plugin cards often ask for the same
                     // titles concurrently. Serialize the lookup and reuse materialized
                     // entities briefly instead of repeatedly writing them to the database.
+                    attempted++;
                     var cacheKey = string.Join('|', "channel-search", channel.Name, channel.DataVersion, userId, take, searchTerm);
                     var found = await _searchCache.GetOrCreateAsync(
                         cacheKey,
@@ -818,6 +821,7 @@ namespace Jellyfin.LiveTv.Channels
                         },
                         cancellationToken).ConfigureAwait(false);
                     results.AddRange(found);
+                    succeeded++;
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -827,6 +831,11 @@ namespace Jellyfin.LiveTv.Channels
                 {
                     _logger.LogWarning(ex, "Channel search failed for {Channel}", channel.Name);
                 }
+            }
+
+            if (attempted > 0 && succeeded == 0)
+            {
+                throw new System.Net.Http.HttpRequestException("Die Indexer-Suche ist momentan nicht erreichbar.");
             }
 
             return results;

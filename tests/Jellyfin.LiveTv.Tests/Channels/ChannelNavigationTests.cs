@@ -28,6 +28,18 @@ namespace Jellyfin.LiveTv.Tests.Channels;
 
 public class ChannelNavigationTests
 {
+    [Fact]
+    public async Task FailedSearchIsNotReportedOrCachedAsAnEmptySuccess()
+    {
+        using var fixture = new Fixture();
+        fixture.Provider.As<ISupportsSearch>().Setup(x => x.GetSearchResults(It.IsAny<ChannelSearchInfo>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new System.Net.Http.HttpRequestException("Offline"));
+        await Assert.ThrowsAsync<System.Net.Http.HttpRequestException>(() => fixture.Manager.SearchChannelItemsAsync("Title", null, 10, TestContext.Current.CancellationToken));
+        fixture.Provider.As<ISupportsSearch>().Setup(x => x.GetSearchResults(It.IsAny<ChannelSearchInfo>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<ChannelItemInfo>());
+        Assert.Empty(await fixture.Manager.SearchChannelItemsAsync("Title", null, 10, TestContext.Current.CancellationToken));
+    }
+
     [Theory]
     [InlineData("Navigation test", "Indexer", 1)]
     [InlineData("", "Indexer", 1)]

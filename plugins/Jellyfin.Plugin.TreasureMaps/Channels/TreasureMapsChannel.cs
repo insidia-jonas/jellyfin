@@ -1272,8 +1272,8 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
                 group.Title = Search.TreasureMapsSearch.DisplayTitle(group, searchTerm);
             }
 
-            groups = groups.Where(g => Search.TreasureMapsSearch.ScoreIdentity(g.Title, searchTerm, g.Year, g.Kind, g.Imdb) > 0)
-                .OrderByDescending(g => Search.TreasureMapsSearch.ScoreIdentity(g.Title, searchTerm, g.Year, g.Kind, g.Imdb)).ToList();
+            groups = groups.Where(g => Search.TreasureMapsSearch.ScoreGroup(g, searchTerm) > 0)
+                .OrderByDescending(g => Search.TreasureMapsSearch.ScoreGroup(g, searchTerm)).ToList();
         }
         var cap = maxGroups > 0 ? maxGroups : Config.ResultLimit;
         var ordered = (searchTerm is not null ? groups : newestFirst
@@ -1350,6 +1350,10 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
                 card.ProviderIds["Imdb"] = ReleaseMapper.NormalizeImdbId(group.Imdb!);
             }
             if (!string.IsNullOrWhiteSpace(group.Tmdb)) card.ProviderIds["EvolutionTmdb"] = group.Tmdb;
+            card.ProviderIds["EvolutionSearchAliases"] = string.Join("\n", group.Releases.SelectMany(r => new[] {
+                ReleaseGrouper.TitleOf(r, group.Kind), group.Kind == "tv" ? ReleaseGrouper.ShowNameFromScene(r.Title) : ReleaseGrouper.CleanSceneTitle(r.Title)
+            }).Where(t => !string.IsNullOrWhiteSpace(t)).Distinct(StringComparer.OrdinalIgnoreCase).Take(12).Select(t => t[..Math.Min(256, t.Length)]));
+            card.ProviderIds["EvolutionSearchCredits"] = string.Join(' ', group.Actors.Take(10).Append(group.Director ?? string.Empty));
 
             // Favouriting the title card (the poster) grabs the best release in the group.
             var best = ReleaseGrouper.PickBestRelease(group.Releases);
@@ -1806,11 +1810,11 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
         var releases = await Search.LiveSearchPages.FetchAsync(
             term, take,
             (kind, offset, token) => FetchPageSafeAsync(kind, term, null, null, offset, token, 100),
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken, search: (kind, variant, offset, token) => FetchPageSafeAsync(kind, variant, null, null, offset, token, 100)).ConfigureAwait(false);
         var cards = await BuildGroupCardsAsync(Search.TreasureMapsSearch.RelevantReleases(releases, term), "search:" + term.ToLowerInvariant(), take, term, cancellationToken).ConfigureAwait(false);
         return cards.Items
             .Where(i => i.Type != ChannelItemType.Media && i.FolderType == ChannelFolderType.BoxSet)
-            .Select(i => (Card: i, Score: Search.TreasureMapsSearch.ScoreIdentity(i.Name, term, i.ProductionYear, i.ProviderIds.GetValueOrDefault("TreasureMapsKind"), i.ProviderIds.GetValueOrDefault("Imdb"))))
+            .Select(i => (Card: i, Score: Search.TreasureMapsSearch.ScoreDocument(i.Name, term, i.ProductionYear, i.ProviderIds.GetValueOrDefault("TreasureMapsKind"), i.ProviderIds.GetValueOrDefault("Imdb"), i.ProviderIds.GetValueOrDefault("EvolutionSearchAliases"), i.Overview, string.Join(' ', i.Genres) + " " + i.ProviderIds.GetValueOrDefault("EvolutionSearchCredits"))))
             .Where(x => x.Score > 0)
             .OrderByDescending(x => x.Score)
             .ThenBy(x => x.Card.Name, StringComparer.OrdinalIgnoreCase)

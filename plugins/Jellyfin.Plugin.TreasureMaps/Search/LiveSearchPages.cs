@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.TreasureMaps.Api;
 using Jellyfin.Plugin.TreasureMaps.Channels;
+using Jellyfin.Extensions;
 
 namespace Jellyfin.Plugin.TreasureMaps.Search;
 
@@ -17,13 +18,15 @@ public static class LiveSearchPages
     /// <param name="fetch">Fetches one page of at most 100 releases.</param>
     /// <param name="cancellationToken">Caller cancellation.</param>
     /// <param name="timeout">Optional test deadline; defaults to six seconds.</param>
+    /// <param name="search">Optional query-aware fetch for bounded typo recovery.</param>
     /// <returns>The successful releases.</returns>
     public static async Task<IReadOnlyList<Release>> FetchAsync(
         string query,
         int take,
         Func<string, int, CancellationToken, Task<(IReadOnlyList<Release> Items, bool Ok)>> fetch,
         CancellationToken cancellationToken,
-        TimeSpan? timeout = null)
+        TimeSpan? timeout = null,
+        Func<string, string, int, CancellationToken, Task<(IReadOnlyList<Release> Items, bool Ok)>>? search = null)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(timeout ?? TimeSpan.FromSeconds(6));
@@ -43,6 +46,18 @@ public static class LiveSearchPages
             all.AddRange(more.Where(t => t.IsCompletedSuccessfully).SelectMany(t => t.Result.Items));
         }
 
+        if (search is not null && completed.Any(p => p.Ok) && !all.Any(r => TreasureMapsSearch.ScoreRelease(r, query) > 0))
+        {
+            foreach (var fallback in MediaSearch.FallbackQueries(MediaSearch.Parse(query)))
+            {
+                if (deadline.IsCancellationRequested) { break; }
+                var recovery = kinds.Select(kind => Run(kind, 0, fallback)).ToArray();
+                await WaitForPages(recovery).ConfigureAwait(false);
+                all.AddRange(recovery.Where(t => t.IsCompletedSuccessfully).SelectMany(t => t.Result.Items));
+                if (all.Any(r => TreasureMapsSearch.ScoreRelease(r, query) > 0)) { break; }
+            }
+        }
+
         cancellationToken.ThrowIfCancellationRequested();
         if (!completed.Any(p => p.Ok) && all.Count == 0)
         {
@@ -51,11 +66,12 @@ public static class LiveSearchPages
 
         return all.DistinctBy(r => r.Guid).ToList();
 
-        async Task<(string Kind, IReadOnlyList<Release> Items, bool Ok)> Run(string kind, int offset)
+        async Task<(string Kind, IReadOnlyList<Release> Items, bool Ok)> Run(string kind, int offset, string? variant = null)
         {
             try
             {
-                var page = await fetch(kind, offset, deadline.Token).ConfigureAwait(false);
+                var page = search is null ? await fetch(kind, offset, deadline.Token).ConfigureAwait(false)
+                    : await search(kind, variant ?? query, offset, deadline.Token).ConfigureAwait(false);
                 return (kind, page.Items, page.Ok);
             }
             catch (OperationCanceledException) when (deadline.IsCancellationRequested)
