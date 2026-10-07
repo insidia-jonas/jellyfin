@@ -206,4 +206,10 @@ Paketname: `org.jellyfin.firetvweb` — parallel zur offiziellen Android-TV-App 
 
 ## Wiedergabe und Downloads
 
+Version 2.5.5 zeigt bei der globalen Suche die Herkunft „Bibliothek“ oder „Indexer“
+und übernimmt die gemeinsame Trefferbewertung des Servers. Titelvarianten, Tippfehler,
+vertauschte Wörter und Volltexttreffer benötigen Evolution 1.3.0 und den zugehörigen
+Serverstand. Laden, keine Treffer und fehlgeschlagene Anfragen erhalten eigene Anzeigen;
+fehlgeschlagene Anfragen lassen sich erneut starten. Die Suche löst keine Downloads aus.
+
 Play oder eine Fassung startet **ExoPlayer** (Direct Stream mit API-Token, sonst HLS). Amazon-WebView spielt keine MKV-Dateien. Downloads erscheinen in der System-Downloadliste und im Ordner `Downloads/Jellyfin`.

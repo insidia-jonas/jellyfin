@@ -100,7 +100,17 @@ test('Indexer search distinguishes loading, no matches and an unavailable provid
     assert.equal(e.w.document.querySelector('#tmSearchHits').getAttribute('aria-busy'), 'false');
 });
 
-
+test('Fire TV preserves server relevance for aliases and identifies library versus indexer results', async t => {
+    const e = setup(t); e.input.value = 'Insidious 6 - Out of the Further'; e.load(experience); await e.clock.tickAsync(1);
+    e.calls[0].resolve({ Items: [
+        { Id: 'local', Name: 'Insidious: Out of the Further', Type: 'Movie' },
+        { Id: 'remote', Name: 'Insidious: Out of the Further', Type: 'BoxSet', ProviderIds: { TreasureMapsKind: 'movie' } },
+        { Id: 'lower', Name: 'Insidious 6 - Out of the Further unrelated title', Type: 'Movie' }
+    ] }); await e.clock.tickAsync(1);
+    assert.deepEqual([...e.w.document.querySelectorAll('.firetv-card')].map(c => c.dataset.id), ['local', 'remote', 'lower']);
+    assert.match(e.w.document.querySelector('[data-id="local"] .firetv-card-meta').textContent, /Library|Bibliothek/);
+    assert.match(e.w.document.querySelector('[data-id="remote"] .firetv-card-meta').textContent, /Indexer/);
+});
 
 
 test('dashboard ignores superseded searches and appends deduplicated pages', async t => {

@@ -423,7 +423,7 @@
         var box = ensureOverlay();
         box.innerHTML = "";
         if (!items.length) {
-            box.setAttribute("data-firetv-hidden", "1");
+            searchStatus(germanUi() ? "Keine passenden Treffer. Prüfe den Titel oder verwende weniger Suchwörter." : "No matching titles. Check the title or use fewer words.");
             return;
         }
         box.removeAttribute("data-firetv-hidden");
@@ -461,6 +461,11 @@
             var meta = document.createElement("div");
             meta.className = "firetv-card-meta";
             var bits = [];
+            if (!live) {
+                var indexed = item.ProviderIds && item.ProviderIds.TreasureMapsKind;
+                bits.push(indexed ? "Indexer" : (germanUi() ? "Bibliothek" : "Library"));
+                if (indexed) { bits.push(indexed === "tv" ? (germanUi() ? "Serie" : "Series") : (germanUi() ? "Film" : "Movie")); }
+            }
             if (live && item.Overview) {
                 var nowHit = String(item.Overview).split(/\r?\n/).filter(function (line) {
                     return /Jetzt:|Now:/i.test(line);
@@ -530,11 +535,18 @@
         } else {
             request = originalGetItems(client).call(client, uid, options);
         }
-        return request.then(function (result) {
-            return ((result && result.Items) || []).slice().sort(function (a, b) {
-                return scoreItem(b, query, parent) - scoreItem(a, query, parent);
-            });
-        });
+        // The server ranks aliases, full text and typos together. A second literal-title
+        // ranking here would demote the very matches the user was unable to find before.
+        return request.then(function (result) { return (result && result.Items) || []; });
+    }
+
+    function searchStatus(text, retry) {
+        var box = ensureOverlay(); box.replaceChildren(); box.removeAttribute("data-firetv-hidden");
+        var message = document.createElement("p"); message.className = "firetv-smart-title"; message.setAttribute("role", "status"); message.textContent = text; box.appendChild(message);
+        if (retry) {
+            var button = document.createElement("button"); button.type = "button"; button.className = "raised emby-button"; button.textContent = germanUi() ? "Erneut suchen" : "Retry";
+            button.addEventListener("click", retry); box.appendChild(button);
+        }
     }
 
     function cancelSmartSearch() {
@@ -561,6 +573,9 @@
         var generation = searchGeneration;
         var route = location.hash;
         smartRequest = window.AbortController ? new AbortController() : { abort: function () {} };
+        var pending = smartRequest;
+        var deadline = window.setTimeout(function () { pending.abort(); }, 12000);
+        searchStatus(germanUi() ? "Bibliothek und Indexer werden durchsucht …" : "Searching library and indexers …");
         fetchSmart(query, smartRequest.signal).then(function (items) {
             if (generation !== searchGeneration || route !== location.hash ||
                 key !== ((client.getCurrentUserId && client.getCurrentUserId()) + "|" +
@@ -570,8 +585,11 @@
             renderOverlay(items, query);
             scheduleHide();
         }).catch(function () {
-            if (generation === searchGeneration) { smartRequest = null; smartKey = ""; }
-        });
+            if (generation === searchGeneration) {
+                smartRequest = null; smartKey = "";
+                searchStatus(germanUi() ? "Suche gerade nicht erreichbar." : "Search is temporarily unavailable.", function () { runSmartSearch(query); });
+            }
+        }).then(function () { window.clearTimeout(deadline); });
     }
 
     function searchInput() {
