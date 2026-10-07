@@ -168,6 +168,18 @@ public static class TreasureMapsSearch
                 group.Kind == "tv" ? ReleaseGrouper.ShowNameFromScene(r.Title) : ReleaseGrouper.CleanSceneTitle(r.Title) }).Distinct().Take(12)),
             group.Plot, string.Join(' ', group.Genres.Concat(group.Actors).Append(group.Director ?? string.Empty)));
 
+    /// <summary>Adds bounded, nonempty document fields that Jellyfin can persist on reused cards.</summary>
+    public static void AddDocumentFields(IDictionary<string, string> fields, ReleaseGroup group)
+    {
+        var aliases = string.Join("\n", group.Releases.SelectMany(r => new[] {
+            ReleaseGrouper.TitleOf(r, group.Kind), group.Kind == "tv" ? ReleaseGrouper.ShowNameFromScene(r.Title) : ReleaseGrouper.CleanSceneTitle(r.Title)
+        }).Where(t => !string.IsNullOrWhiteSpace(t)).Distinct(StringComparer.OrdinalIgnoreCase).Take(12).Select(t => t[..Math.Min(256, t.Length)]));
+        var credits = string.Join(' ', group.Actors.Take(10).Append(group.Director ?? string.Empty)
+            .Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t[..Math.Min(256, t.Length)]));
+        if (!string.IsNullOrWhiteSpace(aliases)) fields["EvolutionSearchAliases"] = aliases;
+        if (!string.IsNullOrWhiteSpace(credits)) fields["EvolutionSearchCredits"] = credits;
+    }
+
     /// <summary>Scores an identity and its searchable document consistently after materialization.</summary>
     public static float ScoreDocument(string? title, string query, int? year, string? kind, string? imdb, string? aliases, string? overview, string? credits)
     {

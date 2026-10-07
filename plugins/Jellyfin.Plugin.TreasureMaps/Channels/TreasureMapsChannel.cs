@@ -1350,10 +1350,7 @@ public class TreasureMapsChannel : IChannel, ISupportsLatestMedia, ISupportsSear
                 card.ProviderIds["Imdb"] = ReleaseMapper.NormalizeImdbId(group.Imdb!);
             }
             if (!string.IsNullOrWhiteSpace(group.Tmdb)) card.ProviderIds["EvolutionTmdb"] = group.Tmdb;
-            card.ProviderIds["EvolutionSearchAliases"] = string.Join("\n", group.Releases.SelectMany(r => new[] {
-                ReleaseGrouper.TitleOf(r, group.Kind), group.Kind == "tv" ? ReleaseGrouper.ShowNameFromScene(r.Title) : ReleaseGrouper.CleanSceneTitle(r.Title)
-            }).Where(t => !string.IsNullOrWhiteSpace(t)).Distinct(StringComparer.OrdinalIgnoreCase).Take(12).Select(t => t[..Math.Min(256, t.Length)]));
-            card.ProviderIds["EvolutionSearchCredits"] = string.Join(' ', group.Actors.Take(10).Append(group.Director ?? string.Empty));
+            Search.TreasureMapsSearch.AddDocumentFields(card.ProviderIds, group);
 
             // Favouriting the title card (the poster) grabs the best release in the group.
             var best = ReleaseGrouper.PickBestRelease(group.Releases);
