@@ -12,6 +12,19 @@ namespace Jellyfin.Plugin.TreasureMaps.Tests;
 public class TargetedSearchTests
 {
     [Fact]
+    public void SparseSearchMetadataCanBeAppliedToAnExistingJellyfinCard()
+    {
+        var group = ReleaseGrouper.Group(new[] { new Release { Guid = "a", Title = "The.Bear.S02E03.1080p", Tv = new ReleaseTv { Title = "The Bear" } } }).Single();
+        group.Actors.Add(" ");
+        var fields = new Dictionary<string, string>();
+        TreasureMapsSearch.AddDocumentFields(fields, group);
+        Assert.False(fields.ContainsKey("EvolutionSearchCredits"));
+        var item = new MediaBrowser.Controller.Entities.Movies.BoxSet();
+        foreach (var pair in fields) MediaBrowser.Model.Entities.ProviderIdsExtensions.SetProviderId(item, pair.Key, pair.Value);
+        Assert.Contains("The Bear", item.ProviderIds["EvolutionSearchAliases"], StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ExactSeriesIdentitySuppressesUnrelatedShowsWithTheSameWord()
     {
         var titles = new[] { "The Bear", "Masha and the Bear", "We Baby Bears" };
