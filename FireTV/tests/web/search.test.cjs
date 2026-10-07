@@ -112,6 +112,46 @@ test('Fire TV preserves server relevance for aliases and identifies library vers
     assert.match(e.w.document.querySelector('[data-id="remote"] .firetv-card-meta').textContent, /Indexer/);
 });
 
+test('Fire TV search stays on the active page when Jellyfin retains hidden home and search pages', async t => {
+    const e = setup(t); e.input.value = 'Matrix';
+    const home = e.w.document.createElement('div'); home.className = 'page homePage mainAnimatedPage hide';
+    home.innerHTML = '<div class="searchResults"></div>'; e.w.document.body.prepend(home);
+    e.load(experience); await e.clock.tickAsync(1);
+    e.calls[0].resolve({ Items: [{ Id: 'matrix', Name: 'Matrix', Type: 'Movie' }] }); await e.clock.tickAsync(1);
+    const box = e.w.document.querySelector('#firetv-smart-results');
+    assert.equal(box.closest('.searchPage'), e.input.closest('.searchPage'));
+    // A response may finish while the new page is still being attached. Reuse/move the
+    // existing overlay on the next search bind rather than leaving it in a hidden cache.
+    home.appendChild(box); e.input.dispatchEvent(new e.w.Event('focus')); await e.clock.tickAsync(1000);
+    assert.equal(box.closest('.searchPage'), e.input.closest('.searchPage'));
+});
+
+test('Fire TV notices router-assigned search text and restores results replaced by the stock renderer', async t => {
+    const e = setup(t); e.input.value = 'Matrix'; e.load(experience); await e.clock.tickAsync(1);
+    e.calls[0].resolve({ Items: [{ Id: 'matrix', Name: 'Matrix' }] }); await e.clock.tickAsync(1);
+    e.w.document.querySelector('#firetv-smart-results').remove(); await e.clock.tickAsync(1000);
+    assert.equal(e.calls.length, 1);
+    assert.equal(e.w.document.querySelector('.firetv-card-title').textContent, 'Matrix');
+    e.w.location.hash = '#/search?query=Alien'; await e.clock.tickAsync(1);
+    e.input.value = 'Alien'; e.w.document.querySelector('.searchResults').replaceChildren(); await e.clock.tickAsync(1000);
+    const current = e.calls.at(-1);
+    assert.equal(new URL(current.url).searchParams.get('SearchTerm'), 'Alien');
+    current.resolve({ Items: [{ Id: 'alien', Name: 'Alien' }] }); await e.clock.tickAsync(1);
+    assert.equal(e.w.document.querySelector('.firetv-card-title').textContent, 'Alien');
+});
+
+test('Fire TV uses its own visible poster and hides only sections duplicated by its results', async t => {
+    const e = setup(t); e.input.value = 'Matrix';
+    e.w.document.querySelector('.searchResults').innerHTML = '<section class="verticalSection" id="stock"><h2>Movies</h2><div class="card" data-id="matrix"></div></section><section class="verticalSection" id="pending"></section>';
+    e.load(experience); await e.clock.tickAsync(1);
+    e.calls[0].resolve({ Items: [{ Id: 'matrix', Name: 'Matrix' }] }); await e.clock.tickAsync(500);
+    assert.equal(e.w.document.querySelector('.firetv-poster').classList.contains('cardImageContainer'), false);
+    assert.equal(e.w.document.querySelector('#stock').getAttribute('data-firetv-duplicate-section'), '1');
+    assert.equal(e.w.document.querySelector('#pending').hasAttribute('data-firetv-duplicate-section'), false);
+    e.w.location.hash = '#/home'; await e.clock.tickAsync(1);
+    assert.equal(e.w.document.querySelector('#stock').hasAttribute('data-firetv-duplicate-section'), false);
+});
+
 
 test('dashboard ignores superseded searches and appends deduplicated pages', async t => {
     const html = fs.readFileSync(path.join(root, 'plugins/Jellyfin.Plugin.TreasureMaps/Configuration/browse.html'), 'utf8');

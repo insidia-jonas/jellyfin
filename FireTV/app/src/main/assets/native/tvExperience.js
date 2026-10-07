@@ -36,6 +36,7 @@
     var smartRequest = null;
     var smartKey = "";
     var smartUntil = 0;
+    var smartItems = null;
     window.FireTvSmartSearch = true;
     var lastParentId = "";
 
@@ -319,6 +320,7 @@
             hideTimer = 0;
             wrapApiClient();
             bindSearch();
+            if (isSearchPage() && smartItems) { hideDuplicateCards(smartItems); }
             if (isDetailPage()) { enhanceDetails(); }
             hideFailedSections();
         }, 280);
@@ -403,9 +405,13 @@
     }
 
     function ensureOverlay() {
-        var host = $(".searchResults, .searchResultsContainer, .page.searchPage, .mainAnimatedPage") || $(".padded-right.padded-bottom-page") || document.body;
+        // Jellyfin retains hidden home/detail pages before the active search page in the DOM.
+        // A broad selector picks that cached home page and makes the entire result list invisible.
+        var host = all(".searchResults, .searchResultsContainer").filter(searchHostVisible)[0] ||
+            all("#searchPage, .page.searchPage").filter(searchHostVisible)[0] || document.body;
         var existing = $("#firetv-smart-results");
         if (existing) {
+            if (existing.parentNode !== host) { host.insertBefore(existing, host.firstChild); }
             return existing;
         }
         var box = document.createElement("div");
@@ -417,6 +423,11 @@
             host.appendChild(box);
         }
         return box;
+    }
+
+    function searchHostVisible(node) {
+        return !node.closest(".hide, [hidden], [aria-hidden='true']") &&
+            window.getComputedStyle(node).display !== "none";
     }
 
     function renderOverlay(items, query) {
@@ -443,7 +454,9 @@
             card.setAttribute("data-id", item.Id);
             card.tabIndex = 0;
             var poster = document.createElement("div");
-            poster.className = "firetv-poster cardImageContainer";
+            // Stock cardImageContainer painting rules hide these background images in the
+            // Cube WebView; this standalone card owns its own poster geometry and styling.
+            poster.className = "firetv-poster";
             var url = posterUrl(item);
             if (url) {
                 poster.style.backgroundImage = "url('" + url.replace(/'/g, "%27") + "')";
@@ -511,6 +524,13 @@
                 card.setAttribute("data-firetv-hidden", "1");
             }
         });
+        all(".searchResults .verticalSection, .searchResultsContainer .verticalSection").forEach(function (section) {
+            if (section.id === "firetv-smart-results") { return; }
+            var cards = all(".card[data-id]", section);
+            if (cards.length && cards.every(function (card) { return !!ids[card.getAttribute("data-id")]; })) {
+                section.setAttribute("data-firetv-duplicate-section", "1");
+            } else { section.removeAttribute("data-firetv-duplicate-section"); }
+        });
     }
 
     function fetchSmart(query, signal) {
@@ -554,9 +574,11 @@
         if (smartRequest) { smartRequest.abort(); smartRequest = null; }
         smartKey = "";
         smartUntil = 0;
+        smartItems = null;
         var box = $("#firetv-smart-results");
         if (box) { box.setAttribute("data-firetv-hidden", "1"); }
         all(".card[data-firetv-hidden='1']").forEach(function (card) { card.removeAttribute("data-firetv-hidden"); });
+        all("[data-firetv-duplicate-section]").forEach(function (section) { section.removeAttribute("data-firetv-duplicate-section"); });
     }
 
     function runSmartSearch(query) {
@@ -566,7 +588,10 @@
         if (!client || !isSearchPage()) { cancelSmartSearch(); return; }
         var key = (client.getCurrentUserId && client.getCurrentUserId()) + "|" +
             (client.serverAddress && client.serverAddress()) + "|" + query;
-        if (key === smartKey && (smartRequest || Date.now() < smartUntil)) { return; }
+        if (key === smartKey && (smartRequest || Date.now() < smartUntil)) {
+            if (!smartRequest && !$("#firetv-smart-results") && smartItems) { renderOverlay(smartItems, query); }
+            return;
+        }
         cancelSmartSearch();
         if (query.length < 2) { return; }
         smartKey = key;
@@ -582,6 +607,7 @@
                     (client.serverAddress && client.serverAddress()) + "|" + query)) { return; }
             smartRequest = null;
             smartUntil = Date.now() + 20000;
+            smartItems = items;
             renderOverlay(items, query);
             scheduleHide();
         }).catch(function () {
@@ -604,18 +630,22 @@
 
     function bindSearch() {
         if (!isSearchPage()) { return; }
+        if ($("#firetv-smart-results")) { ensureOverlay(); }
         var input = searchInput();
-        if (!input || input.__firetvBound) {
-            return;
+        if (!input) { return; }
+        if (!input.__firetvBound) {
+            input.__firetvBound = true;
+            input.addEventListener("input", function () {
+                window.clearTimeout(searchTimer);
+                cancelSmartSearch();
+                var value = input.value;
+                searchTimer = window.setTimeout(function () { searchTimer = 0; runSmartSearch(value); }, 320);
+            });
         }
-        input.__firetvBound = true;
-        input.addEventListener("input", function () {
-            window.clearTimeout(searchTimer);
-            cancelSmartSearch();
-            var value = input.value;
-            searchTimer = window.setTimeout(function () { runSmartSearch(value); }, 320);
-        });
-        if (input.value && input.value.length >= 2) {
+        // The stock router can reuse this input and assign its value after hashchange,
+        // without emitting input. It can also replace the results host after our response.
+        if (!searchTimer && input.value && input.value.length >= 2 &&
+            (input.value !== lastQuery || !$("#firetv-smart-results"))) {
             runSmartSearch(input.value);
         }
     }
@@ -730,6 +760,7 @@
         window.addEventListener("hashchange", function () {
             window.__firetvDetailId = "";
             window.clearTimeout(searchTimer);
+            searchTimer = 0;
             cancelSmartSearch();
             lastQuery = "";
             tick();

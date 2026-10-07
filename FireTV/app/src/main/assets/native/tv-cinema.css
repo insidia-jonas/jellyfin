@@ -151,11 +151,14 @@ html.layout-tv,
 
 #firetv-smart-results .firetv-smart-row {
     display: flex;
+    align-items: flex-start;
     flex-wrap: nowrap;
     overflow-x: auto;
     gap: 1.05em;
     padding: 0.35em 0 0.7em;
 }
+
+[data-firetv-duplicate-section="1"] { display: none !important; }
 
 #firetv-smart-results .firetv-card {
     font: inherit;
