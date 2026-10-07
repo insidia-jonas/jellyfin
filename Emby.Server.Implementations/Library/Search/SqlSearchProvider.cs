@@ -96,7 +96,8 @@ public class SqlSearchProvider : IInternalSearchProvider
             // Cached indexer title cards are query-specific snapshots. Fresh external search owns
             // them; otherwise every previous spelling contributes a duplicate or a stale result.
             var boxSets = MapKindsToTypeNames([BaseItemKind.BoxSet]);
-            eligible = eligible.Where(e => e.ChannelId == null || e.ChannelId == Guid.Empty || !boxSets.Contains(e.Type));
+            eligible = eligible.Where(e => e.ChannelId == null || e.ChannelId == Guid.Empty
+                || (!boxSets.Contains(e.Type) && !e.Provider!.Any(p => p.ProviderId == "TreasureMapsKind")));
         }
 
         if (parsed.Kind == "movie")

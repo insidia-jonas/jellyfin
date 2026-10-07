@@ -30,6 +30,7 @@ public sealed class MediaSearchSqlTests : IDisposable
     private readonly Guid _movie = Guid.NewGuid();
     private readonly Guid _series = Guid.NewGuid();
     private readonly Guid _cached = Guid.NewGuid();
+    private readonly Guid _download = Guid.NewGuid();
     private readonly Guid _library = Guid.NewGuid();
 
     public MediaSearchSqlTests()
@@ -42,7 +43,8 @@ public sealed class MediaSearchSqlTests : IDisposable
             new BaseItemEntity { Id = _library, Type = "CollectionFolder", IsFolder = true },
             new BaseItemEntity { Id = _movie, Type = "Movie", IsMovie = true, Name = "Insidious: Out of the Further", CleanName = "insidious out of the further", ProductionYear = 2026, ParentId = _library, Overview = "A mother enters a mysterious realm." },
             new BaseItemEntity { Id = _series, Type = "Series", IsSeries = true, Name = "All Her Fault", CleanName = "all her fault", ProductionYear = 2025, Overview = "Marissa discovers Carries past." },
-            new BaseItemEntity { Id = _cached, Type = "BoxSet", ChannelId = Guid.NewGuid(), Name = "Insidious: Out of the Further", CleanName = "insidious out of the further", ProductionYear = 2026 });
+            new BaseItemEntity { Id = _cached, Type = "BoxSet", ChannelId = Guid.NewGuid(), Name = "Insidious: Out of the Further", CleanName = "insidious out of the further", ProductionYear = 2026 },
+            new BaseItemEntity { Id = _download, Type = "Folder", ChannelId = Guid.NewGuid(), Name = "1080p WEBRip", CleanName = "1080p webrip", OriginalTitle = "Insidious: Out of the Further", Provider = [new() { Item = null!, ProviderId = "TreasureMapsKind", ProviderValue = "movie" }] });
         db.SaveChanges();
         var factory = new Mock<IDbContextFactory<JellyfinDbContext>>();
         factory.Setup(f => f.CreateDbContextAsync(It.IsAny<CancellationToken>())).ReturnsAsync(CreateContext);
@@ -74,6 +76,18 @@ public sealed class MediaSearchSqlTests : IDisposable
         var results = await _provider.SearchAsync(new SearchProviderQuery { SearchTerm = "Insidious" }, TestContext.Current.CancellationToken);
         Assert.Equal(_movie, Assert.Single(results).ItemId);
         Assert.DoesNotContain(results, r => r.ItemId.Equals(_cached));
+        Assert.DoesNotContain(results, r => r.ItemId.Equals(_download));
+    }
+
+    [Fact]
+    public async Task OrdinaryLiveChannelsRemainSearchable()
+    {
+        using var db = CreateContext();
+        var channel = new BaseItemEntity { Id = Guid.NewGuid(), Type = "Video", ChannelId = Guid.NewGuid(), Name = "Kabel Eins Doku", CleanName = "kabel eins doku" };
+        db.BaseItems.Add(channel);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var results = await _provider.SearchAsync(new SearchProviderQuery { SearchTerm = "Kabel Eins Doku" }, TestContext.Current.CancellationToken);
+        Assert.Equal(channel.Id, Assert.Single(results).ItemId);
     }
 
     [Fact]
