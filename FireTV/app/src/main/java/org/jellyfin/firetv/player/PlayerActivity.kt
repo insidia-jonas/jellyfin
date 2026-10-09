@@ -14,7 +14,6 @@ import android.util.Log
 import android.view.KeyEvent
 import android.widget.Button
 import android.widget.LinearLayout
-import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.OnBackPressedCallback
@@ -45,6 +44,7 @@ import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import androidx.media3.ui.CaptionStyleCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -83,6 +83,9 @@ import java.util.concurrent.TimeUnit
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private lateinit var binding: ActivityPlayerBinding
+    private lateinit var trackDrawer: PlaybackTrackPanel
+    private var subtitleSyncJob: Job? = null
+    private var subtitleStatusItem: String? = null
     private var player: ExoPlayer? = null
     private var playback: ResolvedPlayback? = null
     private var reporter: PlaybackReporter? = null
@@ -186,6 +189,18 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         binding.osdSeek.isFocusable = false
         binding.osdSeek.isFocusableInTouchMode = false
         styleSubtitles()
+        trackDrawer = PlaybackTrackPanel(this, binding.trackPanel,
+            audioPicked = ::onAudioPicked, subtitlePicked = ::onSubtitlePicked,
+            offsetChanged = ::adjustSubtitleOffset,
+            synchronize = {
+                androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle(R.string.subtitle_sync_start)
+                    .setMessage(R.string.subtitle_sync_confirm)
+                    .setPositiveButton(R.string.track_panel_sync_confirm) { _, _ -> subtitleSyncAction(true) }
+                    .setNegativeButton(android.R.string.cancel, null).show()
+            },
+            syncStatus = { subtitleSyncAction(false, explicit = true) },
+            refresh = ::refreshSubtitleTracks, search = ::showSearchPanel)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = handlePlayerBack()
         })
@@ -224,6 +239,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         audioStreamIndex: Int? = null,
         subtitleStreamIndex: Int? = null,
         resumePositionMs: Long? = null,
+        playWhenReady: Boolean = true,
     ) {
         if (payload.isNullOrBlank()) {
             if (playback == null) finish()
@@ -288,7 +304,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                         handleResolveFailure(liveHint)
                     } else {
                         Log.i("FireTvPlayback", "resolved request=$generation ms=${SystemClock.elapsedRealtime() - tuneStartedAt}")
-                        startPlayer(resolved, resumePositionMs)
+                        startPlayer(resolved, resumePositionMs, playWhenReady)
                     }
                 }
             }
@@ -328,7 +344,12 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         }
     }
 
-    private fun startPlayer(resolved: ResolvedPlayback, resumePositionMs: Long? = null) {
+    private fun startPlayer(resolved: ResolvedPlayback, resumePositionMs: Long? = null, playWhenReady: Boolean = true) {
+        if (subtitleStatusItem != resolved.itemId) {
+            subtitleSyncJob?.cancel()
+            subtitleStatusItem = null
+            binding.osdSubtitleJob.isVisible = false
+        }
         val keepPosition = resumePositionMs ?: resolved.startPositionMs
         if (playback != null) retirePlayback(keepPlayer = resolved.isLive && playerIsLive)
         playback = resolved
@@ -517,9 +538,12 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         if (!resolved.isLive && keepPosition > 0) {
             exo.seekTo(keepPosition)
         }
-        exo.playWhenReady = true
+        exo.playWhenReady = playWhenReady
         val currentReporter = reporter
         currentReporter?.playing(keepPosition)
+        // A paused track reload must report its real state immediately, even if the
+        // previous playback session reported less than ten seconds ago.
+        lastServerProgressAt = 0L
         mainHandler.removeCallbacks(progressTick)
         mainHandler.post(progressTick)
         renderTrackPanel()
@@ -688,7 +712,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                 hideTrackPanel()
                 return true
             }
-            return super.dispatchKeyEvent(event)
+            return trackDrawer.dispatch(event) || super.dispatchKeyEvent(event)
         }
         val liveSelection = originalPayload?.let { LivePlayback.isLivePayload(it) } == true
         if (liveSelection && event.keyCode in listOf(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_MEDIA_NEXT, KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_MEDIA_PREVIOUS)) {
@@ -801,6 +825,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     }
 
     private fun showOsd() {
+        if (binding.trackPanel.isVisible || binding.searchPanel.isVisible) return
         binding.osd.isVisible = true
         updateOsd()
         mainHandler.removeCallbacks(osdTick)
@@ -915,93 +940,24 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
 
     private fun showTrackPanel() {
         renderTrackPanel()
-        binding.trackPanel.isVisible = true
-        binding.osd.isVisible = true
+        // Let the film remain visible without a second large overlay underneath the drawer.
+        dismissOsd()
+        trackDrawer.show()
         mainHandler.removeCallbacks(hideOsd)
-        binding.trackList.getChildAt(1)?.requestFocus() ?: binding.trackList.getChildAt(0)?.requestFocus()
+        val current = playback
+        if (current != null && !current.isLive && subtitleSyncJob?.isActive != true) subtitleSyncAction(false)
     }
 
     private fun hideTrackPanel() {
-        binding.trackPanel.isVisible = false
-        binding.playerView.requestFocus()
-        showOsd()
+        trackDrawer.hide {
+            binding.playerView.requestFocus()
+            showOsd()
+        }
     }
 
     private fun renderTrackPanel() {
         val current = playback ?: return
-        val list = binding.trackList
-        list.removeAllViews()
-        addHeading(list, getString(R.string.track_audio))
-        if (current.audioTracks.isEmpty()) {
-            addHeading(list, "—")
-        } else {
-            current.audioTracks.forEach { track ->
-                addTrackButton(list, track.displayTitle, track.index == current.selectedAudioIndex) {
-                    onAudioPicked(track)
-                }
-            }
-        }
-        addHeading(list, getString(R.string.track_subtitles))
-        if (subtitleTimingKey(current) != null) {
-            val status = TextView(this).apply {
-                text = getString(R.string.subtitle_timing_value, subtitleOffsetMs / 1000.0)
-                textSize = 18f
-                setTextColor(Color.WHITE)
-                setPadding(8, 16, 8, 8)
-            }
-            list.addView(status)
-            addTrackButton(list, getString(R.string.subtitle_earlier), false) { adjustSubtitleOffset(-500, status) }
-            addTrackButton(list, getString(R.string.subtitle_later), false) { adjustSubtitleOffset(500, status) }
-            addTrackButton(list, getString(R.string.subtitle_timing_reset), false) { adjustSubtitleOffset(-subtitleOffsetMs, status) }
-            addTrackButton(list, getString(R.string.subtitle_sync_start), false) {
-                androidx.appcompat.app.AlertDialog.Builder(this)
-                    .setTitle(R.string.subtitle_sync_start)
-                    .setMessage(R.string.subtitle_sync_confirm)
-                    .setPositiveButton(R.string.subtitle_sync_start) { _, _ -> subtitleSyncAction(status, true) }
-                    .setNegativeButton(android.R.string.cancel, null).show()
-            }
-            addTrackButton(list, getString(R.string.subtitle_sync_status), false) { subtitleSyncAction(status, false) }
-        }
-        addTrackButton(
-            list,
-            getString(R.string.subtitle_off),
-            current.selectedSubtitleIndex == null || current.selectedSubtitleIndex!! < 0,
-        ) {
-            onSubtitlePicked(null)
-        }
-        current.subtitleTracks.forEach { track ->
-            addTrackButton(list, track.displayTitle, track.index == current.selectedSubtitleIndex) {
-                onSubtitlePicked(track)
-            }
-        }
-        if (!current.isLive) {
-            addTrackButton(list, getString(R.string.subtitle_refresh), false) { refreshSubtitleTracks() }
-            addTrackButton(list, getString(R.string.subtitle_search), selected = false) {
-                showSearchPanel()
-            }
-        }
-    }
-
-    private fun addHeading(parent: LinearLayout, text: String) {
-        val view = TextView(this)
-        view.text = text.uppercase(Locale.getDefault())
-        view.setTextColor(getColor(R.color.accent_soft))
-        view.textSize = 13f
-        view.letterSpacing = 0.08f
-        view.setPadding(8, 20, 8, 6)
-        parent.addView(view)
-    }
-
-    private fun addTrackButton(
-        parent: LinearLayout,
-        label: String,
-        selected: Boolean,
-        onClick: () -> Unit,
-    ) {
-        val button = layoutInflater.inflate(R.layout.item_track, parent, false) as Button
-        button.text = if (selected) "●  $label" else label
-        button.setOnClickListener { onClick() }
-        parent.addView(button)
+        trackDrawer.render(current, subtitleOffsetMs, subtitleTimingKey(current) != null)
     }
 
     private fun onAudioPicked(track: MediaTrack) {
@@ -1045,12 +1001,12 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         val payload = originalPayload ?: return
         val position = player?.currentPosition ?: playback?.startPositionMs ?: 0L
         beginResolve(payload, resetQueue = false, audioStreamIndex = audioIndex,
-            subtitleStreamIndex = subtitleIndex, resumePositionMs = position)
+            subtitleStreamIndex = subtitleIndex, resumePositionMs = position, playWhenReady = player?.playWhenReady ?: true)
     }
 
     private fun showSearchPanel() {
         binding.searchPanel.isVisible = true
-        binding.trackPanel.isVisible = false
+        trackDrawer.hide(animate = false)
         binding.searchResults.removeAllViews()
         binding.searchStatus.setText(R.string.subtitle_search_pick_language)
         val row = binding.languageRow
@@ -1078,6 +1034,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         subtitleSearchGeneration++
         subtitleSearchJob?.cancel()
         binding.searchPanel.isVisible = false
+        trackDrawer.subtitles()
         showTrackPanel()
     }
 
@@ -1141,15 +1098,41 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         return SubtitleTiming.key(current.serverAddress, current.userId, current.itemId, current.mediaSourceId, track.index, track.identity)
     }
 
-    private fun subtitleSyncAction(status: TextView, start: Boolean) {
+    private fun subtitleSyncAction(start: Boolean, explicit: Boolean = false) {
         val current = playback ?: return
-        status.setText(R.string.subtitle_applying)
-        lifecycleScope.launch {
-            val message = withContext(Dispatchers.IO) {
-                runCatching { if (start) SubtitleSync.start(current, ignoreSsl) else SubtitleSync.status(current, ignoreSsl) }
-                    .getOrElse { it.message ?: "Tonspur-Abgleich derzeit nicht erreichbar." }
+        subtitleStatusItem = current.itemId
+        subtitleSyncJob?.cancel()
+        subtitleSyncJob = lifecycleScope.launch {
+            var showDetails = explicit
+            if (start) {
+                val accepted = withContext(Dispatchers.IO) { runCatching { SubtitleSync.start(current, ignoreSsl) } }
+                if (!isActiveSafe() || playback?.itemId != current.itemId) return@launch
+                if (accepted.isFailure) {
+                    trackDrawer.setJobStatus(accepted.exceptionOrNull()?.message ?: getString(R.string.track_panel_job_failed))
+                    return@launch
+                }
             }
-            if (isActiveSafe() && playback?.itemId == current.itemId) status.text = message
+            do {
+                val result = withContext(Dispatchers.IO) { runCatching { SubtitleSync.readStatus(current, ignoreSsl) } }
+                if (!isActiveSafe() || playback?.itemId != current.itemId) return@launch
+                val status = result.getOrNull()
+                if (status == null) {
+                    if (start || explicit) trackDrawer.setJobStatus(result.exceptionOrNull()?.message ?: getString(R.string.track_panel_job_failed))
+                    return@launch
+                }
+                val brief = when {
+                    status.state == "completed" -> getString(R.string.track_panel_job_done)
+                    status.active -> getString(R.string.track_panel_job_running, status.percent)
+                    status.exists -> getString(R.string.track_panel_job_attention)
+                    else -> ""
+                }
+                trackDrawer.setJobStatus(brief)
+                if (showDetails) { Toast.makeText(this@PlayerActivity, status.message, Toast.LENGTH_LONG).show(); showDetails = false }
+                binding.osdSubtitleJob.text = brief
+                binding.osdSubtitleJob.isVisible = status.exists
+                if (!status.active) break
+                delay(5_000)
+            } while (true)
         }
     }
 
@@ -1162,17 +1145,22 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             }.getOrNull() }
             if (!isActiveSafe() || playback !== current) return@launch
             if (refreshed == null) { Toast.makeText(this@PlayerActivity, R.string.subtitle_download_failed, Toast.LENGTH_LONG).show(); return@launch }
-            playback = current.copy(subtitleTracks = refreshed.subtitleTracks)
+            // New sidecars renumber public stream indexes; retain the actual selected identities.
+            val subtitle = current.subtitleTracks.firstOrNull { it.index == current.selectedSubtitleIndex }
+            val audio = current.audioTracks.firstOrNull { it.index == current.selectedAudioIndex }
+            playback = current.copy(subtitleTracks = refreshed.subtitleTracks, audioTracks = refreshed.audioTracks,
+                selectedSubtitleIndex = subtitle?.let { old -> refreshed.subtitleTracks.firstOrNull { it.identity == old.identity }?.index } ?: -1,
+                selectedAudioIndex = audio?.let { old -> refreshed.audioTracks.firstOrNull { it.identity == old.identity }?.index } ?: refreshed.selectedAudioIndex)
             renderTrackPanel()
-            binding.trackList.getChildAt(1)?.requestFocus()
+            Toast.makeText(this@PlayerActivity, R.string.track_panel_refreshed, Toast.LENGTH_SHORT).show()
         }
     }
 
-    private fun adjustSubtitleOffset(deltaMs: Long, status: TextView) {
+    private fun adjustSubtitleOffset(deltaMs: Long) {
         val current = playback ?: return
         val key = subtitleTimingKey(current) ?: return
         subtitleOffsetMs = SubtitleTiming.clamp(subtitleOffsetMs + deltaMs)
-        status.text = getString(R.string.subtitle_timing_value, subtitleOffsetMs / 1000.0)
+        trackDrawer.updateOffset(subtitleOffsetMs)
         getSharedPreferences("subtitle-timing", MODE_PRIVATE).edit().putLong(key, subtitleOffsetMs).apply()
         pendingSubtitleOffset?.let(mainHandler::removeCallbacks)
         // Coalesce repeated remote presses. Re-prepare at the current position so already
@@ -1239,6 +1227,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                 position,
             )
             player?.playWhenReady = playing
+            trackDrawer.subtitles()
             showTrackPanel()
         }
     }
@@ -1417,6 +1406,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     }
 
     override fun onDestroy() {
+        subtitleSyncJob?.cancel()
         tune.invalidate()
         cancelPendingTune()
         if (PlayerCommands.listener === this) {

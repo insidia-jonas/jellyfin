@@ -206,6 +206,23 @@ Paketname: `org.jellyfin.firetvweb` — parallel zur offiziellen Android-TV-App 
 
 ## Wiedergabe und Downloads
 
+Version 2.5.8 ersetzt die lange Spurliste durch ein seitlich einblendendes Panel
+mit **Ton**, **Untertitel** und **Timing**. Links/Rechts wechselt zwischen den
+Bereichen und ihren Optionen, Hoch/Runter bewegt den Fokus. Im Timing-Regler
+wechselt Links/Rechts zwischen Minus und Plus; Links am Minus führt zu den Bereichen.
+Die aktive Spur hat ein Häkchen, der Fernbedienungsfokus einen hellen Rahmen.
+Beim erneuten Öffnen wird die aktive Spur fokussiert. Zurück schließt zuerst
+das Panel, danach die Wiedergabeleiste und erst anschließend den Film.
+
+Sprachen, Tonformat und Untertitelmerkmale werden getrennt dargestellt. Fehlende
+Sprachmetadaten dürfen nur durch einen eindeutigen Sprachpräfix im Spurtitel
+ergänzt werden, nicht durch beliebige Wörter eines Dateinamens. Gleich benannte
+Varianten bleiben anhand ihrer Spurnummer unterscheidbar. Der lokale Abgleich
+zeigt eine kurze Statuszeile; laufende Aufträge werden alle fünf Sekunden
+abgefragt. Öffnen und Navigieren starten keine Abgleich- oder KI-Aufträge.
+Die 180-ms-Animation verwendet nur Deckkraft und Verschiebung, keine Live-Unschärfe.
+Spurwechsel mit notwendigem Neuladen erhalten Position und Pausenzustand.
+
 Version 2.5.7 ergänzt unter **Ton & Untertitel** für Textspuren eine Zeitkorrektur
 in 0,5-Sekunden-Schritten (Plus = später, Minus = früher, Bereich ±120 Sekunden).
 Der Versatz bleibt pro Benutzer, Film/Datei und Untertitelspur gespeichert. Beim

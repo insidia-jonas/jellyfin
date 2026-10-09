@@ -16,6 +16,7 @@ data class MediaTrack(
     val deliveryMethod: String?,
     val deliveryUrl: String?,
     val identity: String? = null,
+    val channels: Int? = null,
 ) {
     enum class Kind { AUDIO, SUBTITLE, OTHER }
 
@@ -116,6 +117,7 @@ object MediaTracks {
             deliveryMethod = jsonStringField(json, "DeliveryMethod"),
             deliveryUrl = jsonStringField(json, "DeliveryUrl"),
             identity = jsonStringField(json, "Path") ?: listOf(type.name, title, language.orEmpty(), jsonStringField(json, "Codec").orEmpty()).joinToString("|"),
+            channels = jsonLongField(json, "Channels")?.toInt(),
         )
     }
 }

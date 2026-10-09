@@ -4,4 +4,8 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginTop="8dp"
+    android:background="@drawable/bg_track_row"
+    android:textColor="#F0F5FF"
+    android:textSize="16sp"
+    android:textAllCaps="false"
     android:gravity="start|center_vertical" />
