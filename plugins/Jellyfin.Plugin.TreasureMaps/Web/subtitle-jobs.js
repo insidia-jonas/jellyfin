@@ -29,7 +29,7 @@
         mount();
         if (trigger) {
             var active = jobs.filter(function (j) { return j.active; }).length;
-            trigger.textContent = 'KI-Aufträge' + (active ? ' · ' + active : '');
+            trigger.textContent = 'Untertitelaufträge' + (active ? ' · ' + active : '');
             trigger.setAttribute('aria-label','Untertitelaufträge' + (active ? ', ' + active + ' aktiv' : ''));
         }
         render();
@@ -39,7 +39,7 @@
         // Jellyfin keeps the legacy header mounted but hidden on React routes.
         var header = document.querySelector('header.MuiAppBar-root .MuiToolbar-root') || document.querySelector('.headerRight');
         if (!header) { return; }
-        if (!trigger) { trigger = button('KI-Aufträge', open); trigger.className = 'evolution-jobs-trigger'; }
+        if (!trigger) { trigger = button('Untertitelaufträge', open); trigger.className = 'evolution-jobs-trigger'; }
         if (trigger.parentElement !== header) { header.appendChild(trigger); }
     }
     function poll() {
@@ -80,7 +80,7 @@
                 row.appendChild(el('p','evolution-job-message'));
                 row.appendChild(button('Zum Film',function () { close(); location.hash = '#/details?id=' + job.itemId; }));
                 var cancel = button('Abbrechen',function () {
-                    if (!window.confirm('Untertitelauftrag abbrechen? Bereits verarbeitete Schritte werden gesichert. Anbieter-Kosten können bereits angefallen sein.')) { return; }
+                    if (!window.confirm(job.kind === 'sync' ? 'Lokalen Tonspur-Abgleich abbrechen?' : 'Untertitelauftrag abbrechen? Bereits verarbeitete Schritte werden gesichert. Anbieter-Kosten können bereits angefallen sein.')) { return; }
                     cancel.disabled = true;
                     request('Jobs/' + job.id + '/Cancel',{},'POST').then(poll,function () { cancel.disabled = false; });
                 });
@@ -89,7 +89,7 @@
                 retry.className = 'evolution-job-retry'; row.appendChild(retry);
                 list.appendChild(row);
             }
-            row.querySelector('.evolution-job-title').textContent = (job.title || 'Film') + ' · ' + job.language.toUpperCase();
+            row.querySelector('.evolution-job-title').textContent = (job.title || 'Film') + ' · ' + (job.language || 'und').toUpperCase() + (job.kind === 'sync' ? ' · Tonspur-Abgleich' : '');
             var states = {queued:'Warteschlange',running:'In Arbeit',cancelling:'Wird abgebrochen',cancelled:'Abgebrochen',interrupted:'Unterbrochen',failed:'Fehlgeschlagen',completed:'Fertig'};
             row.querySelector('.evolution-job-state').textContent = (states[job.state] || job.state) + (job.active ? ' · ' + job.percent + ' % der Schritte' : '');
             row.querySelector('progress').value = job.percent;
@@ -103,6 +103,7 @@
         });
     }
     function restart(job, btn) {
+        if (job.kind === 'sync') { close(); location.hash = '#/details?id=' + job.itemId; return; }
         var ticket = generation; btn.disabled = true;
         request('Quote',{itemId:job.itemId,language:job.language}).then(function (q) {
             if (ticket !== generation || !q || !q.ok || !Number.isFinite(q.totalUsd)) { throw new Error('Keine gültige Kostenschätzung.'); }

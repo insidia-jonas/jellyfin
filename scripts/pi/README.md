@@ -203,6 +203,19 @@ entry servers belong in the tuner's `AlternateUrls`; `ActiveUrl` selects the pri
 Different export formats and different entry hostnames are not evidence of independent
 backup capacity. The watchdog records actual delivery hosts and warns about overlap.
 
+Local subtitle alignment (Evolution 1.4): `manage-stack.py --apply --configure-only
+--install-subtitle-sync --user <service-user>` installs the pinned ffsubsync 0.4.29
+environment in `/opt/jellyfin-subtitle-sync`. New `--install-missing` installations
+include it automatically. Repeated runs check the installed version first.
+No API key is required. Select an existing text subtitle and the intended audio
+track under the film's subtitle tools, or from Fire TV's track panel. The shared
+subtitle job queue runs one job at a time with a 20-minute alignment deadline;
+restart/cancel never silently reruns a job. A validated result becomes a separate
+`Synchronisiert` SRT; the original is preserved. Weak speech correlation fails
+visibly. Different edits, cuts or heavily altered dubbing may still require
+another subtitle release or manual correction. Browser playback also exposes
+Jellyfin's existing subtitle offset control.
+
 Idle checks use one short decoder process per minute, with a 20-second deadline.
 They rotate favorite/recent channels, up to eight representative channels on configured
 alternatives, and the remaining catalog. Large playlists take hours to sweep; untested

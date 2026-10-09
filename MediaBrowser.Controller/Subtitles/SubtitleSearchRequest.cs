@@ -32,6 +32,10 @@ namespace MediaBrowser.Controller.Subtitles
 
         public string Name { get; set; }
 
+        public string OriginalTitle { get; set; }
+
+        public Dictionary<string, string> SeriesProviderIds { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
         public int? IndexNumber { get; set; }
 
         public int? IndexNumberEnd { get; set; }

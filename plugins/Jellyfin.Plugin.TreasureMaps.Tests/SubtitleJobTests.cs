@@ -12,6 +12,26 @@ namespace Jellyfin.Plugin.TreasureMaps.Tests;
 
 public sealed class SubtitleJobTests
 {
+    [Fact]
+    public void SyncJobsAreFreeSeparateFromGenerationAndNeverExposeAnotherOwnersJob()
+    {
+        var path = Store();
+        try
+        {
+            using var queue = Queue(path, (_, _, _) => Task.CompletedTask);
+            var owner = Guid.NewGuid(); var item = Guid.NewGuid();
+            var generated = queue.Enqueue(owner, item, new() { Language = "de" }, false);
+            var synced = queue.Enqueue(owner, item, new() { Language = "de" }, false, 3, 1);
+            Assert.NotEqual(generated.Id, synced.Id);
+            Assert.Equal("sync", synced.Kind);
+            Assert.Equal(0m, synced.Quote.TotalUsd);
+            Assert.Equal(synced.Id, queue.Enqueue(owner, item, new() { Language = "de" }, false, 3, 1).Id);
+            Assert.NotEqual(synced.Id, queue.Enqueue(owner, item, new() { Language = "de" }, false, 3, 2).Id);
+            Assert.Throws<InvalidOperationException>(() => queue.Enqueue(Guid.NewGuid(), item, new() { Language = "de" }, false, 3, 1));
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(path)!, true); }
+    }
+
     private static string Store() => Path.Combine(Path.GetTempPath(), "subtitle-jobs-test-" + Guid.NewGuid(), "jobs.json");
     private static SubtitleJobQueue Queue(string path, Func<SubtitleJob, Action<SubtitleProgress>, CancellationToken, Task> run)
         => new(path, run, NullLogger<SubtitleJobQueue>.Instance);

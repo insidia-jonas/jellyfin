@@ -19,7 +19,7 @@ namespace Jellyfin.Plugin.TreasureMaps.Api;
 [ApiController]
 [Authorize]
 [Route("TreasureMaps/Subtitles")]
-public sealed class SubtitleJobsController(SubtitleJobQueue jobs, AiSubtitleService ai, ILibraryManager library, IUserManager users) : ControllerBase
+public sealed class SubtitleJobsController(SubtitleJobQueue jobs, AiSubtitleService ai, ILibraryManager library, IUserManager users, SubtitleSyncService sync) : ControllerBase
 {
     private Guid UserId => Guid.TryParse(User.FindFirst("Jellyfin-UserId")?.Value, out var id) ? id : Guid.Empty;
 
@@ -75,5 +75,29 @@ public sealed class SubtitleJobsController(SubtitleJobQueue jobs, AiSubtitleServ
         {
             return BadRequest(new { ok = false, message = SubtitleJobQueue.SafeError(ex) });
         }
+    }
+
+    [HttpGet("Sync")]
+    public IActionResult SyncOptions([FromQuery] Guid itemId)
+    {
+        var item = Visible(itemId, true);
+        return item is null ? NotFound() : Ok(sync.Options(item));
+    }
+
+    [HttpPost("Sync")]
+    public IActionResult Synchronize([FromQuery] Guid itemId, [FromQuery] int subtitleIndex, [FromQuery] int audioIndex)
+    {
+        var item = Visible(itemId, true);
+        if (item is null) return NotFound();
+        if (!SubtitleSyncService.Available) return BadRequest(new { ok = false, message = "Tonspur-Abgleich ist noch nicht installiert." });
+        var path = SubtitleFiles.ResolveMediaPath(item);
+        if (path is null) return BadRequest(new { ok = false, message = "Lokale Mediendatei fehlt." });
+        try
+        {
+            var (subtitle, audio) = sync.Tracks(item, subtitleIndex, audioIndex);
+            var quote = new SubtitleQuote { Path = path, Language = LanguageMatcher.Normalize(subtitle.Language), Title = item.Name };
+            return Accepted(new { ok = true, job = jobs.Enqueue(UserId, itemId, quote, false, subtitleIndex, audioIndex, SubtitleSyncService.Fingerprint(path, subtitle, audio)).View() });
+        }
+        catch (InvalidOperationException ex) { return BadRequest(new { ok = false, message = SubtitleJobQueue.SafeError(ex) }); }
     }
 }

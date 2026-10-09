@@ -348,6 +348,43 @@
             bar.appendChild(searchBtn);
             box.appendChild(bar);
 
+            var syncBox = document.createElement('div'); syncBox.className = 'tmSubAi';
+            var syncNote = document.createElement('p'); syncNote.textContent = 'Automatisch mit der Tonspur abgleichen · lokal, ohne API-Kosten. Das Original bleibt erhalten.';
+            var syncSubs = document.createElement('select'); syncSubs.setAttribute('aria-label', 'Untertitel für Tonspur-Abgleich');
+            var syncAudio = document.createElement('select'); syncAudio.setAttribute('aria-label', 'Tonspur für Abgleich');
+            var syncBar = document.createElement('div'); syncBar.className = 'tmSubBar';
+            var syncBtn = document.createElement('button'); syncBtn.type = 'button'; syncBtn.className = 'tmSubSearch'; syncBtn.textContent = 'Mit Tonspur abgleichen'; syncBtn.disabled = true;
+            var syncRefresh = document.createElement('button'); syncRefresh.type = 'button'; syncRefresh.textContent = 'Spuren aktualisieren';
+            syncBar.appendChild(syncSubs); syncBar.appendChild(syncAudio); syncBar.appendChild(syncBtn); syncBar.appendChild(syncRefresh);
+            syncBox.appendChild(syncNote); syncBox.appendChild(syncBar); box.appendChild(syncBox);
+            function loadSyncTracks() {
+                api().ajax({url:api().getUrl('TreasureMaps/Subtitles/Sync',{itemId:item.Id}), type:'GET', dataType:'json'}).then(function (res) {
+                    if (!box.isConnected) { return; }
+                    [[syncSubs,res.subtitles],[syncAudio,res.audio]].forEach(function (pair) {
+                        var previous = pair[0].value; pair[0].textContent = '';
+                        (pair[1] || []).forEach(function (track) { var opt = document.createElement('option'); opt.value = track.index; opt.textContent = track.title; pair[0].appendChild(opt); });
+                        if (Array.prototype.some.call(pair[0].options,function (o) { return o.value === previous; })) { pair[0].value = previous; }
+                    });
+                    syncBtn.disabled = !res.available || !syncSubs.options.length || !syncAudio.options.length;
+                    syncNote.textContent = !res.available ? 'Lokaler Tonspur-Abgleich ist auf dem Server noch nicht installiert.'
+                        : !syncSubs.options.length ? 'Zuerst Text-Untertitel herunterladen oder erstellen. Bilduntertitel können nicht abgeglichen werden.'
+                        : 'Untertitel und die tatsächlich gehörte Tonspur wählen. Der Abgleich läuft lokal im Hintergrund, ohne API-Kosten. Das Original bleibt erhalten.';
+                },function () { syncNote.textContent = 'Spuren derzeit nicht erreichbar. Bitte erneut aktualisieren.'; syncBtn.disabled = true; });
+            }
+            syncRefresh.addEventListener('click',loadSyncTracks);
+            syncBtn.addEventListener('click',function () {
+                if (!window.confirm('Untertitel mit der gewählten Tonspur abgleichen? Eine zusätzliche Spur „Synchronisiert“ wird erstellt. Du kannst diese Seite verlassen.')) { return; }
+                syncBtn.disabled = true;
+                api().ajax({url:api().getUrl('TreasureMaps/Subtitles/Sync',{itemId:item.Id,subtitleIndex:syncSubs.value,audioIndex:syncAudio.value}),type:'POST',dataType:'json'}).then(function (res) {
+                    if (!box.isConnected) { return; }
+                    if (res && res.job && window.EvolutionSubtitleJobs) { window.EvolutionSubtitleJobs.accept(res.job); }
+                    syncNote.textContent = 'Abgleich läuft im Hintergrund. Anschließend „Spuren aktualisieren“ und beim Abspielen die neue synchronisierte Spur wählen.';
+                    syncBtn.disabled = false;
+                },function () { if (box.isConnected) { syncNote.textContent = 'Abgleich konnte nicht gestartet werden. Spuren und Berechtigungen prüfen.'; syncBtn.disabled = false; } });
+            });
+            var syncLoaded = false;
+            box.addEventListener('toggle',function () { if (box.open && !syncLoaded) { syncLoaded = true; loadSyncTracks(); } });
+
             var aiBox = document.createElement('div');
             aiBox.className = 'tmSubAi';
             var quoteEl = document.createElement('div');
@@ -387,12 +424,13 @@
             var currentJobs = [], searchGeneration = 0;
             function updateJob(records) {
                 currentJobs = records;
-                var job = records.filter(function (j) { return j.itemId.replace(/-/g, '') === item.Id.replace(/-/g, '') && j.language === sel.value; })[0];
+                var job = records.filter(function (j) { return j.itemId.replace(/-/g, '') === item.Id.replace(/-/g, '') && (j.language === sel.value || j.kind === 'sync'); })[0];
                 jobStatus.hidden = !job;
                 h.textContent = 'Untertitel suchen & erstellen' + (job && job.active ? ' · In Arbeit' : job && job.state === 'completed' ? ' · Fertig' : '');
                 if (!job) { return; }
                 jobText.textContent = job.message;
                 jobProgress.value = job.percent;
+                if (job.kind === 'sync') { return; }
                 if (job.active) {
                     genBtn.disabled = true; genBtn.textContent = 'Auftrag läuft · ' + job.percent + ' %';
                     hintEl.textContent = 'Du kannst diesen Film verlassen. Der Server arbeitet weiter.';

@@ -21,7 +21,7 @@ namespace Jellyfin.Plugin.TreasureMaps;
 public class WebScriptInjector : IHostedService
 {
     private const string ScriptMarker = "plugin=\"TreasureMaps\"";
-    private const string ScriptTag = "<script plugin=\"TreasureMaps\" defer src=\"/TreasureMaps/ClientScript?v=22\"></script>";
+    private const string ScriptTag = "<script plugin=\"TreasureMaps\" defer src=\"/TreasureMaps/ClientScript?v=23\"></script>";
 
     private readonly IApplicationPaths _appPaths;
     private readonly ILogger<WebScriptInjector> _logger;
