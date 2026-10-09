@@ -23,14 +23,16 @@
         android:name="amazon.hardware.fire_tv"
         android:required="false" />
 
+    <!-- Fire OS puts sideloaded icons in a square inside its wide tile. A transparent
+         vector avoids visible side strips; a wide icon would be squeezed. Keep the
+         separate banner for launchers that support the full TV artwork. -->
     <application
         android:name=".JellyfinFireTvApp"
         android:allowBackup="true"
         android:banner="@drawable/banner"
-        android:icon="@drawable/ic_launcher_square"
-        android:roundIcon="@drawable/ic_launcher_square"
+        android:icon="@drawable/ic_jellyfin"
         android:label="@string/app_name"
-        android:logo="@drawable/ic_launcher_square"
+        android:logo="@drawable/ic_jellyfin"
         android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true"
         android:hardwareAccelerated="true"
@@ -42,8 +44,8 @@
             android:name=".connect.ConnectActivity"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize"
             android:banner="@drawable/banner"
-            android:icon="@drawable/ic_launcher_square"
-            android:logo="@drawable/ic_launcher_square"
+            android:icon="@drawable/ic_jellyfin"
+            android:logo="@drawable/ic_jellyfin"
             android:exported="true"
             android:launchMode="singleTop"
             android:screenOrientation="landscape"

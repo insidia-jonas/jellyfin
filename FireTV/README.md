@@ -8,6 +8,23 @@ Das ist bewusst **kein** API-only-Client wie [jellyfin-androidtv](https://github
 
 Fire TV client that hosts the full Jellyfin web UI (same architecture as the official iOS app: WebView + NativeShell). Video playback uses ExoPlayer so selecting a movie cannot freeze Amazon WebView. Downloads use Android DownloadManager. The 1920 CSS-pixel TV layout is scaled to the actual window, with automatic viewport height.
 
+## Änderungen in 2.5.9
+
+Das Fire-TV-Startsymbol verwendet das größere, transparente Jellyfin-Vektorzeichen.
+Der dunkle quadratische Bildhintergrund entfällt, sodass die vom Cube ergänzten
+Seitenflächen nicht mehr als getrennte Streifen sichtbar sind. Das Logo bleibt
+unverzerrt. Ein breites Bild als `android:icon` wird auf diesem Fire OS in ein Quadrat
+gepresst; das breite Markenbild bleibt daher ausschließlich `android:banner`.
+Anwendung und Start-Activity verwenden dasselbe transparente Symbol.
+
+Fire OS kann das alte Symbol sogar über APK-Updates, Cache-Leeren, Neustart und
+Neuinstallation hinaus pro Paket behalten. Der getestete Cube wurde deshalb von
+`org.jellyfin.firetvweb.preview` auf die reguläre Variante `org.jellyfin.firetvweb`
+umgestellt. Gesicherte App-Daten wurden vor dem ersten Start übernommen und alle
+155 Dateien per SHA-256 geprüft; die Anmeldung blieb erhalten. Erst danach wurde
+die alte Variante entfernt. Künftige Cube-Updates ohne `-PfiretvPreview=true` bauen.
+Keine pauschale Löschung von Launcher- oder Appstore-Daten vornehmen.
+
 ## Änderungen in 2.5.4
 
 - Filme und Serien laden bei weniger als 30 Sekunden Reserve nach und puffern bis zu 60 Sekunden; das Datenziel bleibt auf 64 MiB begrenzt. Der Start verlangt weiterhin nur eine Sekunde Puffer, nach einem Leerlauf werden fünf Sekunden gesammelt. Vorübergehende Dateizugriffsfehler werden innerhalb des bestehenden Zeitlimits über Media3 erneut versucht, ohne die Wiedergabeposition zurückzusetzen.

@@ -251,7 +251,7 @@
             deviceId: "firetv-web",
             deviceName: "Fire TV",
             appName: "Jellyfin Fire TV",
-            appVersion: "2.5.8"
+            appVersion: "2.5.9"
         };
     }
 

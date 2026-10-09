@@ -22,8 +22,8 @@ android {
         applicationId = if (previewBuild) "org.jellyfin.firetvweb.preview" else "org.jellyfin.firetvweb"
         minSdk = 25
         targetSdk = 34
-        versionCode = 38
-        versionName = "2.5.8"
+        versionCode = 39
+        versionName = "2.5.9"
     }
 
     buildTypes {
