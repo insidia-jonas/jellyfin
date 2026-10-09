@@ -15,6 +15,7 @@ data class MediaTrack(
     val isExternal: Boolean,
     val deliveryMethod: String?,
     val deliveryUrl: String?,
+    val identity: String? = null,
 ) {
     enum class Kind { AUDIO, SUBTITLE, OTHER }
 
@@ -114,6 +115,7 @@ object MediaTracks {
             isExternal = jsonBooleanField(json, "IsExternal") == true,
             deliveryMethod = jsonStringField(json, "DeliveryMethod"),
             deliveryUrl = jsonStringField(json, "DeliveryUrl"),
+            identity = jsonStringField(json, "Path") ?: listOf(type.name, title, language.orEmpty(), jsonStringField(json, "Codec").orEmpty()).joinToString("|"),
         )
     }
 }

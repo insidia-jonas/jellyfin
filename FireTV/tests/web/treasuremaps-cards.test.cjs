@@ -140,7 +140,10 @@ test('subtitle tools are collapsed below metadata and load a JSON Grok quote onl
     assert.equal(panel.closest('.infoWrapper'), null); assert.ok(panel.closest('.detailSection'));
     assert.equal(calls.length, 0);
     panel.open = true; panel.dispatchEvent(new e.w.Event('toggle')); await e.clock.tickAsync(1);
-    assert.equal(calls.length, 1); assert.match(panel.querySelector('.tmSubHint').textContent, /Grok 0.16 USD/);
+    assert.equal(calls.filter(c => c.url.includes('Subtitles/Search')).length, 1);
+    assert.equal(calls.filter(c => c.url.includes('Subtitles/Sync')).length, 1);
+    assert.ok(calls.every(c => c.type === 'GET'));
+    assert.match(panel.querySelector('.tmSubHint').textContent, /Grok 0.16 USD/);
     assert.equal(panel.querySelector('.tmSubGen').disabled, false);
 });
 
@@ -155,6 +158,24 @@ test('a missing subtitle quote cannot advertise zero cost or start generation', 
     panel.dispatchEvent(new e.w.Event('toggle')); await e.clock.tickAsync(1);
     const button = panel.querySelector('.tmSubGen'); assert.equal(button.disabled, true);
     assert.doesNotMatch(panel.textContent, /0.00 USD/); button.click(); assert.equal(generated, 0);
+});
+
+test('local alignment uses selected tracks and queues a free job without generating AI subtitles', async t => {
+    const e=setup(t), calls=[];let accepted;
+    e.w.document.querySelector('.page').insertAdjacentHTML('afterbegin','<div class="detailSection"></div>');
+    e.api.getItem=()=>Promise.resolve({Id:id,Name:'Resident Evil',Type:'Movie'});
+    e.api.getCurrentUser=()=>Promise.resolve({});
+    e.api.getUrl=(p,q)=>p+'?'+new URLSearchParams(q);
+    e.api.ajax=o=>{calls.push(o);return Promise.resolve(o.type==='POST'?{ok:true,job:{id:'sync',kind:'sync'}}:
+        o.url.includes('Subtitles/Sync')?{available:true,subtitles:[{index:6,title:'English ASS'}],audio:[{index:4,title:'Deutsch'},{index:5,title:'English'}]}:{ok:true,quote:null});};
+    e.w.EvolutionSubtitleJobs={subscribe:()=>{},accept:j=>{accepted=j;}};
+    e.w.confirm=()=>true;e.w.ApiClient=e.api;e.load();await e.clock.tickAsync(1200);
+    const panel=e.w.document.querySelector('#tmSubtitles');panel.open=true;panel.dispatchEvent(new e.w.Event('toggle'));await e.clock.tickAsync(1);
+    const audio=panel.querySelector('[aria-label="Tonspur für Abgleich"]');audio.value='5';
+    Array.from(panel.querySelectorAll('button')).find(b=>b.textContent==='Mit Tonspur abgleichen').click();await e.clock.tickAsync(1);
+    assert.equal(accepted.kind,'sync');assert.equal(calls.filter(c=>c.type==='POST').length,1);
+    assert.match(calls.at(-1).url,/Subtitles\/Sync.*subtitleIndex=6.*audioIndex=5/);
+    assert.ok(!calls.some(c=>c.url.includes('/Generate')));
 });
 
 test('confirmed generation hands an accepted job to the persistent observer instead of waiting for the film', async t => {

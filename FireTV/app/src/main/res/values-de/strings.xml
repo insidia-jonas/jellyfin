@@ -65,6 +65,14 @@
     <string name="subtitle_download_failed">Diese Untertiteldatei konnte nicht hinzugefügt werden.</string>
     <string name="subtitle_applying">Untertitel wird hinzugefügt…</string>
     <string name="subtitle_applied">Untertitel hinzugefügt</string>
+    <string name="subtitle_timing_value">Untertitel-Versatz: %1$+.1f s (+ später / − früher)</string>
+    <string name="subtitle_earlier">− 0,5 s · Früher anzeigen</string>
+    <string name="subtitle_later">+ 0,5 s · Später anzeigen</string>
+    <string name="subtitle_timing_reset">Versatz auf 0 s zurücksetzen</string>
+    <string name="subtitle_sync_start">Automatisch an Tonspur ausrichten</string>
+    <string name="subtitle_sync_confirm">Die gewählten Untertitel lokal mit der gewählten Tonspur abgleichen? Keine API-Kosten. Es wird eine zusätzliche synchronisierte Spur gespeichert. Du kannst den Film währenddessen verlassen.</string>
+    <string name="subtitle_sync_status">Status des Tonspur-Abgleichs</string>
+    <string name="subtitle_refresh">Verfügbare Untertitel aktualisieren</string>
     <plurals name="download_started">
         <item quantity="one">Download gestartet</item>
         <item quantity="other">%d Downloads gestartet</item>

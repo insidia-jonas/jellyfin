@@ -65,6 +65,14 @@
     <string name="subtitle_download_failed">Could not add that subtitle file.</string>
     <string name="subtitle_applying">Adding subtitle…</string>
     <string name="subtitle_applied">Subtitle added</string>
+    <string name="subtitle_timing_value">Subtitle timing: %1$+.1f s (+ later / − earlier)</string>
+    <string name="subtitle_earlier">− 0.5 s · Show earlier</string>
+    <string name="subtitle_later">+ 0.5 s · Show later</string>
+    <string name="subtitle_timing_reset">Reset timing to 0 s</string>
+    <string name="subtitle_sync_start">Align to audio automatically</string>
+    <string name="subtitle_sync_confirm">Align the selected subtitles to the selected audio on your server? No API charges. A separate synchronized track will be saved. You can leave the film while the job runs.</string>
+    <string name="subtitle_sync_status">Check alignment status</string>
+    <string name="subtitle_refresh">Refresh available subtitles</string>
     <plurals name="download_started">
         <item quantity="one">Download started</item>
         <item quantity="other">%d downloads started</item>

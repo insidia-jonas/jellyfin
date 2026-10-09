@@ -71,6 +71,8 @@ import org.jellyfin.firetv.core.ResolvedPlayback
 import org.jellyfin.firetv.core.StreamAuth
 import org.jellyfin.firetv.core.StreamResolver
 import org.jellyfin.firetv.core.SubtitleSearchOutcome
+import org.jellyfin.firetv.core.SubtitleTiming
+import org.jellyfin.firetv.core.SubtitleSync
 import org.jellyfin.firetv.databinding.ActivityPlayerBinding
 import java.util.Locale
 import java.io.IOException
@@ -91,6 +93,11 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private val tune = LiveTuneState()
     private var playerListener: Player.Listener? = null
     private var playerIsLive = false
+    private var subtitleOffsetMs = 0L
+    private var mediaSourceFactory: DefaultMediaSourceFactory? = null
+    private var pendingSubtitleOffset: Runnable? = null
+    private var subtitleSearchJob: Job? = null
+    private var subtitleSearchGeneration = 0
     private var tuneStartedAt = 0L
     private var bufferingStartedAt = 0L
     private var hasStartedPlayback = false
@@ -325,6 +332,10 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         val keepPosition = resumePositionMs ?: resolved.startPositionMs
         if (playback != null) retirePlayback(keepPlayer = resolved.isLive && playerIsLive)
         playback = resolved
+        pendingSubtitleOffset?.let(mainHandler::removeCallbacks)
+        pendingSubtitleOffset = null
+        subtitleOffsetMs = subtitleTimingKey(resolved)?.let { getSharedPreferences("subtitle-timing", MODE_PRIVATE).getLong(it, 0) } ?: 0
+        subtitleOffsetMs = SubtitleTiming.clamp(subtitleOffsetMs)
         reporter = PlaybackReporter(resolved, ignoreSsl)
         hasStartedPlayback = false
         displayMetadata = resolved.metadata
@@ -365,6 +376,8 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             extractors.setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES)
         }
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory, extractors)
+            .setSubtitleParserFactory(OffsetSubtitleParserFactory(subtitleOffsetMs))
+        this.mediaSourceFactory = mediaSourceFactory
         if (!resolved.isLive) {
             // Media3 resumes the same HTTP range after transient failures. Keep the
             // playback session and position instead of resolving the whole film again.
@@ -390,6 +403,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         val requestGeneration = tune.generation
         val listener = object : Player.Listener {
             private var reportedSubtitleCue = false
+            private var reportedSubtitleOffset = Long.MIN_VALUE
 
             override fun onRenderedFirstFrame() {
                 if (!tune.accepts(requestGeneration)) return
@@ -407,9 +421,10 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             }
 
             override fun onCues(cueGroup: CueGroup) {
-                if (BuildConfig.DEBUG && !reportedSubtitleCue && cueGroup.cues.isNotEmpty()) {
+                if (BuildConfig.DEBUG && (!reportedSubtitleCue || reportedSubtitleOffset != subtitleOffsetMs) && cueGroup.cues.isNotEmpty()) {
                     reportedSubtitleCue = true
-                    Log.i("FireTvPlayback", "subtitle first_cue count=${cueGroup.cues.size} position_ms=${exo.currentPosition}")
+                    reportedSubtitleOffset = subtitleOffsetMs
+                    Log.i("FireTvPlayback", "subtitle first_cue count=${cueGroup.cues.size} position_ms=${exo.currentPosition} cue_time_us=${cueGroup.presentationTimeUs} offset_ms=$subtitleOffsetMs")
                 }
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -927,6 +942,26 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             }
         }
         addHeading(list, getString(R.string.track_subtitles))
+        if (subtitleTimingKey(current) != null) {
+            val status = TextView(this).apply {
+                text = getString(R.string.subtitle_timing_value, subtitleOffsetMs / 1000.0)
+                textSize = 18f
+                setTextColor(Color.WHITE)
+                setPadding(8, 16, 8, 8)
+            }
+            list.addView(status)
+            addTrackButton(list, getString(R.string.subtitle_earlier), false) { adjustSubtitleOffset(-500, status) }
+            addTrackButton(list, getString(R.string.subtitle_later), false) { adjustSubtitleOffset(500, status) }
+            addTrackButton(list, getString(R.string.subtitle_timing_reset), false) { adjustSubtitleOffset(-subtitleOffsetMs, status) }
+            addTrackButton(list, getString(R.string.subtitle_sync_start), false) {
+                androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle(R.string.subtitle_sync_start)
+                    .setMessage(R.string.subtitle_sync_confirm)
+                    .setPositiveButton(R.string.subtitle_sync_start) { _, _ -> subtitleSyncAction(status, true) }
+                    .setNegativeButton(android.R.string.cancel, null).show()
+            }
+            addTrackButton(list, getString(R.string.subtitle_sync_status), false) { subtitleSyncAction(status, false) }
+        }
         addTrackButton(
             list,
             getString(R.string.subtitle_off),
@@ -940,6 +975,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             }
         }
         if (!current.isLive) {
+            addTrackButton(list, getString(R.string.subtitle_refresh), false) { refreshSubtitleTracks() }
             addTrackButton(list, getString(R.string.subtitle_search), selected = false) {
                 showSearchPanel()
             }
@@ -985,6 +1021,8 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         val current = playback ?: return
         val index = track?.index ?: -1
         playback = current.copy(selectedSubtitleIndex = index)
+        subtitleOffsetMs = subtitleTimingKey(playback!!)?.let { getSharedPreferences("subtitle-timing", MODE_PRIVATE).getLong(it, 0) } ?: 0
+        mediaSourceFactory?.setSubtitleParserFactory(OffsetSubtitleParserFactory(SubtitleTiming.clamp(subtitleOffsetMs)))
         val exo = player
         if (track != null && index != current.selectedSubtitleIndex && MediaTracks.selectedSidecar(current.subtitleTracks, index) != null) {
             reloadTracks(current.selectedAudioIndex, index)
@@ -1037,15 +1075,19 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     }
 
     private fun hideSearchPanel() {
+        subtitleSearchGeneration++
+        subtitleSearchJob?.cancel()
         binding.searchPanel.isVisible = false
         showTrackPanel()
     }
 
     private fun searchSubtitles(language: String) {
         val current = playback ?: return
+        val generation = ++subtitleSearchGeneration
+        subtitleSearchJob?.cancel()
         binding.searchStatus.setText(R.string.subtitle_search_searching)
         binding.searchResults.removeAllViews()
-        lifecycleScope.launch {
+        subtitleSearchJob = lifecycleScope.launch {
             val outcome = withContext(Dispatchers.IO) {
                 runCatching {
                     RemoteSubtitles.search(
@@ -1061,7 +1103,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                     )
                 }.getOrElse { SubtitleSearchOutcome.Failed(0, it.message.orEmpty()) }
             }
-            if (!isActiveSafe()) {
+            if (!isActiveSafe() || generation != subtitleSearchGeneration || playback?.itemId != current.itemId || !binding.searchPanel.isVisible) {
                 return@launch
             }
             when (outcome) {
@@ -1092,10 +1134,66 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         binding.searchResults.getChildAt(0)?.requestFocus()
     }
 
+    private fun subtitleTimingKey(current: ResolvedPlayback): String? {
+        if (current.isLive) return null
+        val track = MediaTracks.selectedSidecar(current.subtitleTracks, current.selectedSubtitleIndex) ?: return null
+        if (track.codec?.lowercase() !in setOf("subrip", "srt", "ass", "ssa", "webvtt", "vtt", "mov_text", "text", "ttml")) return null
+        return SubtitleTiming.key(current.serverAddress, current.userId, current.itemId, current.mediaSourceId, track.index, track.identity)
+    }
+
+    private fun subtitleSyncAction(status: TextView, start: Boolean) {
+        val current = playback ?: return
+        status.setText(R.string.subtitle_applying)
+        lifecycleScope.launch {
+            val message = withContext(Dispatchers.IO) {
+                runCatching { if (start) SubtitleSync.start(current, ignoreSsl) else SubtitleSync.status(current, ignoreSsl) }
+                    .getOrElse { it.message ?: "Tonspur-Abgleich derzeit nicht erreichbar." }
+            }
+            if (isActiveSafe() && playback?.itemId == current.itemId) status.text = message
+        }
+    }
+
+    private fun refreshSubtitleTracks() {
+        val current = playback ?: return
+        val payload = originalPayload ?: return
+        lifecycleScope.launch {
+            val refreshed = withContext(Dispatchers.IO) { runCatching {
+                StreamResolver.resolve(payload, ignoreSsl, current.selectedAudioIndex, current.selectedSubtitleIndex)
+            }.getOrNull() }
+            if (!isActiveSafe() || playback !== current) return@launch
+            if (refreshed == null) { Toast.makeText(this@PlayerActivity, R.string.subtitle_download_failed, Toast.LENGTH_LONG).show(); return@launch }
+            playback = current.copy(subtitleTracks = refreshed.subtitleTracks)
+            renderTrackPanel()
+            binding.trackList.getChildAt(1)?.requestFocus()
+        }
+    }
+
+    private fun adjustSubtitleOffset(deltaMs: Long, status: TextView) {
+        val current = playback ?: return
+        val key = subtitleTimingKey(current) ?: return
+        subtitleOffsetMs = SubtitleTiming.clamp(subtitleOffsetMs + deltaMs)
+        status.text = getString(R.string.subtitle_timing_value, subtitleOffsetMs / 1000.0)
+        getSharedPreferences("subtitle-timing", MODE_PRIVATE).edit().putLong(key, subtitleOffsetMs).apply()
+        pendingSubtitleOffset?.let(mainHandler::removeCallbacks)
+        // Coalesce repeated remote presses. Re-prepare at the current position so already
+        // decoded cues are invalidated too; the playback session and pause state stay intact.
+        pendingSubtitleOffset = Runnable {
+            val exo = player ?: return@Runnable
+            if (playback?.let(::subtitleTimingKey) != key) return@Runnable
+            val factory = mediaSourceFactory ?: return@Runnable
+            val position = exo.currentPosition
+            val playing = exo.playWhenReady
+            factory.setSubtitleParserFactory(OffsetSubtitleParserFactory(subtitleOffsetMs))
+            exo.setMediaSource(factory.createMediaSource(mediaItemFor(current)), position)
+            exo.prepare()
+            exo.playWhenReady = playing
+            Log.i("FireTvPlayback", "subtitle offset_ms=$subtitleOffsetMs position_ms=$position paused=${!playing}")
+        }.also { mainHandler.postDelayed(it, 450) }
+    }
+
     private fun applyRemoteSubtitle(item: RemoteSubtitle) {
         val current = playback ?: return
         val payload = originalPayload ?: return
-        val position = player?.currentPosition ?: current.startPositionMs
         binding.searchStatus.setText(R.string.subtitle_applying)
         lifecycleScope.launch {
             val downloaded = withContext(Dispatchers.IO) {
@@ -1125,18 +1223,22 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                     }
                 }.getOrNull()
             }
-            if (!isActiveSafe() || resolved == null) {
+            if (!isActiveSafe() || resolved == null || playback?.itemId != current.itemId) {
                 binding.searchStatus.setText(R.string.subtitle_download_failed)
                 return@launch
             }
-            val added = resolved.subtitleTracks.lastOrNull()
-                ?: resolved.subtitleTracks.firstOrNull { it.language.equals(item.language, true) }
+            val added = resolved.subtitleTracks.firstOrNull { candidate ->
+                candidate.isExternal && current.subtitleTracks.none { it.identity == candidate.identity }
+            } ?: resolved.subtitleTracks.firstOrNull { it.isExternal && it.language.equals(item.language, true) }
+            val position = player?.currentPosition ?: current.startPositionMs
+            val playing = player?.playWhenReady ?: true
             Toast.makeText(this@PlayerActivity, R.string.subtitle_applied, Toast.LENGTH_SHORT).show()
             binding.searchPanel.isVisible = false
             startPlayer(
                 resolved.copy(selectedSubtitleIndex = added?.index ?: resolved.selectedSubtitleIndex),
                 position,
             )
+            player?.playWhenReady = playing
             showTrackPanel()
         }
     }

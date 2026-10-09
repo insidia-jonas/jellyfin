@@ -206,6 +206,19 @@ Paketname: `org.jellyfin.firetvweb` — parallel zur offiziellen Android-TV-App 
 
 ## Wiedergabe und Downloads
 
+Version 2.5.7 ergänzt unter **Ton & Untertitel** für Textspuren eine Zeitkorrektur
+in 0,5-Sekunden-Schritten (Plus = später, Minus = früher, Bereich ±120 Sekunden).
+Der Versatz bleibt pro Benutzer, Film/Datei und Untertitelspur gespeichert. Beim
+Anwenden werden bereits dekodierte Untertitel erneuert; Position und Pause bleiben
+erhalten, kurzzeitiges Nachpuffern ist möglich. Eingebrannte Bilduntertitel lassen
+sich auf diese Weise nicht verschieben.
+
+Mit Evolution 1.4.0 startet **Automatisch an Tonspur ausrichten** einen lokalen
+Hintergrundauftrag ohne API-Kosten. Danach **Verfügbare Untertitel aktualisieren**
+und die zusätzliche Spur **Synchronisiert** auswählen. Das Original bleibt erhalten.
+Die Online-Suche prüft Filmidentität, Jahr, Sprache sowie Staffel/Folge. Ein
+Sprachwechsel verwirft verspätete Antworten der vorherigen Suche.
+
 Version 2.5.6 zeigt bei der globalen Suche die Herkunft „Bibliothek“ oder „Indexer“
 und übernimmt die gemeinsame Trefferbewertung des Servers. Titelvarianten, Tippfehler,
 vertauschte Wörter und Volltexttreffer benötigen Evolution 1.3.1 und den zugehörigen
