@@ -32,6 +32,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<Subtitles.OpenSubtitlesClient>();
         serviceCollection.AddSingleton<Subtitles.OpenSubtitlesProvider>();
         serviceCollection.AddSingleton<Subtitles.AiSubtitleService>();
+        serviceCollection.AddSingleton<Subtitles.SubtitleSyncService>();
         serviceCollection.AddSingleton(sp => new Subtitles.SubtitleJobQueue(
             System.IO.Path.Combine(sp.GetRequiredService<MediaBrowser.Common.Configuration.IApplicationPaths>().DataPath, "evolution", "subtitle-jobs.json"),
             async (job, progress, ct) =>
@@ -43,7 +44,12 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
                         && !user.HasPermission(Jellyfin.Database.Implementations.Enums.PermissionKind.EnableContentDownloading))
                     || Subtitles.SubtitleFiles.ResolveMediaPath(item) != job.Quote.Path)
                     throw new System.InvalidOperationException("Subtitle media access changed.");
-                await sp.GetRequiredService<Subtitles.AiSubtitleService>().GenerateAsync(job.Quote, ct, job.Force, progress).ConfigureAwait(false);
+                if (job.Kind == "sync")
+                {
+                    await sp.GetRequiredService<Subtitles.SubtitleSyncService>().RunAsync(item, job, progress, ct).ConfigureAwait(false);
+                    await item.RefreshMetadata(ct).ConfigureAwait(false);
+                }
+                else await sp.GetRequiredService<Subtitles.AiSubtitleService>().GenerateAsync(job.Quote, ct, job.Force, progress).ConfigureAwait(false);
                 item.ChangedExternally();
             }, sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Subtitles.SubtitleJobQueue>>()));
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<Subtitles.SubtitleJobQueue>());

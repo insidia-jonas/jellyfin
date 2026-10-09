@@ -416,6 +416,31 @@ def reconcile(args, home, choices=None, setup=None):
     return all(link['state'] not in ('error', 'missing') for link in links)
 
 
+def install_subtitle_sync():
+    """Isolated, pinned local speech aligner; no model downloads or provider credentials."""
+    python = Path('/opt/jellyfin-subtitle-sync/bin/python')
+    if python.exists():
+        check = subprocess.run([str(python), '-c',
+            'from importlib.metadata import version; import webrtcvad, numpy; assert version("ffsubsync") == "0.4.29"'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if check.returncode == 0:
+            print('Local subtitle synchronization already installed.')
+            return
+    if not python.exists():
+        run('apt-get', 'update')
+        run('apt-get', 'install', '-y', 'python3-venv')
+        run('python3', '-m', 'venv', python.parent.parent)
+    run(python, '-m', 'pip', 'install', '--disable-pip-version-check', 'ffsubsync==0.4.29')
+    # The installer uses a private umask; service users need read/execute access.
+    for directory, dirs, files in os.walk(python.parent.parent):
+        os.chmod(directory, 0o755)
+        for name in files:
+            path = Path(directory) / name
+            if not path.is_symlink():
+                os.chmod(path, 0o755 if path.stat().st_mode & 0o111 else 0o644)
+    print('Local subtitle synchronization ready (ffsubsync 0.4.29).')
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--user', default=os.environ.get('SUDO_USER') or os.environ.get('USER'))
@@ -430,6 +455,7 @@ def main(argv=None):
     parser.add_argument('--interrupt-playback', action='store_true', help='Explicitly allow the server restart to interrupt active or paused playback')
     parser.add_argument('--configure-only', action='store_true')
     parser.add_argument('--install-missing', action='store_true')
+    parser.add_argument('--install-subtitle-sync', action='store_true', help='Install/update the isolated local subtitle speech aligner')
     parser.add_argument('--setup-config', type=Path, help='Private JSON with mediaRoot, indexer and Usenet credentials for new systems')
     parser.add_argument('--allow-dirty', action='store_true', help='Allow a locally reviewed development bundle')
     for service in ('radarr', 'sonarr', 'sab'):
@@ -463,6 +489,8 @@ def main(argv=None):
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         if args.install_missing:
             install_missing(args, account, services)
+        if args.install_missing or args.install_subtitle_sync:
+            install_subtitle_sync()
         if not args.configure_only:
             if not args.bundle:
                 if run('git', '-C', args.repo, 'status', '--porcelain', capture=True).strip():

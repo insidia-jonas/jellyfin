@@ -314,6 +314,7 @@ public class TreasureMapsController : ControllerBase
         {
             MediaPath = path,
             Name = item.Name,
+            OriginalTitle = item.OriginalTitle,
             Language = language,
             TwoLetterISOLanguageName = language,
             ProductionYear = item.ProductionYear,
@@ -332,6 +333,8 @@ public class TreasureMapsController : ControllerBase
         if (item is Episode episode)
         {
             request.SeriesName = episode.SeriesName;
+            request.OriginalTitle = episode.Series?.OriginalTitle;
+            request.SeriesProviderIds = episode.Series?.ProviderIds ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             request.ParentIndexNumber = episode.ParentIndexNumber;
             request.IndexNumber = episode.IndexNumber;
         }

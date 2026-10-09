@@ -52,15 +52,21 @@ public sealed class SubtitleJobQueue : BackgroundService
         }
     }
 
-    public SubtitleJob Enqueue(Guid owner, Guid item, SubtitleQuote quote, bool force)
+    public SubtitleJob Enqueue(Guid owner, Guid item, SubtitleQuote quote, bool force, int? subtitleIndex = null, int? audioIndex = null, string? trackFingerprint = null)
     {
         lock (_sync)
         {
             if (_storageError is not null) throw new InvalidOperationException(_storageError);
-            var duplicate = _jobs.FirstOrDefault(j => j.ItemId == item && j.Quote.Language == quote.Language && j.Active);
-            if (duplicate is not null) return duplicate;
+            var duplicate = _jobs.FirstOrDefault(j => j.ItemId == item && j.Quote.Language == quote.Language
+                && j.SubtitleIndex == subtitleIndex && j.AudioIndex == audioIndex && j.Active);
+            if (duplicate is not null)
+            {
+                if (duplicate.Owner != owner) throw new InvalidOperationException("Untertitel-Warteschlange: Für diese Spur läuft bereits ein Auftrag.");
+                return duplicate;
+            }
             if (_jobs.Count(j => j.Active) >= 8) throw new InvalidOperationException("Die Warteschlange ist voll (maximal acht Aufträge).");
-            var job = new SubtitleJob { Id = Guid.NewGuid(), Owner = owner, ItemId = item, Quote = quote, Force = force };
+            var job = new SubtitleJob { Id = Guid.NewGuid(), Owner = owner, ItemId = item, Quote = quote, Force = force,
+                Kind = subtitleIndex.HasValue ? "sync" : "generate", SubtitleIndex = subtitleIndex, AudioIndex = audioIndex, TrackFingerprint = trackFingerprint };
             _jobs.Add(job);
             try { Save(); }
             catch (Exception ex) { _jobs.Remove(job); StorageFailed(ex); throw; }
@@ -132,7 +138,9 @@ public sealed class SubtitleJobQueue : BackgroundService
                         Update(latest with { Stage = progress.Stage, Percent = Math.Max(latest.Percent, Math.Clamp(progress.Percent, 0, 99)), Message = progress.Message });
                     }
                 }, work.Token).ConfigureAwait(false);
-                Finish(job.Id, "completed", "Untertitel gespeichert. Sie stehen nach der Medienaktualisierung zur Auswahl bereit.", 100);
+                Finish(job.Id, "completed", job.Kind == "sync"
+                    ? "Tonspur-Abgleich fertig. Die zusätzliche Spur „Synchronisiert“ steht zur Auswahl. Bitte das Ergebnis bei Dialogen prüfen; das Original bleibt erhalten."
+                    : "Untertitel gespeichert. Sie stehen nach der Medienaktualisierung zur Auswahl bereit.", 100);
             }
             catch (OperationCanceledException)
             {
@@ -182,6 +190,7 @@ public sealed class SubtitleJobQueue : BackgroundService
     public static string SafeError(Exception ex)
     {
         if (ex is InvalidOperationException && ex.Message.StartsWith("Untertitel-Warteschlange", StringComparison.Ordinal)) return ex.Message;
+        if (ex is InvalidOperationException && ex.Message.StartsWith("Tonspur-Abgleich:", StringComparison.Ordinal)) return ex.Message;
         if (ex is InvalidOperationException && ex.Message.StartsWith("Die Warteschlange ist voll", StringComparison.Ordinal)) return ex.Message;
         if (ex is OperationCanceledException or TimeoutException) return "Der KI-Anbieter hat nicht rechtzeitig geantwortet. Gesicherte Schritte bleiben erhalten; bitte später erneut versuchen.";
         if (ex is UnauthorizedAccessException) return "Die Untertiteldatei konnte nicht gespeichert werden. Schreibrechte des Medienordners prüfen.";
@@ -202,6 +211,10 @@ public sealed record SubtitleJob
     public Guid ItemId { get; init; }
     public SubtitleQuote Quote { get; init; } = new();
     public bool Force { get; init; }
+    public string Kind { get; init; } = "generate";
+    public int? SubtitleIndex { get; init; }
+    public int? AudioIndex { get; init; }
+    public string? TrackFingerprint { get; init; }
     public string State { get; init; } = "queued";
     public string Stage { get; init; } = "queued";
     public int Percent { get; init; }
@@ -210,6 +223,6 @@ public sealed record SubtitleJob
     public DateTimeOffset Updated { get; init; } = DateTimeOffset.UtcNow;
     public bool Active => State is "queued" or "running" or "cancelling";
     public object View() => new { id = Id, itemId = ItemId, title = Quote.Title, language = Quote.Language,
-        state = State, stage = Stage, percent = Percent, message = Message, active = Active,
+        state = State, stage = Stage, percent = Percent, message = Message, active = Active, kind = Kind,
         estimatedUsd = Quote.TotalUsd, created = Created, updated = Updated };
 }

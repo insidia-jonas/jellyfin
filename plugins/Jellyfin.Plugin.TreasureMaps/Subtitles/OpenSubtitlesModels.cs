@@ -38,6 +38,9 @@ public class OsSubtitle
 /// <summary>Subtitle attributes.</summary>
 public class OsSubtitleAttributes
 {
+    /// <summary>Gets or sets the actual film/episode identity, independently of the release label.</summary>
+    [JsonPropertyName("feature_details")]
+    public OsFeatureDetails? Feature { get; set; }
     /// <summary>Gets or sets the language (2-letter code).</summary>
     [JsonPropertyName("language")]
     public string? Language { get; set; }
@@ -81,6 +84,31 @@ public class OsSubtitleAttributes
     /// <summary>Gets or sets the files (the first file's id is used for download).</summary>
     [JsonPropertyName("files")]
     public IReadOnlyList<OsSubtitleFile> Files { get; set; } = new List<OsSubtitleFile>();
+}
+
+/// <summary>Provider identity used to reject unrelated films and episodes.</summary>
+public sealed class OsFeatureDetails
+{
+    [JsonPropertyName("feature_type")]
+    public string? Type { get; set; }
+    [JsonPropertyName("title")]
+    public string? Title { get; set; }
+    [JsonPropertyName("parent_title")]
+    public string? ParentTitle { get; set; }
+    [JsonPropertyName("year"), JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
+    public int? Year { get; set; }
+    [JsonPropertyName("imdb_id"), JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
+    public long? Imdb { get; set; }
+    [JsonPropertyName("tmdb_id"), JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
+    public long? Tmdb { get; set; }
+    [JsonPropertyName("parent_imdb_id"), JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
+    public long? ParentImdb { get; set; }
+    [JsonPropertyName("parent_tmdb_id"), JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
+    public long? ParentTmdb { get; set; }
+    [JsonPropertyName("season_number"), JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
+    public int? Season { get; set; }
+    [JsonPropertyName("episode_number"), JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
+    public int? Episode { get; set; }
 }
 
 /// <summary>A downloadable subtitle file entry.</summary>

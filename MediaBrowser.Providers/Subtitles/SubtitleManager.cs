@@ -343,6 +343,7 @@ namespace MediaBrowser.Providers.Subtitles
                 Language = language,
                 MediaPath = video.Path,
                 Name = video.Name,
+                OriginalTitle = video.OriginalTitle,
                 ParentIndexNumber = video.ParentIndexNumber,
                 ProductionYear = video.ProductionYear,
                 ProviderIds = video.ProviderIds,
@@ -355,6 +356,8 @@ namespace MediaBrowser.Providers.Subtitles
             {
                 request.IndexNumberEnd = episode.IndexNumberEnd;
                 request.SeriesName = episode.SeriesName;
+                request.OriginalTitle = episode.Series?.OriginalTitle;
+                request.SeriesProviderIds = episode.Series?.ProviderIds ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             }
 
             return SearchSubtitles(request, cancellationToken);
