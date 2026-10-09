@@ -59,6 +59,12 @@ public sealed class SubtitleSyncService(IMediaSourceManager sources)
         var video = SubtitleFiles.ResolveMediaPath(item) ?? throw new InvalidOperationException("Tonspur-Abgleich: Lokale Mediendatei nicht verfügbar.");
         if (Fingerprint(video, subtitle, audio) != job.TrackFingerprint)
             throw new InvalidOperationException("Tonspur-Abgleich: Medien oder Spuren wurden geändert. Bitte die Spuren erneut auswählen.");
+        var language = LanguageMatcher.Normalize(subtitle.Language);
+        if (!Regex.IsMatch(language ?? "", "^[a-z]{2,3}$")) language = "und";
+        var target = Path.Combine(Path.GetDirectoryName(video)!, Path.GetFileNameWithoutExtension(video)
+            + $".Synchronisiert-Tonspur-{audioOrdinal + 1}.{language}.srt");
+        if (subtitle.IsExternal && Path.GetFullPath(subtitle.Path) == Path.GetFullPath(target))
+            throw new InvalidOperationException("Tonspur-Abgleich: Diese Spur wurde bereits synchronisiert. Für einen neuen Abgleich bitte die Originalspur wählen.");
         var fingerprint = (new FileInfo(video).Length, File.GetLastWriteTimeUtc(video));
         var work = Path.Combine(Path.GetTempPath(), "evolution-sync-" + job.Id.ToString("N"));
         Directory.CreateDirectory(work);
@@ -88,10 +94,6 @@ public sealed class SubtitleSyncService(IMediaSourceManager sources)
                 || Fingerprint(video, subtitle, audio) != job.TrackFingerprint)
                 throw new InvalidOperationException("Tonspur-Abgleich: Ergebnis unvollständig oder Mediendatei geändert. Das Original bleibt erhalten.");
             progress(new("saving", 95, "Synchronisierte Spur wird zusätzlich gespeichert."));
-            var language = LanguageMatcher.Normalize(subtitle.Language);
-            if (!Regex.IsMatch(language ?? "", "^[a-z]{2,3}$")) language = "und";
-            var target = Path.Combine(Path.GetDirectoryName(video)!, Path.GetFileNameWithoutExtension(video)
-                + $".Synchronisiert-S{subtitle.Index}-A{audio.Index}.{language}.srt");
             // Copy to the media filesystem before the atomic rename; /tmp may be another volume.
             var staged = target + "." + job.Id.ToString("N") + ".tmp";
             try
