@@ -644,6 +644,11 @@
             return null;
         }
         var candidates = [mod, mod.playbackManager, mod.default, mod.PlaybackManager];
+        // Optimized webpack builds also shorten named exports (for example "f").
+        Object.keys(mod).forEach(function (key) {
+            var value = mod[key];
+            if (value && typeof value.currentMediaSource === 'function' && typeof value.getPlayerState === 'function') { candidates.push(value); }
+        });
         var i;
         for (i = 0; i < candidates.length; i++) {
             var value = candidates[i];
