@@ -23,7 +23,7 @@ function collectAuth() {
         deviceId: device.deviceId || "",
         deviceName: device.deviceName || "Fire TV",
         appName: device.appName || "Jellyfin Fire TV",
-        appVersion: device.appVersion || "2.5.10"
+        appVersion: device.appVersion || "2.5.11"
     };
 }
 
@@ -48,7 +48,7 @@ function toPayload(options) {
                 IndexNumber: item.IndexNumber,
                 IndexNumberEnd: item.IndexNumberEnd,
                 MediaType: item.MediaType,
-                IsLiveStream: !!(item.IsLiveStream || item.Type === "TvChannel" || item.Type === "Program" || item.Type === "LiveTvProgram"),
+                IsLiveStream: !!(!["Movie", "Episode", "Audio", "MusicVideo"].includes(item.Type) && (item.IsLiveStream || item.Type === "TvChannel" || item.Type === "Program" || item.Type === "LiveTvProgram")),
                 ChannelId: item.ChannelId,
                 ExternalId: item.ExternalId,
                 OriginalTitle: item.OriginalTitle,

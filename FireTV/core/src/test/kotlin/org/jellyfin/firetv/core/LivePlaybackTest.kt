@@ -7,6 +7,28 @@ import org.junit.jupiter.api.Test
 
 class LivePlaybackTest {
     @Test
+    fun `library types override stale flags and dynamic stream handles`() {
+        for (type in listOf("Movie", "Episode", "Audio")) {
+            val payload = """{"IsLiveStream":true,"items":[{"Id":"film","Type":"$type","IsLiveStream":true}]}"""
+            assertFalse(LivePlayback.isLivePayload(payload))
+            assertFalse(LivePlayback.isLive(payload, """{"RequiresOpening":true,"LiveStreamId":"handle","IsInfiniteStream":true}"""))
+        }
+        assertFalse(LivePlayback.isLiveSource("""{"RequiresOpening":true,"LiveStreamId":"dynamic-vod"}"""))
+        assertFalse(LivePlayback.isLiveType("Channel"))
+    }
+
+    @Test
+    fun `nested media types and queued live flags do not replace the current item`() {
+        val payload = """{"items":[{"MediaSources":[{"Type":"Video","IsLiveStream":true}],"Type":"Episode"},{"Type":"TvChannel","IsLiveStream":true}]}"""
+        assertEquals("Episode", LivePlayback.itemType(payload))
+        assertFalse(LivePlayback.isLivePayload(payload))
+        assertFalse(LivePlayback.isLivePayload("""{"items":[{"Type":"Video"},{"Type":"TvChannel","IsLiveStream":true}]}"""))
+        assertTrue(LivePlayback.isLivePayload("""{"items":[{"Type":"Video","IsLiveStream":true}]}"""))
+        assertTrue(LivePlayback.isLivePayload("""{"IsLiveStream":true,"items":[{"Type":"Video"}]}"""))
+        assertTrue(LivePlayback.isLivePayload("""{"items":[{"Type":"TvChannel"}]}"""))
+    }
+
+    @Test
     fun `detects tv channels and infinite media sources`() {
         assertTrue(LivePlayback.isLiveType("TvChannel"))
         assertTrue(LivePlayback.isLiveType("Program"))

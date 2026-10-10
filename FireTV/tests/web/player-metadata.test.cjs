@@ -14,14 +14,17 @@ test('native player receives series metadata for current and queued episodes', a
     const context = vm.createContext({window});
     const source = fs.readFileSync(path.resolve(__dirname,'../../app/src/main/assets/native/ExoPlayerPlugin.js'),'utf8');
     vm.runInContext(source.replace('export class ExoPlayerPlugin','class ExoPlayerPlugin') + '\nwindow.plugin = new ExoPlayerPlugin({});', context);
-    const items = [5,6].map(n=>({Id:'episode-'+n,Name:'Folge '+n,Type:'Episode',SeriesName:'All Her Fault',SeriesId:'series',ParentIndexNumber:1,IndexNumber:n,Overview:'Deutsche Beschreibung.',RunTimeTicks:10000000}));
+    const items = [5,6].map(n=>({Id:'episode-'+n,Name:'Folge '+n,Type:'Episode',IsLiveStream:true,SeriesName:'All Her Fault',SeriesId:'series',ParentIndexNumber:1,IndexNumber:n,Overview:'Deutsche Beschreibung.',RunTimeTicks:10000000}));
     await window.plugin.play({items,startPositionTicks:450000000});
     assert.deepEqual(delivered.ids,['episode-5','episode-6']);
     for (let n=0;n<2;n++) {
+        assert.equal(delivered.items[n].IsLiveStream, false, 'An episode cannot inherit stale live playback flags');
         for (const field of ['Name','SeriesName','SeriesId','ParentIndexNumber','IndexNumber','Overview','RunTimeTicks']) {
             assert.equal(delivered.items[n][field],items[n][field],field);
         }
     }
     assert.equal(delivered.startPositionTicks,450000000);
     assert.equal(delivered.deviceId,'test-tv');
+    await window.plugin.play({items:[{Id:'live',Type:'Video',IsLiveStream:true}]});
+    assert.equal(delivered.items[0].IsLiveStream, true, 'Generic IPTV channel tiles remain supported');
 });

@@ -77,9 +77,9 @@ object StreamResolver {
         require(sources.isNotEmpty()) { "Server returned no media sources" }
         var source = pickSource(sources, mediaSourceId, liveHint)
         val playSessionId = jsonStringField(response.body, "PlaySessionId")
-        val live = liveHint || LivePlayback.isLiveSource(source)
+        val live = LivePlayback.isLive(payload, source)
         val openToken = liveOpenToken(source, tunerId, itemId)
-        if (live && (needsLiveOpen(source) || PlayUrl.resolveLive(server, urlsOf(source)) == null)) {
+        if (needsLiveOpen(source) || (live && PlayUrl.resolveLive(server, urlsOf(source)) == null)) {
             openLiveStream(
                 server = server,
                 itemId = itemId,
@@ -261,10 +261,11 @@ object StreamResolver {
     }
 
     private fun liveOpenToken(source: String, tunerId: String?, itemId: String): String? {
-        val fromSource = jsonStringField(source, "OpenToken")
-        return listOfNotNull(fromSource, tunerId, itemId).firstOrNull { LivePlayback.isTunerChannelId(it) }
-            ?: fromSource
+        // This opaque token includes the media-source provider and possibly a
+        // server selection. A plain tuner id would discard both.
+        return jsonStringField(source, "OpenToken")?.takeIf { it.isNotBlank() }
             ?: tunerId
+            ?: itemId.takeIf { LivePlayback.isTunerChannelId(it) }
     }
 
     private fun urlsOf(source: String): MediaSourceUrls {
@@ -284,6 +285,7 @@ object StreamResolver {
                     return match
                 }
             }
+            require(!mediaSourceId.contains("_iptv_")) { "Selected IPTV source was not returned by the server" }
         }
         if (live) {
             sources.firstOrNull { LivePlayback.isUsableLiveSource(it) }?.let { return it }

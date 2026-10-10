@@ -9,6 +9,52 @@ import java.util.concurrent.Executors
 
 class StreamResolverTest {
     @Test
+    fun `explicit IPTV selection cannot silently use the default source`() {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/Items/channel/PlaybackInfo") { exchange ->
+            exchange.requestBody.readBytes()
+            val body = """{"MediaSources":[{"Id":"default","IsInfiniteStream":true,"SupportsDirectStream":true,"DirectStreamUrl":"/LiveTv/LiveStreamFiles/default/stream.ts"}]}""".toByteArray()
+            exchange.sendResponseHeaders(200, body.size.toLong())
+            exchange.responseBody.use { it.write(body) }
+        }
+        server.start()
+        try {
+            val base = "http://127.0.0.1:${server.address.port}"
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException::class.java) {
+                StreamResolver.resolve("""{"serverAddress":"$base","items":[{"Id":"channel","Type":"TvChannel"}],"mediaSourceId":"default_iptv_other"}""", false)
+            }
+        } finally { server.stop(0) }
+    }
+
+    @Test
+    fun `finite episode opens dynamic source without live TV controls or losing resume`() {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        var opens = 0
+        server.createContext("/Items/episode/PlaybackInfo") { exchange ->
+            exchange.requestBody.readBytes()
+            val body = """{"MediaSources":[{"Id":"vod","RequiresOpening":true,"OpenToken":"dynamic-vod"}]}""".toByteArray()
+            exchange.sendResponseHeaders(200, body.size.toLong())
+            exchange.responseBody.use { it.write(body) }
+        }
+        server.createContext("/LiveStreams/Open") { exchange ->
+            exchange.requestBody.readBytes(); opens++
+            val body = """{"MediaSource":{"Id":"vod","LiveStreamId":"finite-handle","SupportsDirectStream":true,"DirectStreamUrl":"/Videos/episode/stream.mkv"}}""".toByteArray()
+            exchange.sendResponseHeaders(200, body.size.toLong())
+            exchange.responseBody.use { it.write(body) }
+        }
+        server.start()
+        try {
+            val base = "http://127.0.0.1:${server.address.port}"
+            val result = StreamResolver.resolve("""{"serverAddress":"$base","items":[{"Id":"episode","Type":"Episode","SeriesName":"Example","IndexNumber":3,"ParentIndexNumber":1}],"startPositionTicks":1230000000}""", false)
+            assertEquals(false, result.isLive)
+            assertEquals(123000L, result.startPositionMs)
+            assertEquals("finite-handle", result.liveStreamId)
+            assertEquals(1, opens)
+            assertTrue(result.url.startsWith("$base/Videos/episode/stream.mkv"))
+        } finally { server.stop(0) }
+    }
+
+    @Test
     fun `local direct play without stream URLs uses authenticated static media endpoint`() {
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/Items/local-file/PlaybackInfo") { exchange ->
@@ -242,7 +288,7 @@ class StreamResolverTest {
                   "PlaySessionId": "live-session-2",
                   "MediaSources": [
                     {"Id":"file","Protocol":"File","Path":"","SupportsDirectPlay":true},
-                    {"Id":"tuner","RequiresOpening":true,"IsInfiniteStream":true,"OpenToken":"m3u_zdf","Path":"http://nl01.provider.example/zdf.ts","SupportsDirectPlay":true}
+                    {"Id":"tuner","RequiresOpening":true,"IsInfiniteStream":true,"OpenToken":"provider_m3u_zdf|tuner_iptv_choice","Path":"http://nl01.provider.example/zdf.ts","SupportsDirectPlay":true}
                   ]
                 }
             """.trimIndent()
@@ -280,7 +326,7 @@ class StreamResolverTest {
                 }
             """.trimIndent()
             val resolved = StreamResolver.resolve(payload, ignoreSslErrors = false)
-            assertTrue(openedToken.contains("m3u_zdf"))
+            assertEquals("provider_m3u_zdf|tuner_iptv_choice", jsonStringField(openedToken, "OpenToken"))
             assertTrue(resolved.isLive)
             assertEquals("http://127.0.0.1:$port/LiveTv/LiveStreamFiles/zdf/stream.ts?api_key=t", resolved.url)
             assertTrue(!resolved.url.contains("provider.example"))

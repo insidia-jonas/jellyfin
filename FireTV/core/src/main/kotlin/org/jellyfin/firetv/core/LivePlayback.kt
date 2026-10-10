@@ -10,38 +10,38 @@ package org.jellyfin.firetv.core
 object LivePlayback {
     fun itemType(payload: String): String? {
         val fromItem = jsonArrayObjects(payload, "items").firstOrNull()?.let {
-            jsonStringField(it, "Type") ?: jsonStringField(it, "type")
+            val root = jsonShallowObject(it)
+            jsonStringField(root, "Type") ?: jsonStringField(root, "type")
         }
-        return fromItem?.ifBlank { null } ?: jsonStringField(payload, "itemType")
+        return fromItem?.ifBlank { null } ?: jsonStringField(jsonShallowObject(payload), "itemType")
     }
 
     fun isLivePayload(payload: String): Boolean {
-        if (jsonBooleanField(payload, "IsLiveStream") == true) {
-            return true
-        }
+        if (isLibraryItem(payload)) return false
         val item = jsonArrayObjects(payload, "items").firstOrNull()
-        if (item != null && jsonBooleanField(item, "IsLiveStream") == true) {
-            return true
-        }
-        return isLiveType(itemType(payload))
+        return isLiveType(itemType(payload)) ||
+            (item != null && jsonBooleanField(jsonShallowObject(item), "IsLiveStream") == true) ||
+            jsonBooleanField(jsonShallowObject(payload), "IsLiveStream") == true
     }
+
+    private fun isLibraryItem(payload: String) = itemType(payload)?.lowercase() in
+        setOf("movie", "episode", "audio", "musicvideo", "videoepisode")
 
     fun isLiveType(type: String?): Boolean {
         return when (type?.lowercase()) {
-            "tvchannel", "program", "livetvprogram", "channel" -> true
+            "tvchannel", "program", "livetvprogram" -> true
             else -> false
         }
     }
 
     fun isLiveSource(source: String): Boolean {
-        return jsonBooleanField(source, "IsInfiniteStream") == true ||
-            jsonBooleanField(source, "RequiresOpening") == true ||
-            !jsonStringField(source, "LiveStreamId").isNullOrBlank() ||
-            PlayUrl.isLiveProxy(jsonStringField(source, "Path").orEmpty())
+        val root = jsonShallowObject(source)
+        return jsonBooleanField(root, "IsInfiniteStream") == true ||
+            PlayUrl.isLiveProxy(jsonStringField(root, "Path").orEmpty())
     }
 
     fun isLive(payload: String, source: String?): Boolean {
-        return isLivePayload(payload) || (source != null && isLiveSource(source))
+        return !isLibraryItem(payload) && (isLivePayload(payload) || (source != null && isLiveSource(source)))
     }
 
     fun isTunerChannelId(id: String?): Boolean {

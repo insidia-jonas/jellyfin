@@ -64,6 +64,16 @@
         android:visibility="gone">
 
         <TextView
+            android:id="@+id/osdContext"
+            style="@style/Widget.JellyfinFireTv.Caption"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="6dp"
+            android:textColor="@color/accent_soft"
+            android:letterSpacing="0.12"
+            android:textSize="12sp" />
+
+        <TextView
             android:id="@+id/osdTitle"
             style="@style/Widget.JellyfinFireTv.Title"
             android:layout_width="match_parent"
@@ -150,6 +160,13 @@
                 tools:text="−1:27:50" />
         </LinearLayout>
 
+        <LinearLayout
+            android:id="@+id/osdActions"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:orientation="horizontal" />
+
         <TextView
             android:id="@+id/osdSubtitleJob"
             style="@style/Widget.JellyfinFireTv.Caption"
@@ -199,17 +216,7 @@
 
     <FrameLayout
         android:id="@+id/trackPanel"
-        android:layout_width="480dp"
-        android:layout_height="match_parent"
-        android:layout_gravity="end"
-        android:layout_margin="22dp"
-        android:background="@drawable/bg_track_glass"
-        android:elevation="12dp"
-        android:visibility="gone" />
-
-    <FrameLayout
-        android:id="@+id/serverPanel"
-        android:layout_width="500dp"
+        android:layout_width="450dp"
         android:layout_height="match_parent"
         android:layout_gravity="end"
         android:layout_margin="22dp"

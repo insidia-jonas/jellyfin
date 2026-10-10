@@ -14,13 +14,17 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.view.isVisible
 import org.jellyfin.firetv.R
+import org.jellyfin.firetv.core.IptvSourceSnapshot
 import org.jellyfin.firetv.core.MediaTrack
 import org.jellyfin.firetv.core.ResolvedPlayback
 import org.jellyfin.firetv.core.TrackPresentation
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.abs
 
-/** Small native drawer: all focus targets are actions, never labels or film text. */
+/** One accordion drawer. Only headers and actions receive remote focus. */
 class PlaybackTrackPanel(
     private val context: Context,
     private val root: FrameLayout,
@@ -31,106 +35,86 @@ class PlaybackTrackPanel(
     private val syncStatus: () -> Unit,
     private val refresh: () -> Unit,
     private val search: () -> Unit,
+    private val serverPicked: (String) -> Unit,
+    private val retryServers: () -> Unit,
+    private val retryPlayback: () -> Unit,
 ) {
-    private enum class Section { AUDIO, SUBTITLES, TIMING }
-    private var section = Section.AUDIO
+    private enum class Section { SERVERS, AUDIO, SUBTITLES, TIMING }
+    private var section: Section? = null
     private var current: ResolvedPlayback? = null
+    private var itemId: String? = null
+    private var live = false
     private var canTime = false
     private var offsetMs = 0L
-    private val nav = mutableListOf<View>()
+    private var lastFocus: String? = null
+    private var snapshot: IptvSourceSnapshot? = null
+    private var selectedServer: String? = null
+    private var serversLoading = false
+    private var serversFailed = false
+    private var failure = ""
     private val actions = mutableListOf<View>()
-    private val remembered = mutableMapOf<Section, String>()
-    private val title = text(24f, bold = true)
-    private val mediaTitle = text(14f, muted = true)
-    private val contentTitle = text(18f, bold = true)
+    private val mediaTitle = text(15f, muted = true)
     private val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-    private val scroll = ScrollView(context).apply { isFillViewport = false; isVerticalScrollBarEnabled = false; isFocusable = false }
+    private val scroll = ScrollView(context).apply { isVerticalScrollBarEnabled = false; isFocusable = false }
     private val job = text(13f, muted = true)
     private var timingValue: TextView? = null
     private var timingHint: TextView? = null
     private var earlier: View? = null
     private var later: View? = null
     private var closing = false
-    private var rendering = false
+    private fun tr(de: String, en: String) = if (Locale.getDefault().language == "de") de else en
 
     init {
-        val column = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(22), dp(20), dp(22), dp(16))
-        }
+        val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(22), dp(20), dp(22), dp(16)) }
         root.addView(column, FrameLayout.LayoutParams(-1, -1))
-        column.addView(text(11f, muted = true).apply {
-            text = str(R.string.track_panel_eyebrow); letterSpacing = .15f
-        })
-        title.setText(R.string.tracks_title)
-        column.addView(title, vertical(-1, -2, 6))
-        mediaTitle.maxLines = 1; mediaTitle.ellipsize = TextUtils.TruncateAt.END
-        column.addView(mediaTitle, vertical(-1, -2, 4))
-        column.addView(View(context).apply { setBackgroundColor(0x304F6687) }, vertical(-1, 1, 16))
-        val body = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-        column.addView(body, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(16) })
-        val rail = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        body.addView(rail, LinearLayout.LayoutParams(dp(94), -1).apply { marginEnd = dp(14) })
-        val labels = listOf(R.string.track_audio, R.string.track_subtitles, R.string.track_panel_timing)
-        val symbols = listOf("♫", "CC", "↔")
-        Section.entries.forEachIndexed { index, value ->
-            val tab = LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-                isFocusable = true; isClickable = true; id = View.generateViewId()
-                setBackgroundResource(R.drawable.bg_track_row)
-                addView(text(21f, bold = true).apply { text = symbols[index]; gravity = Gravity.CENTER })
-                addView(text(12f, bold = true).apply { text = str(labels[index]); gravity = Gravity.CENTER })
-                contentDescription = str(labels[index])
-                setOnFocusChangeListener { _, focused -> if (focused && !rendering && section != value) { section = value; renderContent() } }
-                setOnClickListener { section = value; renderContent(); focusContent() }
-            }
-            rail.addView(tab, vertical(-1, 70, if (index == 0) 0 else 8)); nav.add(tab)
-        }
-        val content = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        body.addView(content, LinearLayout.LayoutParams(0, -1, 1f))
-        content.addView(contentTitle, vertical(-1, -2))
+        column.addView(text(11f, muted = true).apply { text = tr("WIEDERGABE", "PLAYBACK"); letterSpacing = .15f })
+        column.addView(text(25f, bold = true).apply { text = tr("Bild & Ton", "Playback options") }, vertical(-1, -2, 6))
+        mediaTitle.maxLines = 2; mediaTitle.ellipsize = TextUtils.TruncateAt.END
+        column.addView(mediaTitle, vertical(-1, -2, 6))
+        column.addView(View(context).apply { setBackgroundColor(0x304F6687) }, vertical(-1, 1, 14))
         scroll.addView(list, FrameLayout.LayoutParams(-1, -2))
-        content.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(10) })
-        job.maxLines = 1; job.ellipsize = TextUtils.TruncateAt.END; job.isVisible = false
-        job.setTextColor(0xFF9FD3FF.toInt())
-        column.addView(job, vertical(-1, -2, 12))
-        column.addView(text(11f, muted = true).apply { text = str(R.string.track_panel_navigation) }, vertical(-1, -2, 12))
+        column.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(10) })
+        job.maxLines = 2; job.isVisible = false; job.setTextColor(0xFF9FD3FF.toInt())
+        column.addView(job, vertical(-1, -2, 10))
+        column.addView(text(11f, muted = true).apply {
+            text = tr("↑↓ Auswählen · OK Aufklappen · ← Zuklappen", "↑↓ Select · OK Expand · ← Collapse")
+        }, vertical(-1, -2, 12))
     }
 
-    fun render(value: ResolvedPlayback, offset: Long, timingAvailable: Boolean) {
-        if (current?.itemId != value.itemId) {
-            section = Section.AUDIO; remembered.clear(); setJobStatus("")
+    fun render(value: ResolvedPlayback?, id: String?, title: String, isLive: Boolean, offset: Long, timingAvailable: Boolean) {
+        if (itemId != id) {
+            section = null; lastFocus = null; snapshot = null; failure = ""; setJobStatus("")
         }
-        current = value; offsetMs = offset; canTime = timingAvailable
-        mediaTitle.text = value.title
+        itemId = id; current = value; live = isLive; offsetMs = offset; canTime = timingAvailable
+        if (!live && section == Section.SERVERS) section = null
+        mediaTitle.text = title
         renderContent()
     }
 
+    fun servers(value: IptvSourceSnapshot?, selected: String?, loading: Boolean = false, failed: Boolean = false) {
+        snapshot = value; selectedServer = selected; serversLoading = loading; serversFailed = failed
+        renderContent()
+    }
+
+    fun unavailable(message: String) { failure = message; section = Section.SERVERS; renderContent("retry-playback") }
+    fun clearFailure() { failure = "" }
+    fun subtitles() { section = Section.SUBTITLES }
+    fun setJobStatus(message: String) { job.text = message; job.isVisible = message.isNotBlank() }
+
     fun show() {
-        root.animate().withEndAction(null).cancel()
-        val wasHidden = !root.isVisible
-        // Android assigns initial focus when a hidden subtree becomes visible. That
-        // must not activate the first sidebar tab and discard the section being reopened.
-        rendering = true
-        closing = false; root.isVisible = true
-        if (wasHidden) { root.alpha = 0f; root.translationX = dp(30).toFloat() }
+        val hidden = !root.isVisible
+        root.animate().withEndAction(null).cancel(); closing = false; root.isVisible = true
+        if (hidden) { root.alpha = 0f; root.translationX = dp(24).toFloat() }
         root.animate().alpha(1f).translationX(0f).setDuration(180).setInterpolator(DecelerateInterpolator()).start()
-        // Reopening chooses the actual active track, independent of a previously hovered row.
-        focusContent(preferActive = true)
-        rendering = false
+        (actions.firstOrNull { it.tag == lastFocus } ?: actions.firstOrNull())?.requestFocus()
     }
 
     fun hide(animate: Boolean = true, onHidden: () -> Unit = {}) {
         if (closing && animate) return
-        root.animate().withEndAction(null).cancel()
-        closing = true
+        root.animate().withEndAction(null).cancel(); closing = true
         val finish = { root.isVisible = false; root.alpha = 1f; root.translationX = 0f; closing = false; onHidden() }
-        if (!animate) finish() else root.animate().alpha(0f).translationX(dp(24).toFloat())
-            .setDuration(140).withEndAction(finish).start()
+        if (!animate) finish() else root.animate().alpha(0f).translationX(dp(24).toFloat()).setDuration(140).withEndAction(finish).start()
     }
-
-    fun subtitles() { section = Section.SUBTITLES }
-    fun setJobStatus(message: String) { job.text = message; job.isVisible = message.isNotBlank() }
 
     fun updateOffset(value: Long) {
         offsetMs = value
@@ -145,95 +129,133 @@ class PlaybackTrackPanel(
     fun dispatch(event: KeyEvent): Boolean {
         if (closing) return true
         val code = event.keyCode
-        if (code !in setOf(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT)) return false
+        if (code !in listOf(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT)) return false
+        if (event.action != KeyEvent.ACTION_DOWN) return true
         val focused = root.findFocus()
-        val tab = nav.indexOf(focused)
-        if (tab >= 0) {
-            when (code) {
-                KeyEvent.KEYCODE_DPAD_UP -> nav[(tab - 1).coerceAtLeast(0)].requestFocus()
-                KeyEvent.KEYCODE_DPAD_DOWN -> nav[(tab + 1).coerceAtMost(nav.lastIndex)].requestFocus()
-                KeyEvent.KEYCODE_DPAD_RIGHT -> focusContent()
+        val index = actions.indexOf(focused).coerceAtLeast(0)
+        val header = (focused?.tag as? String)?.takeIf { it.startsWith("header:") }
+        when (code) {
+            KeyEvent.KEYCODE_DPAD_LEFT -> {
+                if (focused === later) earlier?.requestFocus()
+                else if (section != null) { val key = "header:$section"; section = null; renderContent(key) }
             }
-        } else {
-            val index = actions.indexOf(focused)
-            when (code) {
-                KeyEvent.KEYCODE_DPAD_LEFT -> if (focused === later) earlier?.requestFocus() else nav[section.ordinal].requestFocus()
-                KeyEvent.KEYCODE_DPAD_RIGHT -> if (focused === earlier) later?.requestFocus()
-                KeyEvent.KEYCODE_DPAD_UP -> {
-                    val previous = if (focused === later) index - 2 else index - 1
-                    actions.getOrNull(previous.coerceAtLeast(0))?.requestFocus()
-                }
-                KeyEvent.KEYCODE_DPAD_DOWN -> {
-                    val next = if (focused === earlier) index + 2 else index + 1
-                    actions.getOrNull(next.coerceAtMost(actions.lastIndex))?.requestFocus()
+            KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                if (focused === earlier) later?.requestFocus()
+                else if (header != null) {
+                    section = Section.valueOf(header.substringAfter(':')); renderContent(header)
+                    actions.getOrNull(actions.indexOf(root.findFocus()) + 1)?.requestFocus()
                 }
             }
+            KeyEvent.KEYCODE_DPAD_UP -> actions.getOrNull((index - if (focused === later) 2 else 1).coerceAtLeast(0))?.requestFocus()
+            KeyEvent.KEYCODE_DPAD_DOWN -> actions.getOrNull((index + if (focused === earlier) 2 else 1).coerceAtMost(actions.lastIndex))?.requestFocus()
         }
         return true
     }
 
-    private fun renderContent() {
-        val value = current ?: return
-        rendering = true
-        val focusKey = root.findFocus()?.tag as? String
-        val hadContentFocus = actions.contains(root.findFocus())
+    private fun renderContent(requestedFocus: String? = null) {
+        val focusKey = requestedFocus ?: root.findFocus()?.tag as? String ?: lastFocus
         actions.clear(); list.removeAllViews(); timingValue = null; timingHint = null; earlier = null; later = null
-        nav.forEachIndexed { index, view -> view.isSelected = index == section.ordinal }
-        contentTitle.setText(when (section) {
-            Section.AUDIO -> R.string.track_panel_audio_title
-            Section.SUBTITLES -> R.string.track_subtitles
-            Section.TIMING -> R.string.track_panel_timing_title
-        })
-        when (section) {
-            Section.AUDIO -> {
-                val selected = value.selectedAudioIndex ?: value.audioTracks.firstOrNull { it.isDefault }?.index ?: value.audioTracks.firstOrNull()?.index
-                value.audioTracks.forEachIndexed { i, track ->
-                    row("audio:${track.identity ?: track.index}", label(track, i), distinctMetadata(track, i, value.audioTracks), selected == track.index) { audioPicked(track) }
-                }
-                if (value.audioTracks.isEmpty()) note(str(R.string.track_panel_audio_empty))
+        if (failure.isNotBlank()) {
+            note(failure)
+            row("retry-playback", tr("Erneut verbinden", "Reconnect"), tr("Oder unten einen anderen Server wählen", "Or choose another server below"), action = retryPlayback)
+        }
+        val value = current
+        Section.entries.filter { it != Section.SERVERS || live }.forEach { area ->
+            val label = when (area) {
+                Section.SERVERS -> tr("Server", "Server")
+                Section.AUDIO -> str(R.string.track_audio)
+                Section.SUBTITLES -> str(R.string.track_subtitles)
+                Section.TIMING -> str(R.string.track_panel_timing)
             }
-            Section.SUBTITLES -> {
-                row("off", str(R.string.subtitle_off), str(R.string.track_panel_subtitles_off), (value.selectedSubtitleIndex ?: -1) < 0) { subtitlePicked(null) }
-                value.subtitleTracks.forEachIndexed { i, track ->
-                    row("subtitle:${track.identity ?: track.index}", label(track, i), distinctMetadata(track, i, value.subtitleTracks), value.selectedSubtitleIndex == track.index) { subtitlePicked(track) }
-                }
-                if (!value.isLive) {
-                    row("search", str(R.string.subtitle_search), str(R.string.track_panel_search_hint)) { search() }
-                    row("refresh", str(R.string.track_panel_refresh), str(R.string.track_panel_refresh_hint)) { refresh() }
-                }
+            val summary = when (area) {
+                Section.SERVERS -> snapshot?.sources?.firstOrNull { it.mediaSourceId == selectedServer }?.name ?: tr("Automatisch", "Automatic")
+                Section.AUDIO -> value?.audioTracks?.firstOrNull { it.index == value.selectedAudioIndex }?.let { label(it, 0) } ?: tr("Standard", "Default")
+                Section.SUBTITLES -> value?.subtitleTracks?.firstOrNull { it.index == value.selectedSubtitleIndex }?.let { label(it, 0) } ?: str(R.string.subtitle_off)
+                Section.TIMING -> context.getString(R.string.track_panel_offset, offsetMs / 1000.0)
             }
-            Section.TIMING -> {
-                if (!canTime) {
-                    note(str(R.string.track_panel_pick_text))
-                    row("choose-subtitle", str(R.string.track_panel_choose_subtitle), "") { section = Section.SUBTITLES; renderContent(); focusContent(true) }
-                } else {
-                    val selected = value.subtitleTracks.firstOrNull { it.index == value.selectedSubtitleIndex }
-                    note(selected?.let { label(it, value.subtitleTracks.indexOf(it)) }.orEmpty())
-                    val stepper = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-                    list.addView(stepper, vertical(-1, 62, 8))
-                    earlier = stepButton("earlier", "−", str(R.string.subtitle_earlier)) { offsetChanged(-500) }
-                    later = stepButton("later", "+", str(R.string.subtitle_later)) { offsetChanged(500) }
-                    stepper.addView(earlier, LinearLayout.LayoutParams(dp(54), -1))
-                    timingValue = text(26f, bold = true).apply { gravity = Gravity.CENTER }
-                    stepper.addView(timingValue, LinearLayout.LayoutParams(0, -1, 1f))
-                    stepper.addView(later, LinearLayout.LayoutParams(dp(54), -1))
-                    timingHint = note("")
-                    updateOffset(offsetMs)
-                    row("reset", str(R.string.track_panel_reset), "") { offsetChanged(-offsetMs) }
-                    row("sync", str(R.string.track_panel_auto), str(R.string.track_panel_auto_hint)) { synchronize() }
-                    row("status", str(R.string.track_panel_job), str(R.string.track_panel_job_hint)) { syncStatus() }
-                    row("refresh", str(R.string.track_panel_refresh), str(R.string.track_panel_refresh_hint)) { refresh() }
+            row("header:$area", (if (section == area) "▾  " else "▸  ") + label, summary) {
+                section = if (section == area) null else area
+                renderContent("header:$area")
+            }
+            if (section != area) return@forEach
+            if (area == Section.SERVERS) { renderServers(); return@forEach }
+            if (value == null) { note(tr("Nach dem Verbindungsaufbau verfügbar", "Available after connecting")); return@forEach }
+            when (area) {
+                Section.SERVERS -> Unit
+                Section.AUDIO -> {
+                    val selected = value.selectedAudioIndex ?: value.audioTracks.firstOrNull { it.isDefault }?.index ?: value.audioTracks.firstOrNull()?.index
+                    value.audioTracks.forEachIndexed { i, track ->
+                        row("audio:${track.identity ?: track.index}", label(track, i), distinctMetadata(track, i, value.audioTracks), selected == track.index) { audioPicked(track) }
+                    }
+                    if (value.audioTracks.isEmpty()) note(str(R.string.track_panel_audio_empty))
+                }
+                Section.SUBTITLES -> {
+                    row("off", str(R.string.subtitle_off), str(R.string.track_panel_subtitles_off), (value.selectedSubtitleIndex ?: -1) < 0) { subtitlePicked(null) }
+                    value.subtitleTracks.forEachIndexed { i, track ->
+                        row("subtitle:${track.identity ?: track.index}", label(track, i), distinctMetadata(track, i, value.subtitleTracks), value.selectedSubtitleIndex == track.index) { subtitlePicked(track) }
+                    }
+                    if (!value.isLive) {
+                        row("search", str(R.string.subtitle_search), str(R.string.track_panel_search_hint)) { search() }
+                        row("refresh", str(R.string.track_panel_refresh), str(R.string.track_panel_refresh_hint)) { refresh() }
+                    }
+                }
+                Section.TIMING -> {
+                    if (!canTime) {
+                        note(str(R.string.track_panel_pick_text))
+                        row("choose-subtitle", str(R.string.track_panel_choose_subtitle), "") { section = Section.SUBTITLES; renderContent("header:SUBTITLES") }
+                    } else {
+                        val selected = value.subtitleTracks.firstOrNull { it.index == value.selectedSubtitleIndex }
+                        note(selected?.let { label(it, value.subtitleTracks.indexOf(it)) }.orEmpty())
+                        val stepper = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                        list.addView(stepper, vertical(-1, 62, 8))
+                        earlier = stepButton("earlier", "−", str(R.string.subtitle_earlier)) { offsetChanged(-500) }
+                        later = stepButton("later", "+", str(R.string.subtitle_later)) { offsetChanged(500) }
+                        stepper.addView(earlier, LinearLayout.LayoutParams(dp(54), -1))
+                        timingValue = text(26f, bold = true).apply { gravity = Gravity.CENTER }
+                        stepper.addView(timingValue, LinearLayout.LayoutParams(0, -1, 1f))
+                        stepper.addView(later, LinearLayout.LayoutParams(dp(54), -1))
+                        timingHint = note("")
+                        updateOffset(offsetMs)
+                        row("reset", str(R.string.track_panel_reset), "") { offsetChanged(-offsetMs) }
+                        row("sync", str(R.string.track_panel_auto), str(R.string.track_panel_auto_hint)) { synchronize() }
+                        row("status", str(R.string.track_panel_job), str(R.string.track_panel_job_hint)) { syncStatus() }
+                        row("refresh", str(R.string.track_panel_refresh), str(R.string.track_panel_refresh_hint)) { refresh() }
+                    }
                 }
             }
         }
-        if (hadContentFocus) (actions.firstOrNull { it.tag == focusKey } ?: actions.firstOrNull { it.isSelected } ?: actions.firstOrNull())?.requestFocus()
-        else scroll.scrollTo(0, 0)
-        rendering = false
+        if (root.isVisible) (actions.firstOrNull { it.tag == focusKey } ?: actions.firstOrNull())?.requestFocus()
     }
 
-    private fun focusContent(preferActive: Boolean = false) {
-        val rememberedView = if (preferActive) null else actions.firstOrNull { it.tag == remembered[section] }
-        (rememberedView ?: actions.firstOrNull { it.isSelected } ?: actions.firstOrNull() ?: nav[section.ordinal]).requestFocus()
+    private fun renderServers() {
+        note(when {
+            serversFailed -> tr("Serverliste nicht erreichbar. Erneut laden.", "Server list unavailable. Try again.")
+            snapshot?.accountReason == "ProviderBusy" -> tr("Anbieter-Verbindungslimit erreicht.", "Provider connection limit reached.")
+            snapshot?.accountReason != null -> tr("Anbieter-Anmeldung prüfen.", "Check provider credentials.")
+            serversLoading -> tr("Gespeicherte Messwerte werden geladen…", "Loading saved observations…")
+            else -> tr("Nur diese Wiedergabe · Messungen im Leerlauf", "This playback only · Measured when idle")
+        })
+        if (serversFailed) row("reload-servers", tr("Serverliste erneut laden", "Reload server list"), "", action = retryServers)
+        val data = snapshot ?: return
+        if (data.automaticId.isBlank()) { note(tr("Keine Ersatzserver konfiguriert", "No alternative servers configured")); return }
+        row(data.automaticId, tr("Automatisch", "Automatic"), tr("Standard und geprüfte Ersatzquellen", "Default and verified alternatives"), selectedServer.isNullOrBlank() || selectedServer == data.automaticId || selectedServer?.contains("_iptv_") == false) { serverPicked(data.automaticId) }
+        data.sources.forEach { source ->
+            val status = when (source.status) {
+                "Reachable" -> tr("Zuletzt erreichbar", "Recently playable")
+                "Unstable" -> tr("Instabil", "Unstable")
+                "Failed" -> tr("Mehrfach fehlgeschlagen", "Repeated failures")
+                else -> tr("Ungeprüft", "Unknown")
+            }
+            val at = source.checkedAt?.let { runCatching { DateTimeFormatter.ofPattern("dd.MM. HH:mm").withZone(ZoneId.systemDefault()).format(Instant.parse(it)) }.getOrNull() }
+            val detail = listOfNotNull(status, source.startMs?.let { tr("Bild", "Media") + " " + String.format(Locale.getDefault(), "%.1f s", it / 1000.0) }, at,
+                if (at == null) null else if (source.channelSpecific) tr("Dieser Sender", "This channel") else tr("Server-Stichprobe", "Server sample")).joinToString(" · ")
+            val suffix = when {
+                data.playingId == source.id -> tr(" · Läuft jetzt", " · Playing now")
+                source.isDefault -> tr(" · Standard", " · Default")
+                else -> ""
+            }
+            row(source.mediaSourceId, source.name + suffix, detail, selectedServer == source.mediaSourceId) { serverPicked(source.mediaSourceId) }
+        }
     }
 
     private fun label(track: MediaTrack, index: Int): String = TrackPresentation.language(track, Locale.getDefault())
@@ -288,7 +310,7 @@ class PlaybackTrackPanel(
         view.id = View.generateViewId(); view.tag = key; view.isFocusable = true; view.isClickable = true
         view.contentDescription = description
         view.setOnClickListener { action() }
-        view.setOnFocusChangeListener { _, focused -> if (focused) remembered[section] = key }
+        view.setOnFocusChangeListener { _, focused -> if (focused) lastFocus = key }
         actions.add(view)
     }
 

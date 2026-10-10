@@ -1,5 +1,25 @@
 package org.jellyfin.firetv.core
 
+/** Keeps only root fields, so a queued item's flags cannot describe the playing item. */
+internal fun jsonShallowObject(json: String): String = buildString {
+    var depth = 0
+    var quoted = false
+    var escaped = false
+    for (ch in json) {
+        if (quoted) {
+            if (depth <= 1) append(ch)
+            if (escaped) escaped = false
+            else if (ch == '\\') escaped = true
+            else if (ch == '"') quoted = false
+        } else when (ch) {
+            '"' -> { quoted = true; if (depth <= 1) append(ch) }
+            '{', '[' -> { if (depth == 0) append(ch) else if (depth == 1) append("null"); depth++ }
+            '}', ']' -> { depth--; if (depth == 0) append(ch) }
+            else -> if (depth <= 1) append(ch)
+        }
+    }
+}
+
 internal fun jsonStringField(json: String, key: String): String? {
     val pattern = Regex("\"${Regex.escape(key)}\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"")
     val raw = pattern.find(json)?.groupValues?.getOrNull(1) ?: return null

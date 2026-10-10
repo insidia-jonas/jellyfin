@@ -12,6 +12,9 @@ import android.os.SystemClock
 import android.text.Html
 import android.util.Log
 import android.view.KeyEvent
+import android.view.View
+import android.view.Gravity
+import android.widget.TextView
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.Toast
@@ -86,7 +89,9 @@ import java.util.concurrent.TimeUnit
 class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private lateinit var binding: ActivityPlayerBinding
     private lateinit var trackDrawer: PlaybackTrackPanel
-    private lateinit var serverDrawer: PlaybackServerPanel
+    private val osdActions = mutableListOf<TextView>()
+    private var liveFailed = false
+    private var desiredPlayWhenReady = true
     private var serverChoices: IptvSourceSnapshot? = null
     private var serverChoicesItem: String? = null
     private var serverChoicesJob: Job? = null
@@ -196,10 +201,6 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         binding.osdSeek.isFocusable = false
         binding.osdSeek.isFocusableInTouchMode = false
         styleSubtitles()
-        serverDrawer = PlaybackServerPanel(this, binding.serverPanel,
-            picked = ::switchLiveSource,
-            tracks = { hideServerPanel(); if (playback != null) showTrackPanel() },
-            retry = ::showServerPanel)
         trackDrawer = PlaybackTrackPanel(this, binding.trackPanel,
             audioPicked = ::onAudioPicked, subtitlePicked = ::onSubtitlePicked,
             offsetChanged = ::adjustSubtitleOffset,
@@ -211,7 +212,9 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                     .setNegativeButton(android.R.string.cancel, null).show()
             },
             syncStatus = { subtitleSyncAction(false, explicit = true) },
-            refresh = ::refreshSubtitleTracks, search = ::showSearchPanel)
+            refresh = ::refreshSubtitleTracks, search = ::showSearchPanel,
+            serverPicked = ::switchLiveSource, retryServers = ::loadServerChoices,
+            retryPlayback = { beginResolve(originalPayload, resetQueue = false, playWhenReady = desiredPlayWhenReady) })
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = handlePlayerBack()
         })
@@ -256,12 +259,17 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             if (playback == null) finish()
             return
         }
+        val confirmedLive = playback?.takeIf { it.itemId == PlaybackPayload.itemId(payload) }?.isLive == true
         cancelPendingTune()
-        if (resetRetries || PlaybackPayload.itemId(payload) != originalPayload?.let(PlaybackPayload::itemId)) hideServerPanel()
-        originalPayload = payload
+        if (resetRetries || PlaybackPayload.itemId(payload) != originalPayload?.let(PlaybackPayload::itemId)) cancelServerChoices()
+        val effectivePayload = if (confirmedLive) org.json.JSONObject(payload).put("IsLiveStream", true).toString() else payload
+        originalPayload = effectivePayload
+        desiredPlayWhenReady = playWhenReady
+        liveFailed = false
+        if (::trackDrawer.isInitialized) trackDrawer.clearFailure()
         if (resetQueue) queuePayload = payload
         val generation = tune.select(PlaybackPayload.itemId(payload), resetRetries)
-        val liveHint = LivePlayback.isLivePayload(payload)
+        val liveHint = LivePlayback.isLivePayload(effectivePayload)
         retirePlayback(keepPlayer = liveHint && playerIsLive)
         tuneStartedAt = SystemClock.elapsedRealtime()
         liveGuideChannel = null
@@ -301,7 +309,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                         }
                     }
                     cancellation.checkActive()
-                    StreamResolver.resolve(payload, ssl, audioStreamIndex, subtitleStreamIndex, cancellation)
+                    StreamResolver.resolve(effectivePayload, ssl, audioStreamIndex, subtitleStreamIndex, cancellation)
                 }
                 mainHandler.post {
                     mainHandler.removeCallbacks(deadline)
@@ -365,6 +373,11 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         val keepPosition = resumePositionMs ?: resolved.startPositionMs
         if (playback != null) retirePlayback(keepPlayer = resolved.isLive && playerIsLive)
         playback = resolved
+        if (resolved.isLive) {
+            // Generic Video channel tiles may only acquire their live identity from
+            // PlaybackInfo. Keep that evidence for retries after retiring the player.
+            originalPayload = originalPayload?.let { org.json.JSONObject(it).put("IsLiveStream", true).toString() }
+        }
         pendingSubtitleOffset?.let(mainHandler::removeCallbacks)
         pendingSubtitleOffset = null
         subtitleOffsetMs = subtitleTimingKey(resolved)?.let { getSharedPreferences("subtitle-timing", MODE_PRIVATE).getLong(it, 0) } ?: 0
@@ -493,11 +506,11 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                     mainHandler.postDelayed(stallWatchdog, if (resolved.isLive) tune.attemptTimeoutMs(30_000) else 45_000)
                 }
                 if (playbackState == Player.STATE_ENDED) {
-                    emitSync("ended")
                     if (resolved.isLive) {
                         retryLive()
-                    } else if (!playAdjacentFromQueue(next = true)) {
-                        stopAndClose()
+                    } else {
+                        emitSync("ended")
+                        if (!playAdjacentFromQueue(next = true)) stopAndClose()
                     }
                 }
             }
@@ -512,11 +525,11 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 if (!tune.accepts(requestGeneration) || playback == null) return
                 Log.i("FireTvPlayback", "error request=$requestGeneration code=${error.errorCode}")
-                emitSync("error")
                 if (resolved.isLive) {
                     retryLive()
                     return
                 }
+                emitSync("error")
                 Toast.makeText(
                     this@PlayerActivity,
                     error.message?.takeIf { it.isNotBlank() } ?: getString(R.string.playback_failed),
@@ -558,7 +571,9 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         lastServerProgressAt = 0L
         mainHandler.removeCallbacks(progressTick)
         mainHandler.post(progressTick)
+        buildOsdActions()
         renderTrackPanel()
+        if (binding.trackPanel.isVisible && resolved.isLive) loadServerChoices()
         showOsd()
         refreshPlaybackMetadata(resolved)
         if (resolved.isAudio) {
@@ -647,12 +662,16 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         retirePlayback(keepPlayer = delay != null, failed = true)
         if (delay != null && !payload.isNullOrBlank()) {
             Log.i("FireTvPlayback", "retry attempt=${tune.retries} delay_ms=$delay")
-            beginResolve(payload, resetQueue = false, resetRetries = false, delayMs = delay)
+            beginResolve(payload, resetQueue = false, resetRetries = false, delayMs = delay, playWhenReady = desiredPlayWhenReady)
             binding.loadingHint.text = getString(R.string.live_retry_status, tune.retries, 3)
             return
         }
-        Toast.makeText(this, R.string.live_unavailable, Toast.LENGTH_LONG).show()
-        stopAndClose()
+        cancelPendingTune()
+        liveFailed = true
+        binding.loading.isVisible = false
+        binding.rebuffering.isVisible = false
+        showTrackPanel()
+        trackDrawer.unavailable(getString(R.string.live_switch_failed))
     }
 
     private fun showLoadingHint(live: Boolean, buffering: Boolean) {
@@ -704,137 +723,113 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        // Consume the whole Back gesture. A held key must never close two layers.
-        if (event.keyCode == KeyEvent.KEYCODE_BACK || event.keyCode == KeyEvent.KEYCODE_ESCAPE) {
-            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) handlePlayerBack()
+        val code = event.keyCode
+        val down = event.action == KeyEvent.ACTION_DOWN
+        if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE) {
+            if (down && event.repeatCount == 0) handlePlayerBack()
             return true
         }
-        if (binding.serverPanel.isVisible) {
-            return serverDrawer.dispatch(event) || super.dispatchKeyEvent(event)
-        }
-        if (event.action == KeyEvent.ACTION_DOWN && event.keyCode == KeyEvent.KEYCODE_MENU
-            && originalPayload?.let(LivePlayback::isLivePayload) == true) {
-            showServerPanel()
-            return true
-        }
-        if (event.action != KeyEvent.ACTION_DOWN) {
-            return super.dispatchKeyEvent(event)
-        }
-        if (binding.searchPanel.isVisible) {
-            if (event.keyCode == KeyEvent.KEYCODE_BACK || event.keyCode == KeyEvent.KEYCODE_ESCAPE) {
-                hideSearchPanel()
-                return true
-            }
-            return super.dispatchKeyEvent(event)
-        }
-        if (binding.trackPanel.isVisible) {
-            if (event.keyCode == KeyEvent.KEYCODE_BACK || event.keyCode == KeyEvent.KEYCODE_ESCAPE) {
-                hideTrackPanel()
-                return true
-            }
-            return trackDrawer.dispatch(event) || super.dispatchKeyEvent(event)
-        }
-        val liveSelection = originalPayload?.let { LivePlayback.isLivePayload(it) } == true
-        if (liveSelection && event.keyCode in listOf(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_MEDIA_NEXT, KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_MEDIA_PREVIOUS)) {
-            playAdjacentFromQueue(event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN || event.keyCode == KeyEvent.KEYCODE_MEDIA_NEXT)
-            return true
-        }
-        val exo = player
-        if (exo == null) {
-            if (event.keyCode == KeyEvent.KEYCODE_BACK || event.keyCode == KeyEvent.KEYCODE_ESCAPE) {
-                stopAndClose()
-                return true
-            }
-            return super.dispatchKeyEvent(event)
-        }
-        return when (event.keyCode) {
-            KeyEvent.KEYCODE_DPAD_CENTER,
-            KeyEvent.KEYCODE_ENTER,
-            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
-            -> {
-                if (exo.isPlaying) exo.pause() else exo.play()
-                showOsd()
-                true
-            }
-            KeyEvent.KEYCODE_MEDIA_PLAY -> {
-                exo.play()
-                showOsd()
-                true
-            }
-            KeyEvent.KEYCODE_MEDIA_PAUSE -> {
-                exo.pause()
-                showOsd()
-                true
-            }
-            KeyEvent.KEYCODE_DPAD_RIGHT,
-            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
-            -> {
-                if (playback?.isLive == true) {
-                    showOsd()
-                } else {
-                    exo.seekTo(seekTarget(exo, +30_000))
-                    showOsd()
-                }
-                true
-            }
-            KeyEvent.KEYCODE_DPAD_LEFT,
-            KeyEvent.KEYCODE_MEDIA_REWIND,
-            -> {
-                if (playback?.isLive == true) {
-                    showOsd()
-                } else {
-                    exo.seekTo(seekTarget(exo, -10_000))
-                    showOsd()
-                }
-                true
-            }
-            KeyEvent.KEYCODE_MEDIA_NEXT,
-            -> {
-                if (!playAdjacentFromQueue(next = true)) {
-                    showOsd()
-                }
-                true
-            }
-            KeyEvent.KEYCODE_MEDIA_PREVIOUS,
-            -> {
-                if (!playAdjacentFromQueue(next = false)) {
-                    showOsd()
-                }
-                true
-            }
-            KeyEvent.KEYCODE_DPAD_UP,
-            -> {
-                if (playback?.isLive == true && playAdjacentFromQueue(next = false)) {
-                    true
-                } else {
+        if (binding.searchPanel.isVisible) return super.dispatchKeyEvent(event)
+        if (code == KeyEvent.KEYCODE_MENU || code == KeyEvent.KEYCODE_CAPTIONS) {
+            if (down && event.repeatCount == 0) {
+                if (binding.trackPanel.isVisible) hideTrackPanel() else {
+                    if (code == KeyEvent.KEYCODE_CAPTIONS) trackDrawer.subtitles()
                     showTrackPanel()
-                    true
                 }
             }
-            KeyEvent.KEYCODE_DPAD_DOWN,
-            -> {
-                if (playback?.isLive == true && playAdjacentFromQueue(next = true)) {
-                    true
-                } else {
-                    showOsd()
-                    true
-                }
-            }
-            KeyEvent.KEYCODE_CAPTIONS,
-            KeyEvent.KEYCODE_MENU,
-            -> {
-                showTrackPanel()
-                true
-            }
-            KeyEvent.KEYCODE_BACK,
-            KeyEvent.KEYCODE_ESCAPE,
-            KeyEvent.KEYCODE_MEDIA_STOP,
-            -> {
-                stopAndClose()
-                true
-            }
-            else -> super.dispatchKeyEvent(event)
+            return true
         }
+        if (binding.trackPanel.isVisible && trackDrawer.dispatch(event)) return true
+        if (binding.trackPanel.isVisible && code in listOf(KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER)) {
+            if (down && event.repeatCount == 0) binding.trackPanel.findFocus()?.performClick()
+            return true
+        }
+        val navigation = code in listOf(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER)
+        if (navigation) {
+            if (!down) return true
+            if (!binding.osd.isVisible) { showOsd(); return true }
+            val index = osdActions.indexOf(binding.osd.findFocus()).coerceAtLeast(0)
+            when (code) {
+                KeyEvent.KEYCODE_DPAD_LEFT -> osdActions.getOrNull((index - 1).coerceAtLeast(0))?.requestFocus()
+                KeyEvent.KEYCODE_DPAD_RIGHT -> osdActions.getOrNull((index + 1).coerceAtMost(osdActions.lastIndex))?.requestFocus()
+                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> osdActions.getOrNull(index)?.requestFocus()
+                else -> if (event.repeatCount == 0) osdActions.getOrNull(index)?.performClick()
+            }
+            scheduleOsdHide()
+            return true
+        }
+        val media = code in listOf(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY,
+            KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD, KeyEvent.KEYCODE_MEDIA_REWIND,
+            KeyEvent.KEYCODE_MEDIA_NEXT, KeyEvent.KEYCODE_MEDIA_PREVIOUS, KeyEvent.KEYCODE_MEDIA_STOP,
+            KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_CHANNEL_DOWN)
+        if (!media) return super.dispatchKeyEvent(event)
+        if (!down) return true
+        val exo = player
+        when (code) {
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> if (event.repeatCount == 0) togglePause()
+            KeyEvent.KEYCODE_MEDIA_PLAY -> { desiredPlayWhenReady = true; exo?.play(); showOsd() }
+            KeyEvent.KEYCODE_MEDIA_PAUSE -> { desiredPlayWhenReady = false; exo?.pause(); showOsd() }
+            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD, KeyEvent.KEYCODE_MEDIA_REWIND -> {
+                if (exo != null && playback?.isLive == false) exo.seekTo(seekTarget(exo, if (code == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD) 30_000 else -10_000))
+                showOsd()
+            }
+            KeyEvent.KEYCODE_MEDIA_NEXT, KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+            KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_CHANNEL_DOWN -> {
+                val channelKey = code == KeyEvent.KEYCODE_CHANNEL_UP || code == KeyEvent.KEYCODE_CHANNEL_DOWN
+                if ((!channelKey || isLiveSelection()) && event.repeatCount == 0) {
+                    playAdjacentFromQueue(code == KeyEvent.KEYCODE_MEDIA_NEXT || code == KeyEvent.KEYCODE_CHANNEL_UP)
+                }
+            }
+            KeyEvent.KEYCODE_MEDIA_STOP -> stopAndClose()
+        }
+        return true
+    }
+
+    private fun isLiveSelection(): Boolean = playback?.isLive ?: (originalPayload?.let(LivePlayback::isLivePayload) == true)
+
+    private fun togglePause() {
+        val exo = player ?: return
+        desiredPlayWhenReady = !exo.playWhenReady
+        exo.playWhenReady = desiredPlayWhenReady
+        showOsd()
+    }
+
+    private fun buildOsdActions() {
+        val focus = binding.osd.findFocus()?.tag
+        binding.osdActions.removeAllViews(); osdActions.clear()
+        fun action(key: String, title: String, clicked: () -> Unit) {
+            val view = TextView(this).apply {
+                tag = key; id = View.generateViewId(); text = title; contentDescription = title
+                textSize = 16f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                isFocusable = true; isClickable = true; setTextIsSelectable(false)
+                setBackgroundResource(R.drawable.bg_track_row)
+                setPadding(20, 8, 20, 8)
+                setOnClickListener { clicked(); scheduleOsdHide() }
+            }
+            binding.osdActions.addView(view, LinearLayout.LayoutParams(0, (48 * resources.displayMetrics.density).toInt(), 1f).apply {
+                marginEnd = (8 * resources.displayMetrics.density).toInt()
+            })
+            osdActions.add(view)
+        }
+        action("pause", getString(R.string.player_pause), ::togglePause)
+        if (!isLiveSelection()) {
+            action("rewind", getString(R.string.player_seek_back)) { player?.let { it.seekTo(seekTarget(it, -10_000)) }; updateOsd() }
+            action("forward", getString(R.string.player_seek_forward)) { player?.let { it.seekTo(seekTarget(it, 30_000)) }; updateOsd() }
+        }
+        val queue = queuePayload ?: originalPayload
+        val id = playback?.itemId ?: tune.selectedId
+        if (queue != null && id != null) {
+            if (isLiveSelection() && PlaybackPayload.previousItemId(queue, id) != null) {
+                action("previous", getString(R.string.player_previous_channel)) { playAdjacentFromQueue(false) }
+            }
+            if (PlaybackPayload.nextItemId(queue, id) != null) {
+                action("next", getString(if (isLiveSelection()) R.string.player_next_channel else R.string.player_next_item)) { playAdjacentFromQueue(true) }
+            }
+        }
+        action("options", getString(R.string.player_options), ::showTrackPanel)
+        if (binding.osd.isVisible) (osdActions.firstOrNull { it.tag == focus } ?: osdActions.firstOrNull())?.requestFocus()
     }
 
     private fun seekTarget(exo: ExoPlayer, deltaMs: Long): Long {
@@ -845,9 +840,15 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     }
 
     private fun showOsd() {
-        if (binding.trackPanel.isVisible || binding.searchPanel.isVisible || binding.serverPanel.isVisible) return
+        if (binding.trackPanel.isVisible || binding.searchPanel.isVisible) return
+        val wasHidden = !binding.osd.isVisible
         binding.osd.isVisible = true
         updateOsd()
+        if (wasHidden) {
+            binding.osd.alpha = 0f
+            binding.osd.animate().alpha(1f).setDuration(140).start()
+            osdActions.firstOrNull()?.requestFocus()
+        }
         mainHandler.removeCallbacks(osdTick)
         mainHandler.post(osdTick)
         scheduleOsdHide()
@@ -856,12 +857,13 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private fun dismissOsd() {
         mainHandler.removeCallbacks(hideOsd)
         mainHandler.removeCallbacks(osdTick)
+        binding.osd.animate().cancel()
         binding.osd.isVisible = false
+        binding.playerView.requestFocus()
     }
 
     private fun handlePlayerBack() {
         when {
-            binding.serverPanel.isVisible -> hideServerPanel()
             binding.searchPanel.isVisible -> hideSearchPanel()
             binding.trackPanel.isVisible -> hideTrackPanel()
             binding.osd.isVisible -> dismissOsd()
@@ -872,7 +874,6 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private fun scheduleOsdHide() {
         mainHandler.removeCallbacks(hideOsd)
         val keepOpen = binding.trackPanel.isVisible ||
-            binding.serverPanel.isVisible ||
             binding.searchPanel.isVisible ||
             player?.isPlaying == false ||
             playback?.isAudio == true
@@ -882,36 +883,48 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     }
 
     private fun updateOsd() {
+        if (!binding.osd.isVisible) return
         val exo = player ?: return
         val duration = exo.duration
         val position = exo.currentPosition.coerceAtLeast(0)
         binding.osdSeek.max = 1000
         binding.osdSeek.progress = if (duration > 0) ((position * 1000) / duration).toInt() else 0
-        binding.osdPlayState.text = if (exo.isPlaying) "▶" else "❚❚"
+        binding.osdPlayState.updateText(if (exo.playWhenReady) "▶" else "Ⅱ")
+        val pauseLabel = getString(if (exo.playWhenReady) R.string.player_pause else R.string.player_continue)
+        osdActions.firstOrNull { it.tag == "pause" }?.let { it.updateText(pauseLabel); if (it.contentDescription != pauseLabel) it.contentDescription = pauseLabel }
+        binding.osdContext.updateText(getString(when {
+            !exo.playWhenReady -> R.string.player_paused
+            playback?.isLive == true -> R.string.player_live
+            displayMetadata.isEpisode -> R.string.player_episode
+            else -> R.string.player_playing
+        }))
+        binding.osdSeek.isVisible = playback?.isLive != true
         if (playback?.isLive == true) {
             binding.osdSeek.progress = 1000
-            binding.osdTime.text = getString(R.string.player_live)
+            binding.osdTime.updateText(getString(R.string.player_live))
             binding.osdRemaining.isVisible = false
-            binding.osdHints.setText(R.string.player_hints_live)
+            binding.osdHints.updateText(getString(R.string.player_hints_live))
         } else if (playback?.isAudio == true) {
-            binding.osdTime.text = "${formatTime(position)}  /  ${formatTime(duration)}"
+            binding.osdTime.updateText("${formatTime(position)}  /  ${formatTime(duration)}")
             binding.osdRemaining.isVisible = duration > 0
             if (duration > 0) {
-                binding.osdRemaining.text = getString(R.string.player_remaining, formatTime(duration - position))
+                binding.osdRemaining.updateText(getString(R.string.player_remaining, formatTime(duration - position)))
             }
-            binding.osdHints.setText(R.string.player_hints_audio)
+            binding.osdHints.updateText(getString(R.string.player_hints_audio))
         } else {
-            binding.osdTime.text = "${formatTime(position)}  /  ${formatTime(duration)}"
+            binding.osdTime.updateText("${formatTime(position)}  /  ${formatTime(duration)}")
             binding.osdRemaining.isVisible = duration > 0
             if (duration > 0) {
-                binding.osdRemaining.text = getString(R.string.player_remaining, formatTime(duration - position))
+                binding.osdRemaining.updateText(getString(R.string.player_remaining, formatTime(duration - position)))
             }
-            binding.osdHints.setText(R.string.player_hints)
+            binding.osdHints.updateText(getString(R.string.player_hints))
         }
-        binding.osdMeta.text = listOfNotNull(liveGuideLine(), trackSummary())
+        binding.osdMeta.updateText(listOfNotNull(liveGuideLine(), trackSummary())
             .filter { it.isNotBlank() }
-            .joinToString("  ·  ")
+            .joinToString("  ·  "))
     }
+
+    private fun TextView.updateText(value: CharSequence) { if (text.toString() != value.toString()) text = value }
 
     private fun liveGuide(): LiveTvNowNextText.Guide? {
         val payload = originalPayload ?: return null
@@ -960,70 +973,74 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         }
     }
 
-    private fun showServerPanel() {
+    private fun loadServerChoices() {
         val payload = originalPayload ?: return
-        if (!LivePlayback.isLivePayload(payload)) return
+        if (!isLiveSelection()) return
         val item = PlaybackPayload.itemId(payload) ?: return
-        trackDrawer.hide(animate = false)
-        dismissOsd()
         if (serverChoicesItem != item) { serverChoices = null; serverChoicesItem = item }
-        serverChoicesJob?.cancel(); serverChoicesHttp?.cancel()
+        cancelServerChoices()
         val cancellation = HttpCancellation()
         serverChoicesHttp = cancellation
         fun selected() = org.json.JSONObject(originalPayload ?: "{}").optString("mediaSourceId").ifBlank { playback?.mediaSourceId }
-        serverDrawer.render(serverChoices, selected(), loading = true)
-        serverDrawer.show()
+        trackDrawer.servers(serverChoices, selected(), loading = true)
         serverChoicesJob = lifecycleScope.launch {
             do {
                 val liveStream = playback?.liveStreamId
                 val result = runCatching { withContext(Dispatchers.IO) { IptvSources.load(payload, ignoreSsl, cancellation, liveStream) } }
-                if (!binding.serverPanel.isVisible || originalPayload != payload || serverChoicesHttp !== cancellation) return@launch
+                if (!binding.trackPanel.isVisible || originalPayload != payload || serverChoicesHttp !== cancellation) return@launch
                 result.getOrNull()?.let { serverChoices = it }
-                serverDrawer.render(serverChoices, selected(), failed = result.isFailure)
+                trackDrawer.servers(serverChoices, selected(), failed = result.isFailure)
                 delay(30_000)
-            } while (binding.serverPanel.isVisible)
+            } while (binding.trackPanel.isVisible)
         }
     }
 
-    private fun hideServerPanel() {
+    private fun cancelServerChoices() {
         serverChoicesHttp?.cancel(); serverChoicesHttp = null
         serverChoicesJob?.cancel(); serverChoicesJob = null
-        if (::serverDrawer.isInitialized) serverDrawer.hide()
     }
 
     private fun switchLiveSource(sourceId: String) {
         val payload = originalPayload ?: return
+        if (!isLiveSelection() || serverChoicesItem != PlaybackPayload.itemId(payload)) return
         val choices = serverChoices ?: return
-        if (sourceId != choices.automaticId && choices.sources.none { it.mediaSourceId == sourceId }) return
+        if (sourceId.isBlank() || (sourceId != choices.automaticId && choices.sources.none { it.mediaSourceId == sourceId })) return
+        val currentSource = org.json.JSONObject(payload).optString("mediaSourceId").ifBlank { playback?.mediaSourceId ?: choices.automaticId }
+        if (!liveFailed && playback != null && sourceId == currentSource) { hideTrackPanel(); return }
         val updated = org.json.JSONObject(payload).apply {
             put("mediaSourceId", sourceId); remove("MediaSourceId")
             remove("liveStreamId"); remove("LiveStreamId"); put("startPositionTicks", 0)
         }.toString()
-        val playing = player?.playWhenReady ?: true
-        hideServerPanel()
-        beginResolve(updated, resetQueue = false, resetRetries = true, playWhenReady = playing)
+        cancelServerChoices()
+        trackDrawer.hide(animate = false)
+        // Switching a paused live stream starts the new live edge; there is no shared timeshift buffer.
+        beginResolve(updated, resetQueue = false, resetRetries = true, playWhenReady = true)
     }
 
     private fun showTrackPanel() {
         renderTrackPanel()
-        // Let the film remain visible without a second large overlay underneath the drawer.
         dismissOsd()
         trackDrawer.show()
         mainHandler.removeCallbacks(hideOsd)
+        if (isLiveSelection()) loadServerChoices()
         val current = playback
         if (current != null && !current.isLive && subtitleSyncJob?.isActive != true) subtitleSyncAction(false)
     }
 
     private fun hideTrackPanel() {
+        cancelServerChoices()
         trackDrawer.hide {
             binding.playerView.requestFocus()
-            showOsd()
+            if (!liveFailed) showOsd()
         }
     }
 
     private fun renderTrackPanel() {
-        val current = playback ?: return
-        trackDrawer.render(current, subtitleOffsetMs, subtitleTimingKey(current) != null)
+        val current = playback
+        val payload = originalPayload
+        trackDrawer.render(current, current?.itemId ?: payload?.let(PlaybackPayload::itemId),
+            current?.title ?: payload?.let(PlaybackPayload::itemName).orEmpty(),
+            isLiveSelection(), subtitleOffsetMs, current?.let { subtitleTimingKey(it) } != null)
     }
 
     private fun onAudioPicked(track: MediaTrack) {
@@ -1299,11 +1316,13 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     }
 
     override fun pause() {
+        desiredPlayWhenReady = false
         player?.pause()
         showOsd()
     }
 
     override fun resume() {
+        desiredPlayWhenReady = true
         player?.play()
         showOsd()
     }
@@ -1472,7 +1491,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     }
 
     override fun onDestroy() {
-        hideServerPanel()
+        cancelServerChoices()
         subtitleSyncJob?.cancel()
         tune.invalidate()
         cancelPendingTune()

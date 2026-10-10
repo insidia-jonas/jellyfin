@@ -45,9 +45,9 @@
     <string name="webview_error">The web interface could not be loaded. Check that the server is running and that this Fire TV can reach it.</string>
     <string name="press_back_again">Press Back again to exit</string>
     <string name="connected_as">Connected to %1$s</string>
-    <string name="player_hints">OK pause · Left/Right skip · Up audio &amp; subtitles</string>
-    <string name="player_hints_live">OK pause · Up/Down channel · Menu servers / audio</string>
-    <string name="player_hints_audio">OK pause · Next/Prev album · Up tracks</string>
+    <string name="player_hints">← → Actions · OK Select · Menu Options · Back Hide</string>
+    <string name="player_hints_live">← → Actions · OK Select · Menu Options · Back Hide</string>
+    <string name="player_hints_audio">← → Actions · OK Select · Menu Options · Back Hide</string>
     <string name="player_live">LIVE</string>
     <string name="player_remaining">−%1$s</string>
     <string name="tracks_title">Audio &amp; subtitles</string>
@@ -113,4 +113,16 @@
     <string name="live_buffering">Connection interrupted – buffering…</string>
     <string name="playback_buffering">Buffering playback…</string>
     <string name="live_retry_status">Reconnecting (%1$d/%2$d)…</string>
+    <string name="player_pause">Ⅱ  Pause</string>
+    <string name="player_continue">▶  Continue</string>
+    <string name="player_seek_back">−10 seconds</string>
+    <string name="player_seek_forward">+30 seconds</string>
+    <string name="player_previous_channel">Previous channel</string>
+    <string name="player_next_channel">Next channel</string>
+    <string name="player_next_item">Next item</string>
+    <string name="player_options">Options</string>
+    <string name="player_paused">PAUSED</string>
+    <string name="player_episode">EPISODE</string>
+    <string name="player_playing">PLAYING</string>
+    <string name="live_switch_failed">This server is not delivering video. Choose another server or reconnect.</string>
 </resources>

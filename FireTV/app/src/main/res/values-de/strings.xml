@@ -45,9 +45,9 @@
     <string name="playback_failed">Diese Fassung konnte nicht abgespielt werden. Andere Version wählen oder Transcoding auf dem Server prüfen.</string>
     <string name="playback_timeout">Der Server hat zu lange gebraucht, um den Titel zu starten. Netz prüfen und erneut versuchen.</string>
     <string name="webview_recovered">Die Oberfläche wurde nach einem Grafikfehler neu geladen.</string>
-    <string name="player_hints">OK Pause · Links/Rechts springen · Hoch Ton &amp; Untertitel</string>
-    <string name="player_hints_live">OK Pause · Hoch/Runter Sender · Menü Server / Ton</string>
-    <string name="player_hints_audio">OK Pause · Weiter/Zurück · Hoch Spuren</string>
+    <string name="player_hints">← → Aktionen · OK Auswählen · Menü Bild &amp; Ton · Zurück Ausblenden</string>
+    <string name="player_hints_live">← → Aktionen · OK Auswählen · Menü Bild &amp; Ton · Zurück Ausblenden</string>
+    <string name="player_hints_audio">← → Aktionen · OK Auswählen · Menü Bild &amp; Ton · Zurück Ausblenden</string>
     <string name="player_live">LIVE</string>
     <string name="player_remaining">−%1$s</string>
     <string name="tracks_title">Ton &amp; Untertitel</string>
@@ -113,4 +113,16 @@
     <string name="live_buffering">Verbindung stockt – puffere…</string>
     <string name="playback_buffering">Wiedergabe lädt nach…</string>
     <string name="live_retry_status">Verbindung wird wiederhergestellt (%1$d/%2$d)…</string>
+    <string name="player_pause">Ⅱ  Pause</string>
+    <string name="player_continue">▶  Fortsetzen</string>
+    <string name="player_seek_back">−10 Sekunden</string>
+    <string name="player_seek_forward">+30 Sekunden</string>
+    <string name="player_previous_channel">Voriger Sender</string>
+    <string name="player_next_channel">Nächster Sender</string>
+    <string name="player_next_item">Nächster Titel</string>
+    <string name="player_options">Bild &amp; Ton</string>
+    <string name="player_paused">PAUSIERT</string>
+    <string name="player_episode">SERIENFOLGE</string>
+    <string name="player_playing">WIEDERGABE</string>
+    <string name="live_switch_failed">Dieser Server liefert derzeit kein Bild. Wähle einen anderen Server oder verbinde erneut.</string>
 </resources>

@@ -263,15 +263,35 @@ zwischenspeichert oder den Suchtext erst nach dem Seitenwechsel aktualisiert. Ei
 Posterflächen vermeiden einen Darstellungsfehler der WebView; doppelte native Ergebniszeilen
 werden ausgeblendet und beim Verlassen der Suche wieder freigegeben.
 
-Version 2.5.10 öffnet während Live-TV mit der **Menütaste** die Serverauswahl.
-Sie zeigt alle konfigurierten Eingangsserver mit Erreichbarkeit, gemessener Zeit
+Version 2.5.11 verwendet eine gemeinsame **Bild & Ton**-Schublade:
+**Menü** öffnet sie bei Filmen, Serien und Live-TV. **Ton**, **Untertitel** und
+**Timing** lassen sich mit OK auf- und zuklappen; bei Live-TV kommt **Server** hinzu.
+Hoch/Runter bewegt den Fokus, Links klappt den Bereich zu. Die Auswahl bleibt auch
+bei aktualisierten Servermessungen erhalten. Untertitelsuche, Sekundenkorrektur und
+lokaler Tonspur-Abgleich sind weiterhin erreichbar.
+
+Die Wiedergabeleiste zeigt auswählbare Aktionen statt reiner Tastaturhinweise:
+Pause/Fortsetzen, −10/+30 Sekunden und Bild & Ton. Bei Live-TV erscheinen verfügbare
+vorige/nächste Sender als eigene Aktionen; Hoch/Runter zappt nicht. Echte
+Sender-/Medientasten unterstützen weiterhin den Kanalwechsel. OK öffnet zunächst
+die Leiste und führt bei sichtbarer Leiste die gewählte Aktion aus. Die Play/Pause-
+Taste wirkt direkt. Zurück schließt zuerst die Schublade, dann die Leiste und erst
+beim nächsten Drücken die Wiedergabe. Pausierte Titel behalten Position und Zustand.
+
+Die Serverliste zeigt konfigurierte Eingangsserver, Erreichbarkeit, gemessene Zeit
 bis zum Bild und Prüfzeitpunkt. Messwerte stammen vom aktuellen Sender oder einer
-ausdrücklich gekennzeichneten Server-Stichprobe. Ungeprüfte Server bleiben erkennbar.
-Die Liste lädt ausschließlich gespeicherte Messwerte, auch während der Sender puffert.
-**Ton & Untertitel** bleibt im Menü erreichbar. **Zurück** schließt zuerst das Menü.
-Eine manuelle Auswahl gilt für die laufende Wiedergabe und bleibt bei Wiederholungen
-erhalten; **Automatisch** aktiviert wieder Standardserver und geprüfte Ersatzquellen.
-Der Server benötigt das zugehörige Update. Upgrades verwenden weiterhin das reguläre
-Paket `org.jellyfin.firetvweb` (ohne `-PfiretvPreview=true`).
+gekennzeichneten Server-Stichprobe; ungeprüfte Server bleiben erkennbar. Das Öffnen
+des Menüs liest ausschließlich gespeicherte Messwerte. Eine manuelle Auswahl gilt
+für diese Wiedergabe; **Automatisch** aktiviert Standard und geprüfte Ersatzquellen.
+Beim Wechsel eines pausierten Live-Streams startet die neue Live-Position; einen
+serverübergreifenden Timeshift-Puffer gibt es nicht. Nach erfolglosen, zeitlich
+begrenzten Wiederholungen bleibt die Serverauswahl mit **Erneut verbinden** offen.
+Wiederherstellbare Live-Fehler melden dem Webplayer kein endgültiges Ende.
+
+Filme und Bibliotheksfolgen werden nicht aufgrund eines technischen Öffnungshandles
+oder verschachtelter Live-Kennzeichen als TV behandelt. Der Server benötigt für
+IPTV-Auswahl auch über Bibliothekskacheln das zu 2.5.11 gehörende Server-Update.
+Upgrades verwenden das reguläre Paket
+`org.jellyfin.firetvweb` (ohne `-PfiretvPreview=true`).
 
 Play oder eine Fassung startet **ExoPlayer** (Direct Stream mit API-Token, sonst HLS). Amazon-WebView spielt keine MKV-Dateien. Downloads erscheinen in der System-Downloadliste und im Ordner `Downloads/Jellyfin`.
