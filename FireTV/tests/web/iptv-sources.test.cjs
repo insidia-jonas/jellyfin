@@ -20,8 +20,10 @@ function setup(t, pending = false) {
         reportPlaybackStopped: data => { calls.push(['stop-report', data]); return stop.promise; }
     };
     const original = w.ApiClient.reportPlaybackStopped;
-    const pm = { currentItem: () => playing ? { Id: 'channel', Name: 'Sky Cinema Action', Type: 'TvChannel' } : null,
-        currentMediaSource: () => ({ Id: 'base', LiveStreamId: 'live' }),
+    const player = {};
+    const pm = { getCurrentPlayer: () => player,
+        currentItem: p => { assert.equal(p, player); return playing ? { Id: 'channel', Name: 'Sky Cinema Action', Type: 'TvChannel' } : null; },
+        currentMediaSource: p => { assert.equal(p, player); return { Id: 'base', LiveStreamId: 'live' }; },
         stop: () => { playing = false; w.ApiClient.reportPlaybackStopped({ ItemId: 'channel', LiveStreamId: 'live' }); return Promise.resolve(); },
         play: options => { calls.push(['play', options]); return Promise.resolve(); }
     };
