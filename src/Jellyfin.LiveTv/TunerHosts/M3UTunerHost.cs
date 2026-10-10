@@ -141,6 +141,18 @@ namespace Jellyfin.LiveTv.TunerHosts
             var sources = await GetChannelStreamMediaSources(tunerHost, channel, cancellationToken).ConfigureAwait(false);
 
             var mediaSource = sources[0];
+            var selectedOrigin = IptvSourceChoice.Resolve(tunerHost, mediaSource.Id, streamId);
+            if (streamId?.Contains(IptvSourceChoice.Marker, StringComparison.Ordinal) == true && selectedOrigin is null)
+            {
+                throw new FileNotFoundException("The selected IPTV source is no longer configured.");
+            }
+
+            if (selectedOrigin is not null)
+            {
+                mediaSource.Path = M3uUrlFailover.RewriteStreamUrl(mediaSource.Path, selectedOrigin);
+                mediaSource.Id = streamId;
+                mediaSource.Name = IptvSourceChoice.Name(selectedOrigin);
+            }
             _health?.SynchronizeSource(tunerHost.Id, IptvWatchdog.SourceId(tunerHost, M3uUrlFailover.GetPrimaryUrl(tunerHost)));
             var reservation = _probeCoordinator is null ? null : await _probeCoordinator.AcquirePlayback(cancellationToken).ConfigureAwait(false);
 
@@ -150,12 +162,13 @@ namespace Jellyfin.LiveTv.TunerHosts
                 && !mediaSource.RequiresLooping
                 && !M3uUrlFailover.IsHls(mediaSource.Path, mediaSource.Container))
             {
-                return new SharedHttpStream(mediaSource, tunerHost, streamId, FileSystem, _httpClientFactory, Logger, Config, _appHost, _streamHelper, _health, channel.Id, reservation, _watchdog);
+                return new SharedHttpStream(mediaSource, tunerHost, streamId, FileSystem, _httpClientFactory, Logger, Config, _appHost, _streamHelper, _health, channel.Id, reservation, _watchdog, selectedOrigin);
             }
 
             _health?.BeginPlayback(channel.Id, tunerHost.Id);
-            _watchdog?.ObservePlayback(tunerHost, M3uUrlFailover.GetPrimaryUrl(tunerHost), channel.Id, Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
-            return new LiveStream(mediaSource, tunerHost, FileSystem, Logger, Config, _streamHelper, reservation);
+            var liveStream = new LiveStream(mediaSource, tunerHost, FileSystem, Logger, Config, _streamHelper, reservation);
+            _watchdog?.ObservePlayback(tunerHost, selectedOrigin ?? M3uUrlFailover.GetPrimaryUrl(tunerHost), channel.Id, liveStream.UniqueId);
+            return liveStream;
         }
 
         public async Task Validate(TunerHostInfo info)

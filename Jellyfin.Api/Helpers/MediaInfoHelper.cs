@@ -20,6 +20,7 @@ using MediaBrowser.Controller.Devices;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Audio;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Controller.MediaEncoding;
 using MediaBrowser.Model.Dlna;
 using MediaBrowser.Model.Dto;
@@ -46,6 +47,7 @@ public class MediaInfoHelper
     private readonly INetworkManager _networkManager;
     private readonly IDeviceManager _deviceManager;
     private readonly IServerApplicationHost _appHost;
+    private readonly IIptvSourceSelector? _iptvSources;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="MediaInfoHelper"/> class.
@@ -59,6 +61,7 @@ public class MediaInfoHelper
     /// <param name="networkManager">Instance of the <see cref="INetworkManager"/> interface.</param>
     /// <param name="deviceManager">Instance of the <see cref="IDeviceManager"/> interface.</param>
     /// <param name="appHost">Instance of the <see cref="IServerApplicationHost"/> interface.</param>
+    /// <param name="iptvSources">Optional configured per-playback IPTV source selection.</param>
     public MediaInfoHelper(
         IUserManager userManager,
         ILibraryManager libraryManager,
@@ -68,7 +71,8 @@ public class MediaInfoHelper
         ILogger<MediaInfoHelper> logger,
         INetworkManager networkManager,
         IDeviceManager deviceManager,
-        IServerApplicationHost appHost)
+        IServerApplicationHost appHost,
+        IIptvSourceSelector? iptvSources = null)
     {
         _userManager = userManager;
         _libraryManager = libraryManager;
@@ -79,6 +83,7 @@ public class MediaInfoHelper
         _networkManager = networkManager;
         _deviceManager = deviceManager;
         _appHost = appHost;
+        _iptvSources = iptvSources;
     }
 
     /// <summary>
@@ -152,9 +157,16 @@ public class MediaInfoHelper
             return mediaSourcesList.ToArray();
         }
 
-        return mediaSourcesList
+        var matching = mediaSourcesList
             .Where(i => string.Equals(i.Id, mediaSourceId, StringComparison.OrdinalIgnoreCase))
             .ToArray();
+        if (matching.Length == 0 && item.ExternalId is { Length: > 0 } channelId
+            && _iptvSources?.Select(channelId, mediaSourcesList.ToArray(), mediaSourceId) is { } selected)
+        {
+            return [selected];
+        }
+
+        return matching;
     }
 
     /// <summary>

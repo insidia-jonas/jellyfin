@@ -47,6 +47,7 @@ public static class LiveTvServiceCollectionExtensions
         services.AddSingleton<ChannelHealthStore>();
         services.AddSingleton<IptvWatchdog>();
         services.AddSingleton<IIptvWatchdog>(s => s.GetRequiredService<IptvWatchdog>());
+        services.AddSingleton<IIptvSourceSelector, IptvSourceSelector>();
         services.AddSingleton<ILiveTvChannelHealth>(s => s.GetRequiredService<ChannelHealthStore>());
         services.AddSingleton<ChannelProbeCoordinator>();
         services.AddSingleton<ChannelMediaProbe>();

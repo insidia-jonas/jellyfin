@@ -241,3 +241,19 @@ startup on the alternative. Shared delivery hosts suppress an independence recom
 Recommendations never change the configured primary. MPEG-TS recovery may use an
 alternative only after successful decoding/playback of that same channel on it, within
 the existing retry/time budget. HLS retains its existing player reconnect handling.
+
+During Live TV, **Server wechseln** in the browser or the **Menu** key on
+Fire TV 2.5.10 selects one configured entry for the current playback. The old
+stream is released before reopening the same channel. A manual choice remains
+pinned; **Automatisch** restores the default and verified recovery alternatives.
+This never updates `ActiveUrl` or changes another viewer's source.
+
+`GET /LiveTv/Channels/{itemId}/Sources` requires access to that channel and returns
+opaque media-source IDs and cached observations, without provider URLs or tokens.
+The menu displays decoded startup time, last observation and whether evidence is
+for this channel or a server sample. Unknown/expired evidence remains unknown.
+It refreshes cached values every 30 seconds while open; opening the menu starts
+no provider tests. The existing once-per-minute idle rotation supplies new media
+measurements and yields to playback/recordings. Provider entry hosts may redirect
+to the same delivery infrastructure; a manual host choice cannot guarantee an
+independent provider backend.

@@ -126,7 +126,7 @@ public sealed class ChannelHealthWorker : BackgroundService
         }
 
         _store.ConfirmClientProgress(id);
-        _watchdog.ObserveClient(id, false);
+        _watchdog.ObserveClient(id, false, args.LiveStreamId);
     }
 
     private void OnStopped(object? sender, PlaybackStopEventArgs args)
@@ -134,7 +134,7 @@ public sealed class ChannelHealthWorker : BackgroundService
         if (args.Failed && args.Item?.ExternalId is { } id && id.StartsWith("m3u", StringComparison.OrdinalIgnoreCase))
         {
             _store.RecordClientFailure(id);
-            _watchdog.ObserveClient(id, true);
+            _watchdog.ObserveClient(id, true, args.LiveStreamId);
         }
     }
 

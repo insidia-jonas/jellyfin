@@ -19,7 +19,7 @@ public sealed class IptvWatchdog : IIptvWatchdog
 {
     private readonly object _sync = new();
     private readonly Dictionary<string, Observation> _history = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, (TunerHostInfo Tuner, string Source, string Attempt, DateTime Until, bool Ended)> _playbacks = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (TunerHostInfo Tuner, string Source, string Channel, string Attempt, DateTime Until, bool Ended)> _playbacks = new(StringComparer.Ordinal);
     private readonly string? _path;
     private readonly TimeProvider _clock;
     private readonly Func<LiveTvOptions> _options;
@@ -95,7 +95,7 @@ public sealed class IptvWatchdog : IIptvWatchdog
                 _playbacks.Remove(id);
             }
 
-            _playbacks[channel] = (tuner, source, attempt, _clock.GetUtcNow().UtcDateTime.AddMinutes(2), false);
+            _playbacks[attempt] = (tuner, source, channel, attempt, _clock.GetUtcNow().UtcDateTime.AddMinutes(2), false);
         }
     }
 
@@ -103,29 +103,33 @@ public sealed class IptvWatchdog : IIptvWatchdog
     {
         lock (_sync)
         {
-            if (_playbacks.TryGetValue(channel, out var playback) && playback.Attempt == attempt)
+            if (_playbacks.TryGetValue(attempt, out var playback) && playback.Channel == channel)
             {
                 // Late progress must not revive a failed source. Retain a short
                 // window for the client's final failure report after stream close.
-                _playbacks[channel] = playback with { Ended = true, Until = _clock.GetUtcNow().UtcDateTime.AddSeconds(30) };
+                _playbacks[attempt] = playback with { Ended = true, Until = _clock.GetUtcNow().UtcDateTime.AddSeconds(30) };
             }
         }
     }
 
-    internal void ObserveClient(string channel, bool failed)
+    internal void ObserveClient(string channel, bool failed, string? liveStreamId = null)
     {
         lock (_sync)
         {
-            if (_playbacks.TryGetValue(channel, out var playback) && playback.Until >= _clock.GetUtcNow().UtcDateTime && (failed || !playback.Ended))
+            var candidates = _playbacks.Values.Where(p => p.Channel == channel && p.Until >= _clock.GetUtcNow().UtcDateTime
+                && (string.IsNullOrEmpty(liveStreamId) || liveStreamId.EndsWith("_" + p.Attempt, StringComparison.Ordinal))).ToArray();
+            // A report without a handle must never verify a different viewer's source.
+            if (candidates.Length == 1 && (failed || !candidates[0].Ended))
             {
+                var playback = candidates[0];
                 Record(playback.Tuner, playback.Source, channel, playback.Attempt, !failed, !failed, reason: failed ? "ClientPlaybackFailed" : null, interrupted: failed);
                 if (failed)
                 {
-                    _playbacks.Remove(channel);
+                    _playbacks.Remove(playback.Attempt);
                 }
                 else
                 {
-                    _playbacks[channel] = playback with { Until = _clock.GetUtcNow().UtcDateTime.AddMinutes(2) };
+                    _playbacks[playback.Attempt] = playback with { Until = _clock.GetUtcNow().UtcDateTime.AddMinutes(2) };
                 }
             }
         }
@@ -293,6 +297,49 @@ public sealed class IptvWatchdog : IIptvWatchdog
         }
 
         return result;
+    }
+
+    internal IptvChannelSources GetChannelSources(TunerHostInfo tuner, string channel, string baseId, string? liveStreamId = null)
+    {
+        lock (_sync)
+        {
+            var account = AccountReason(tuner);
+            var playing = _playbacks.Values.Where(p => p.Channel == channel && p.Tuner.Id == tuner.Id && !p.Ended
+                && p.Until >= _clock.GetUtcNow().UtcDateTime && !string.IsNullOrEmpty(liveStreamId)
+                && liveStreamId.EndsWith("_" + p.Attempt, StringComparison.Ordinal)).ToArray();
+            return new IptvChannelSources
+            {
+                AutomaticMediaSourceId = baseId,
+                PlayingSourceId = playing.Length == 1 ? SourceId(tuner, playing[0].Source) : null,
+                State = _options().EnableChannelHealthProbes ? _state : _state == "Checking" ? "Stopping" : "Disabled",
+                AccountReason = account,
+                Sources = Sources(tuner).Select(origin =>
+                {
+                    var summary = Summarize(tuner, origin);
+                    var local = Samples(tuner, origin, new HashSet<string>(StringComparer.Ordinal) { channel }).OrderBy(s => s.Utc).ToArray();
+                    var samples = local.Length > 0 ? local : Samples(tuner, origin).OrderBy(s => s.Utc).ToArray();
+                    var latest = samples.LastOrDefault();
+                    var failures = samples.TakeLast(2).Count(s => !s.Success);
+                    var status = latest is null || account is not null ? "Unknown"
+                        : !latest.Success ? failures >= 2 ? "Failed" : "Unstable"
+                        : samples.Any(s => !s.Success || s.Interruptions > 0) ? "Unstable"
+                        : samples.Any(s => s.Decoded) ? "Reachable" : "Unknown";
+                    return new IptvChannelSource
+                    {
+                        Id = summary.Id,
+                        MediaSourceId = IptvSourceChoice.Id(tuner, baseId, origin),
+                        Name = IptvSourceChoice.Name(origin),
+                        Host = summary.Host,
+                        IsDefault = summary.Active,
+                        Status = status,
+                        ChannelSpecific = local.Length > 0,
+                        LastCheckedUtc = latest?.Utc,
+                        MedianStartMilliseconds = Median(samples.Where(s => s.Decoded).Select(s => s.StartMilliseconds)),
+                        Samples = samples.Length
+                    };
+                }).ToArray()
+            };
+        }
     }
 
     private IptvSourceHealth Summarize(TunerHostInfo tuner, string source)

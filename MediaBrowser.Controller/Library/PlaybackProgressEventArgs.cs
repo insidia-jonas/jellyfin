@@ -31,6 +31,9 @@ namespace MediaBrowser.Controller.Library
 
         public string MediaSourceId { get; set; }
 
+        /// <summary>Gets or sets the stream handle captured when the report arrived.</summary>
+        public string LiveStreamId { get; set; }
+
         public bool IsPaused { get; set; }
 
         public bool IsAutomated { get; set; }
