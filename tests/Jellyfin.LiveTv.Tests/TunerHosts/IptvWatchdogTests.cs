@@ -15,6 +15,51 @@ public class IptvWatchdogTests
     private const string Backup = "https://backup.example";
 
     [Fact]
+    public void ChannelMenuDistinguishesChannelEvidenceSamplesAndExpiredChecks()
+    {
+        var (store, tuner, clock) = Create();
+        store.Record(tuner, Backup, "other", "probe", true, true, 900);
+        var menu = store.GetChannelSources(tuner, "current", "media");
+        var backup = menu.Sources.Single(s => !s.IsDefault);
+        Assert.False(backup.ChannelSpecific);
+        Assert.Equal("Reachable", backup.Status);
+        Assert.Equal(900, backup.MedianStartMilliseconds);
+        store.Record(tuner, Backup, "current", "transport", true, false, 10);
+        backup = store.GetChannelSources(tuner, "current", "media").Sources.Single(s => !s.IsDefault);
+        Assert.True(backup.ChannelSpecific);
+        Assert.Equal("Unknown", backup.Status);
+        Assert.Null(backup.MedianStartMilliseconds);
+        clock.Advance(TimeSpan.FromHours(7));
+        Assert.All(store.GetChannelSources(tuner, "current", "media").Sources, s => Assert.Equal("Unknown", s.Status));
+    }
+
+    [Fact]
+    public void TwoViewersAndLateStopAreAttributedOnlyToTheirOwnStream()
+    {
+        var (store, tuner, _) = Create();
+        store.ObservePlayback(tuner, Primary, "a", "old");
+        store.ObservePlayback(tuner, Backup, "a", "new");
+        store.ObserveClient("a", false); // Ambiguous reports cannot verify either server.
+        Assert.Null(store.GetVerifiedAlternate(tuner, "a", Primary));
+        store.ObserveClient("a", false, "provider_new");
+        Assert.Equal(Backup, store.GetVerifiedAlternate(tuner, "a", Primary));
+        store.ObserveClient("a", true, "provider_old");
+        Assert.Equal(Backup, store.GetVerifiedAlternate(tuner, "a", Primary));
+        var menu = store.GetChannelSources(tuner, "a", "media", "provider_new");
+        Assert.Equal(menu.Sources.Single(s => !s.IsDefault).Id, menu.PlayingSourceId);
+    }
+
+    [Fact]
+    public void AccountLimitDoesNotLabelAllMenuChoicesAsDead()
+    {
+        var (store, tuner, _) = Create();
+        store.Record(tuner, Primary, "a", "denied", false, false, reason: "ProviderBusy");
+        var menu = store.GetChannelSources(tuner, "a", "media");
+        Assert.Equal("ProviderBusy", menu.AccountReason);
+        Assert.All(menu.Sources, s => Assert.Equal("Unknown", s.Status));
+    }
+
+    [Fact]
     public void TransportDataNeverVerifiesFallbackAndAccountErrorsStopAllSources()
     {
         var (store, tuner, clock) = Create();

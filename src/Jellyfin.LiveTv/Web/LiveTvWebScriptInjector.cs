@@ -16,7 +16,7 @@ namespace Jellyfin.LiveTv.Web;
 /// </summary>
 public sealed class LiveTvWebScriptInjector : IHostedService
 {
-    internal const string ScriptVersion = "13";
+    internal const string ScriptVersion = "14";
 
     private const string ScriptMarker = "plugin=\"LiveTvOverview\"";
 
@@ -127,10 +127,14 @@ public sealed class LiveTvWebScriptInjector : IHostedService
         using var watchdogStream = assembly.GetManifestResourceStream("Jellyfin.LiveTv.Web.iptv-watchdog.js")
             ?? throw new InvalidOperationException("Embedded IPTV watchdog script is missing.");
         using var watchdogReader = new StreamReader(watchdogStream);
+        using var sourcesStream = assembly.GetManifestResourceStream("Jellyfin.LiveTv.Web.iptv-sources.js")
+            ?? throw new InvalidOperationException("Embedded IPTV source selector is missing.");
+        using var sourcesReader = new StreamReader(sourcesStream);
         using var cssStream = assembly.GetManifestResourceStream("Jellyfin.LiveTv.Web.livetv-guide.css")
             ?? throw new InvalidOperationException("Embedded Live TV guide stylesheet is missing.");
         using var cssReader = new StreamReader(cssStream);
         return reader.ReadToEnd() + "\n" + healthReader.ReadToEnd() + "\n" + watchdogReader.ReadToEnd()
+            + "\n" + sourcesReader.ReadToEnd()
             + "\n(function(){var s=document.createElement('style');s.textContent="
             + System.Text.Json.JsonSerializer.Serialize(cssReader.ReadToEnd()) + ";document.head.appendChild(s);})();";
     }

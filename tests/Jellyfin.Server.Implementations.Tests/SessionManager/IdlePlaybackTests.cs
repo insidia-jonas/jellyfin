@@ -20,6 +20,41 @@ namespace Jellyfin.Server.Implementations.Tests.SessionManager;
 
 public class IdlePlaybackTests
 {
+    [Fact]
+    public async Task StopEventRetainsStreamHandleAfterSessionStateIsCleared()
+    {
+        PlaybackStopEventArgs? stopped = null;
+        var events = new Mock<IEventManager>();
+        events.Setup(e => e.PublishAsync(It.IsAny<PlaybackStopEventArgs>()))
+            .Callback<PlaybackStopEventArgs>(e => stopped = e).Returns(Task.CompletedTask);
+        await using var manager = new Emby.Server.Implementations.Session.SessionManager(
+            NullLogger<Emby.Server.Implementations.Session.SessionManager>.Instance,
+            events.Object,
+            Mock.Of<IUserDataManager>(),
+            Mock.Of<IServerConfigurationManager>(),
+            Mock.Of<ILibraryManager>(),
+            Mock.Of<IUserManager>(),
+            Mock.Of<IMusicManager>(),
+            Mock.Of<IDtoService>(),
+            Mock.Of<IImageProcessor>(),
+            Mock.Of<IServerApplicationHost>(),
+            Mock.Of<IDeviceManager>(),
+            Mock.Of<IMediaSourceManager>(),
+            Mock.Of<IHostApplicationLifetime>());
+        var session = await manager.LogSessionActivity("Test", "1", "device", "Device", "127.0.0.1", null);
+        session.PlayState.LiveStreamId = "old-stream";
+        await manager.OnPlaybackStopped(new PlaybackStopInfo
+        {
+            SessionId = session.Id,
+            LiveStreamId = "old-stream",
+            Failed = true
+        });
+        session.PlayState.LiveStreamId = "new-stream";
+        Assert.NotNull(stopped);
+        Assert.Equal("old-stream", stopped.LiveStreamId);
+        Assert.True(stopped.Failed);
+    }
+
     [Theory]
     [InlineData(null, null)]
     [InlineData(123456789L, 123456789L)]

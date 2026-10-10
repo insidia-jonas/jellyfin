@@ -676,10 +676,14 @@
             if (!found && req.m) {
                 var key;
                 for (key in req.m) {
-                    if (!Object.prototype.hasOwnProperty.call(req.m, key)
-                        || String(key).toLowerCase().indexOf('playbackmanager') === -1) {
+                    if (!Object.prototype.hasOwnProperty.call(req.m, key)) {
                         continue;
                     }
+                    // Production module IDs are numeric. Inspect the export/method
+                    // signature and require only the matching manager factory.
+                    var factory = String(req.m[key]);
+                    if (String(key).toLowerCase().indexOf('playbackmanager') < 0
+                        && !(factory.indexOf('playbackManager') >= 0 && factory.indexOf('currentMediaSource') >= 0 && factory.indexOf('getPlayerState') >= 0)) { continue; }
                     try {
                         found = unwrapPlaybackManager(req(key));
                         if (found) {
@@ -824,12 +828,13 @@
         });
     }
 
-    function requestPlaybackInfo(item) {
+    function requestPlaybackInfo(item, mediaSourceId) {
         var client = api();
         return apiPost('Items/' + item.Id + '/PlaybackInfo', { userId: client.getCurrentUserId() }, {
             UserId: client.getCurrentUserId(),
             MaxStreamingBitrate: 20000000,
             StartTimeTicks: 0,
+            MediaSourceId: mediaSourceId || null,
             AutoOpenLiveStream: true,
             EnableDirectPlay: false,
             EnableDirectStream: false,
@@ -1247,19 +1252,18 @@
                 })['catch'](function () { /* the transcode may already be gone */ }));
             } catch (e) { /* best effort */ }
         }
-        if (state.liveStreamId) {
-            pending.push(apiPost('LiveStreams/Close', { liveStreamId: state.liveStreamId }, null)['catch'](
-                function () { /* the server closes idle streams anyway */ }));
-        }
-        if (client && typeof client.reportPlaybackStopped === 'function' && state.playSessionId) {
-            try {
-                client.reportPlaybackStopped({
+        if (state.startReport && client && typeof client.reportPlaybackStopped === 'function') {
+            pending.push(state.startReport.catch(function () { /* the open handle still needs releasing */ }).then(function () {
+                return client.reportPlaybackStopped({
                     ItemId: state.itemId,
                     PlaySessionId: state.playSessionId,
                     MediaSourceId: state.mediaSourceId,
+                    LiveStreamId: state.liveStreamId,
                     PositionTicks: 0
                 });
-            } catch (e) { /* reporting is optional */ }
+            }));
+        } else if (state.liveStreamId) {
+            pending.push(apiPost('LiveStreams/Close', { liveStreamId: state.liveStreamId }, null));
         }
         return Promise.all(pending).then(function () { /* value is irrelevant */ });
     }
@@ -1326,7 +1330,7 @@
     /* Guaranteed player: PlaybackInfo over REST plus a plain <video>. It needs no
        jellyfin-web internals and no hls.js, so it still works on a web build whose
        module graph this script cannot reach. */
-    function openBuiltinPlayer(item, queue, gen) {
+    function openBuiltinPlayer(item, queue, gen, mediaSourceId) {
         var client = api();
         if (!client || !item || !item.Id) {
             return Promise.reject(new Error(german() ? 'Kein Server verfügbar.' : 'No server connection.'));
@@ -1336,6 +1340,8 @@
             box: shell.box,
             video: shell.video,
             itemId: item.Id,
+            item: item,
+            selectedMediaSourceId: mediaSourceId,
             queue: queue,
             keyHandler: null
         };
@@ -1344,6 +1350,7 @@
             if (playState !== state) {
                 return;
             }
+            if (document.querySelector('.jf-iptv-drawer')) { return; }
             if (event.key === 'Escape' || event.key === 'Backspace' || event.keyCode === 27 || event.keyCode === 8) {
                 event.preventDefault();
                 event.stopPropagation();
@@ -1359,7 +1366,7 @@
         document.addEventListener('keydown', state.keyHandler, true);
         shell.close.focus();
 
-        return requestPlaybackInfo(item).then(function (info) {
+        return requestPlaybackInfo(item, mediaSourceId).then(function (info) {
             if (gen !== playGen || playState !== state) {
                 return 'stale';
             }
@@ -1392,13 +1399,15 @@
             });
             if (client && typeof client.reportPlaybackStart === 'function') {
                 try {
-                    client.reportPlaybackStart({
+                    state.startReport = Promise.resolve(client.reportPlaybackStart({
                         ItemId: item.Id,
                         PlaySessionId: info.PlaySessionId,
                         MediaSourceId: source.Id,
+                        LiveStreamId: source.LiveStreamId,
                         CanSeek: false,
                         IsPaused: false
-                    });
+                    }));
+                    state.startReport.catch(function () { /* close still waits for this request */ });
                 } catch (e) { /* reporting is optional */ }
             }
             return waitForPlayback(gen, BUILTIN_TIMEOUT_MS).then(function (how) {
@@ -2046,6 +2055,15 @@
             return openBuiltinPlayer(item, queue, ++playGen);
         },
         closePlayer: closeBuiltinPlayer,
+        switchSource: function (sourceId, stillWanted) {
+            var state = playState;
+            if (!state) { return Promise.reject(new Error('No current live playback')); }
+            var gen = ++playGen;
+            return closeBuiltinPlayer().then(function () {
+                if (gen !== playGen || stillWanted && !stillWanted()) { return 'stale'; }
+                return openBuiltinPlayer(state.item, state.queue, gen, sourceId);
+            });
+        },
         playerState: function () { return playState; }
     };
 

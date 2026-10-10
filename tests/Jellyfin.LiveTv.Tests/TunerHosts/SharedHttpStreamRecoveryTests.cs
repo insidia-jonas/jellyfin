@@ -26,6 +26,19 @@ public class SharedHttpStreamRecoveryTests
 {
     public static bool HasFfmpeg => ChannelMediaProbeTests.HasFfmpeg;
 
+    [Fact]
+    public async Task ManualChoiceNeverSilentlyFailsOverToAnotherHost()
+    {
+        using var fixture = new Fixture(HttpStatusCode.NotFound, selectedOrigin: "http://primary.example");
+        await fixture.Stream.Open(TestContext.Current.CancellationToken);
+        await using var reader = fixture.Stream.GetStream();
+        await WaitUntil(() => fixture.Handler.Hosts.Count >= 2);
+        await Task.Delay(200, TestContext.Current.CancellationToken);
+        Assert.All(fixture.Handler.Hosts, host => Assert.Equal("primary.example", host));
+        Assert.Equal("http://primary.example", fixture.Tuner.ActiveUrl);
+        await fixture.Stream.Close();
+    }
+
     [Fact(Skip = "Set JELLYFIN_TEST_FFMPEG to verify decoded fallback media.", SkipUnless = nameof(HasFfmpeg))]
     public async Task ConfiguredAlternateSuppliesDecodableVideoAfterPrimaryFails()
     {
@@ -175,7 +188,7 @@ public class SharedHttpStreamRecoveryTests
         private readonly DirectoryInfo _directory = Directory.CreateTempSubdirectory();
         private readonly HttpClient _client;
 
-        internal Fixture(HttpStatusCode primaryStatus, byte[]? media = null, HttpStatusCode alternateStatus = HttpStatusCode.OK, bool verifyBackup = true)
+        internal Fixture(HttpStatusCode primaryStatus, byte[]? media = null, HttpStatusCode alternateStatus = HttpStatusCode.OK, bool verifyBackup = true, string? selectedOrigin = null)
         {
             Handler = new ProviderHandler(primaryStatus, media, alternateStatus);
             _client = new HttpClient(Handler);
@@ -194,7 +207,7 @@ public class SharedHttpStreamRecoveryTests
                 watchdog.Record(Tuner, "http://secondary.example", "channel", "probe", true, true, 100);
             }
 
-            Stream = new SharedHttpStream(new MediaSourceInfo { Path = "http://primary.example/live.ts", Protocol = MediaProtocol.Http }, Tuner, "stream", Mock.Of<IFileSystem>(), http.Object, NullLogger.Instance, configuration.Object, host.Object, new StreamHelper(), Health, "channel", watchdog: watchdog);
+            Stream = new SharedHttpStream(new MediaSourceInfo { Path = "http://primary.example/live.ts", Protocol = MediaProtocol.Http }, Tuner, "stream", Mock.Of<IFileSystem>(), http.Object, NullLogger.Instance, configuration.Object, host.Object, new StreamHelper(), Health, "channel", watchdog: watchdog, selectedOrigin: selectedOrigin);
         }
 
         internal ProviderHandler Handler { get; }

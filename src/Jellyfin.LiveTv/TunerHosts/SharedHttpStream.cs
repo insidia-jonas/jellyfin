@@ -31,6 +31,7 @@ namespace Jellyfin.LiveTv.TunerHosts
         private readonly IptvWatchdog? _watchdog;
         private readonly string _channelId;
         private readonly string? _ingestUrl;
+        private readonly string? _selectedOrigin;
         private int _providerStarted;
 
         public SharedHttpStream(
@@ -46,7 +47,8 @@ namespace Jellyfin.LiveTv.TunerHosts
             ChannelHealthStore? health = null,
             string? channelId = null,
             IDisposable? playbackReservation = null,
-            IptvWatchdog? watchdog = null)
+            IptvWatchdog? watchdog = null,
+            string? selectedOrigin = null)
             : base(mediaSource, tunerHostInfo, fileSystem, logger, configurationManager, streamHelper, playbackReservation)
         {
             _httpClientFactory = httpClientFactory;
@@ -54,6 +56,7 @@ namespace Jellyfin.LiveTv.TunerHosts
             _tunerHostInfo = tunerHostInfo;
             _health = health;
             _watchdog = watchdog;
+            _selectedOrigin = selectedOrigin;
             _channelId = channelId ?? originalStreamId;
             OriginalStreamId = originalStreamId;
             // Open() rewrites MediaSource.Path (same object as OriginalMediaSource)
@@ -139,7 +142,7 @@ namespace Jellyfin.LiveTv.TunerHosts
         {
             var watch = Stopwatch.StartNew();
             var originalUrl = url;
-            var currentOrigin = M3uUrlFailover.GetPrimaryUrl(_tunerHostInfo);
+            var currentOrigin = _selectedOrigin ?? M3uUrlFailover.GetPrimaryUrl(_tunerHostInfo);
             var recovery = new LiveStreamRecovery();
             var hangTimeout = M3uUrlFailover.GetHangTimeout(_tunerHostInfo);
             long totalBytes = 0;
@@ -251,7 +254,7 @@ namespace Jellyfin.LiveTv.TunerHosts
 
                         if (recovery.ShouldSwitch)
                         {
-                            var alternate = _watchdog?.GetVerifiedAlternate(_tunerHostInfo, _channelId, currentOrigin);
+                            var alternate = _selectedOrigin is null ? _watchdog?.GetVerifiedAlternate(_tunerHostInfo, _channelId, currentOrigin) : null;
                             if (alternate is not null)
                             {
                                 currentOrigin = alternate;
