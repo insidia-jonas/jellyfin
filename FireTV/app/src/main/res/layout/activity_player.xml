@@ -207,6 +207,16 @@
         android:elevation="12dp"
         android:visibility="gone" />
 
+    <FrameLayout
+        android:id="@+id/serverPanel"
+        android:layout_width="500dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="end"
+        android:layout_margin="22dp"
+        android:background="@drawable/bg_track_glass"
+        android:elevation="12dp"
+        android:visibility="gone" />
+
     <LinearLayout
         android:id="@+id/searchPanel"
         android:layout_width="560dp"

@@ -52,6 +52,8 @@ import kotlinx.coroutines.withTimeout
 import org.jellyfin.firetv.R
 import org.jellyfin.firetv.BuildConfig
 import org.jellyfin.firetv.core.HttpCancellation
+import org.jellyfin.firetv.core.IptvSources
+import org.jellyfin.firetv.core.IptvSourceSnapshot
 import org.jellyfin.firetv.core.LiveTuneState
 import org.jellyfin.firetv.core.LiveTvChannels
 import org.jellyfin.firetv.core.LiveTvChannel
@@ -84,6 +86,11 @@ import java.util.concurrent.TimeUnit
 class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private lateinit var binding: ActivityPlayerBinding
     private lateinit var trackDrawer: PlaybackTrackPanel
+    private lateinit var serverDrawer: PlaybackServerPanel
+    private var serverChoices: IptvSourceSnapshot? = null
+    private var serverChoicesItem: String? = null
+    private var serverChoicesJob: Job? = null
+    private var serverChoicesHttp: HttpCancellation? = null
     private var subtitleSyncJob: Job? = null
     private var subtitleStatusItem: String? = null
     private var player: ExoPlayer? = null
@@ -189,6 +196,10 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         binding.osdSeek.isFocusable = false
         binding.osdSeek.isFocusableInTouchMode = false
         styleSubtitles()
+        serverDrawer = PlaybackServerPanel(this, binding.serverPanel,
+            picked = ::switchLiveSource,
+            tracks = { hideServerPanel(); if (playback != null) showTrackPanel() },
+            retry = ::showServerPanel)
         trackDrawer = PlaybackTrackPanel(this, binding.trackPanel,
             audioPicked = ::onAudioPicked, subtitlePicked = ::onSubtitlePicked,
             offsetChanged = ::adjustSubtitleOffset,
@@ -246,6 +257,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             return
         }
         cancelPendingTune()
+        if (resetRetries || PlaybackPayload.itemId(payload) != originalPayload?.let(PlaybackPayload::itemId)) hideServerPanel()
         originalPayload = payload
         if (resetQueue) queuePayload = payload
         val generation = tune.select(PlaybackPayload.itemId(payload), resetRetries)
@@ -697,6 +709,14 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) handlePlayerBack()
             return true
         }
+        if (binding.serverPanel.isVisible) {
+            return serverDrawer.dispatch(event) || super.dispatchKeyEvent(event)
+        }
+        if (event.action == KeyEvent.ACTION_DOWN && event.keyCode == KeyEvent.KEYCODE_MENU
+            && originalPayload?.let(LivePlayback::isLivePayload) == true) {
+            showServerPanel()
+            return true
+        }
         if (event.action != KeyEvent.ACTION_DOWN) {
             return super.dispatchKeyEvent(event)
         }
@@ -825,7 +845,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     }
 
     private fun showOsd() {
-        if (binding.trackPanel.isVisible || binding.searchPanel.isVisible) return
+        if (binding.trackPanel.isVisible || binding.searchPanel.isVisible || binding.serverPanel.isVisible) return
         binding.osd.isVisible = true
         updateOsd()
         mainHandler.removeCallbacks(osdTick)
@@ -841,6 +861,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
 
     private fun handlePlayerBack() {
         when {
+            binding.serverPanel.isVisible -> hideServerPanel()
             binding.searchPanel.isVisible -> hideSearchPanel()
             binding.trackPanel.isVisible -> hideTrackPanel()
             binding.osd.isVisible -> dismissOsd()
@@ -851,6 +872,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private fun scheduleOsdHide() {
         mainHandler.removeCallbacks(hideOsd)
         val keepOpen = binding.trackPanel.isVisible ||
+            binding.serverPanel.isVisible ||
             binding.searchPanel.isVisible ||
             player?.isPlaying == false ||
             playback?.isAudio == true
@@ -936,6 +958,50 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         } else {
             String.format(Locale.US, "%02d:%02d", minutes, seconds)
         }
+    }
+
+    private fun showServerPanel() {
+        val payload = originalPayload ?: return
+        if (!LivePlayback.isLivePayload(payload)) return
+        val item = PlaybackPayload.itemId(payload) ?: return
+        trackDrawer.hide(animate = false)
+        dismissOsd()
+        if (serverChoicesItem != item) { serverChoices = null; serverChoicesItem = item }
+        serverChoicesJob?.cancel(); serverChoicesHttp?.cancel()
+        val cancellation = HttpCancellation()
+        serverChoicesHttp = cancellation
+        fun selected() = org.json.JSONObject(originalPayload ?: "{}").optString("mediaSourceId").ifBlank { playback?.mediaSourceId }
+        serverDrawer.render(serverChoices, selected(), loading = true)
+        serverDrawer.show()
+        serverChoicesJob = lifecycleScope.launch {
+            do {
+                val liveStream = playback?.liveStreamId
+                val result = runCatching { withContext(Dispatchers.IO) { IptvSources.load(payload, ignoreSsl, cancellation, liveStream) } }
+                if (!binding.serverPanel.isVisible || originalPayload != payload || serverChoicesHttp !== cancellation) return@launch
+                result.getOrNull()?.let { serverChoices = it }
+                serverDrawer.render(serverChoices, selected(), failed = result.isFailure)
+                delay(30_000)
+            } while (binding.serverPanel.isVisible)
+        }
+    }
+
+    private fun hideServerPanel() {
+        serverChoicesHttp?.cancel(); serverChoicesHttp = null
+        serverChoicesJob?.cancel(); serverChoicesJob = null
+        if (::serverDrawer.isInitialized) serverDrawer.hide()
+    }
+
+    private fun switchLiveSource(sourceId: String) {
+        val payload = originalPayload ?: return
+        val choices = serverChoices ?: return
+        if (sourceId != choices.automaticId && choices.sources.none { it.mediaSourceId == sourceId }) return
+        val updated = org.json.JSONObject(payload).apply {
+            put("mediaSourceId", sourceId); remove("MediaSourceId")
+            remove("liveStreamId"); remove("LiveStreamId"); put("startPositionTicks", 0)
+        }.toString()
+        val playing = player?.playWhenReady ?: true
+        hideServerPanel()
+        beginResolve(updated, resetQueue = false, resetRetries = true, playWhenReady = playing)
     }
 
     private fun showTrackPanel() {
@@ -1406,6 +1472,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     }
 
     override fun onDestroy() {
+        hideServerPanel()
         subtitleSyncJob?.cancel()
         tune.invalidate()
         cancelPendingTune()

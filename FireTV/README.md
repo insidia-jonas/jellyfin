@@ -263,4 +263,15 @@ zwischenspeichert oder den Suchtext erst nach dem Seitenwechsel aktualisiert. Ei
 Posterflächen vermeiden einen Darstellungsfehler der WebView; doppelte native Ergebniszeilen
 werden ausgeblendet und beim Verlassen der Suche wieder freigegeben.
 
+Version 2.5.10 öffnet während Live-TV mit der **Menütaste** die Serverauswahl.
+Sie zeigt alle konfigurierten Eingangsserver mit Erreichbarkeit, gemessener Zeit
+bis zum Bild und Prüfzeitpunkt. Messwerte stammen vom aktuellen Sender oder einer
+ausdrücklich gekennzeichneten Server-Stichprobe. Ungeprüfte Server bleiben erkennbar.
+Die Liste lädt ausschließlich gespeicherte Messwerte, auch während der Sender puffert.
+**Ton & Untertitel** bleibt im Menü erreichbar. **Zurück** schließt zuerst das Menü.
+Eine manuelle Auswahl gilt für die laufende Wiedergabe und bleibt bei Wiederholungen
+erhalten; **Automatisch** aktiviert wieder Standardserver und geprüfte Ersatzquellen.
+Der Server benötigt das zugehörige Update. Upgrades verwenden weiterhin das reguläre
+Paket `org.jellyfin.firetvweb` (ohne `-PfiretvPreview=true`).
+
 Play oder eine Fassung startet **ExoPlayer** (Direct Stream mit API-Token, sonst HLS). Amazon-WebView spielt keine MKV-Dateien. Downloads erscheinen in der System-Downloadliste und im Ordner `Downloads/Jellyfin`.
