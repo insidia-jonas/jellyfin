@@ -74,3 +74,13 @@ test('late menu response after an account change cannot populate the new account
     await e.clock.tickAsync(1000); e.load.resolve(e.info); await e.clock.tickAsync(1);
     assert.equal(e.rows().length, 0);
 });
+test('production numeric modules and shortened exports resolve the real playback manager', t => {
+    const dom = new JSDOM('<html><head></head><body></body></html>', { url: 'http://jellyfin.test', runScripts: 'outside-only' });
+    t.after(() => dom.window.close());
+    const manager = { play() {}, stop() {}, currentMediaSource() {}, getPlayerState() {} };
+    const requireModule = key => key === '68221' ? { f: manager } : {};
+    requireModule.m = { 68221: function playbackManager() { /* currentMediaSource getPlayerState */ } };
+    dom.window.webpackChunk = { push: value => value[2](requireModule) };
+    dom.window.eval(fs.readFileSync(path.resolve(__dirname, '../../../src/Jellyfin.LiveTv/Web/livetv-overview.js'), 'utf8'));
+    assert.equal(dom.window.JellyfinLiveTvOverview.resolvePlaybackManager(), manager);
+});
