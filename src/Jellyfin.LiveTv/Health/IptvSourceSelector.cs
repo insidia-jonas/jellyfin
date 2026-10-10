@@ -53,14 +53,21 @@ public sealed class IptvSourceSelector : IIptvSourceSelector
 
         var (host, tuner, channel) = found.Value;
         var baseId = host.CreateProbeSource(tuner, channel).Id;
-        return SelectSource(tuner, baseId, sources, selectionId);
+        return SelectSource(tuner, baseId, sources, selectionId, channel.Id);
     }
 
-    internal static MediaSourceInfo? SelectSource(TunerHostInfo tuner, string baseId, IReadOnlyList<MediaSourceInfo> sources, string selectionId)
+    internal static MediaSourceInfo? SelectSource(TunerHostInfo tuner, string baseId, IReadOnlyList<MediaSourceInfo> sources, string selectionId, string? channelId = null)
     {
         var origin = IptvSourceChoice.Resolve(tuner, baseId, selectionId);
         var source = sources.FirstOrDefault(s => s.Id == baseId && s.RequiresOpening && s.IsInfiniteStream);
-        if (origin is null || source?.OpenToken?.EndsWith("_" + baseId, StringComparison.Ordinal) != true)
+        if (origin is null || string.IsNullOrEmpty(source?.OpenToken))
+        {
+            return null;
+        }
+
+        var libraryToken = !string.IsNullOrEmpty(channelId)
+            && (source.OpenToken == channelId || source.OpenToken.EndsWith("_" + channelId, StringComparison.Ordinal));
+        if (!libraryToken && !source.OpenToken.EndsWith("_" + baseId, StringComparison.Ordinal))
         {
             return null;
         }
@@ -68,7 +75,9 @@ public sealed class IptvSourceSelector : IIptvSourceSelector
         // Never mutate an ordinary/cached source or the shared tuner's ActiveUrl.
         var selected = JsonSerializer.Deserialize<MediaSourceInfo>(JsonSerializer.SerializeToUtf8Bytes(source))!;
         selected.Id = selectionId;
-        selected.OpenToken = source.OpenToken[..^baseId.Length] + selectionId;
+        selected.OpenToken = libraryToken
+            ? source.OpenToken + "|" + selectionId
+            : source.OpenToken[..^baseId.Length] + selectionId;
         selected.Path = M3uUrlFailover.RewriteStreamUrl(source.Path, origin);
         selected.Name = IptvSourceChoice.Name(origin);
         return selected;

@@ -47,21 +47,24 @@ public class LiveTvLibraryChannelPlaybackTests
     }
 
     [Fact]
-    public void EnsureLiveStreamId_FillsMissingIdFromMediaSource()
+    public void EnsureLiveStreamId_IdentifiesOpeningInsteadOfStableMediaSource()
     {
         var source = new MediaSourceInfo { Id = "src-md5" };
-        var stream = Mock.Of<ILiveStream>(s => s.MediaSource == source);
+        var stream = Mock.Of<ILiveStream>(s => s.MediaSource == source && s.UniqueId == "opening-1");
 
-        LiveTvLibraryChannelPlayback.EnsureLiveStreamId(stream, "m3u_channel1");
+        LiveTvLibraryChannelPlayback.EnsureLiveStreamId(stream);
 
-        Assert.Equal("src-md5", source.LiveStreamId);
+        Assert.Equal("opening-1", source.LiveStreamId);
+        var reopened = new MediaSourceInfo { Id = source.Id };
+        LiveTvLibraryChannelPlayback.EnsureLiveStreamId(Mock.Of<ILiveStream>(s => s.MediaSource == reopened && s.UniqueId == "opening-2"));
+        Assert.Equal("opening-2", reopened.LiveStreamId);
     }
 
     [Fact]
     public async Task OpenAsync_UsesMatchingTunerHost()
     {
         var source = new MediaSourceInfo { Id = "src1" };
-        var expected = Mock.Of<ILiveStream>(stream => stream.MediaSource == source);
+        var expected = Mock.Of<ILiveStream>(stream => stream.MediaSource == source && stream.UniqueId == "opening-1");
         var hdhr = new Mock<ITunerHost>();
         hdhr.Setup(host => host.GetChannelStream(
                 It.IsAny<string>(),
@@ -86,7 +89,41 @@ public class LiveTvLibraryChannelPlaybackTests
 
         Assert.Same(expected, opened);
         Assert.Equal("m3u_channel1", opened.OriginalStreamId);
-        Assert.Equal("src1", opened.MediaSource.LiveStreamId);
+        Assert.Equal("opening-1", opened.MediaSource.LiveStreamId);
+    }
+
+    [Fact]
+    public async Task OpenAsync_SelectedSourceDoesNotReuseDefaultButSharesIdenticalSelection()
+    {
+        var source = new MediaSourceInfo { Id = "source_iptv_choice" };
+        var selected = new Mock<ILiveStream>();
+        selected.SetupAllProperties();
+        selected.SetupGet(s => s.MediaSource).Returns(source);
+        selected.SetupGet(s => s.UniqueId).Returns("selected-opening");
+        selected.SetupGet(s => s.EnableStreamSharing).Returns(true);
+        var automatic = Mock.Of<ILiveStream>(s => s.OriginalStreamId == "m3u_channel1" && s.EnableStreamSharing);
+        var host = new Mock<ITunerHost>(MockBehavior.Strict);
+        host.Setup(h => h.GetChannelStream("m3u_channel1", source.Id, It.IsAny<IList<ILiveStream>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(selected.Object);
+
+        var opened = await LiveTvLibraryChannelPlayback.OpenAsync([host.Object], "m3u_channel1|" + source.Id, [automatic], CancellationToken.None);
+        Assert.Same(selected.Object, opened);
+        Assert.Equal("m3u_channel1|source_iptv_choice", opened.OriginalStreamId);
+        Assert.Equal("selected-opening", opened.MediaSource.LiveStreamId);
+        var shared = await LiveTvLibraryChannelPlayback.OpenAsync([host.Object], "m3u_channel1|" + source.Id, [opened], CancellationToken.None);
+        Assert.Same(opened, shared);
+        host.Verify(h => h.GetChannelStream("m3u_channel1", source.Id, It.IsAny<IList<ILiveStream>>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("m3u_channel|")]
+    [InlineData("m3u_channel|https://unconfigured.example")]
+    [InlineData("hdhr_channel|source_iptv_choice")]
+    [InlineData("m3u_channel|source_iptv_choice|another")]
+    public async Task OpenAsync_RejectsMalformedSelectionBeforeCallingTuner(string token)
+    {
+        var host = new Mock<ITunerHost>(MockBehavior.Strict);
+        await Assert.ThrowsAsync<FileNotFoundException>(() => LiveTvLibraryChannelPlayback.OpenAsync([host.Object], token, [], CancellationToken.None));
     }
 
     [Fact]
