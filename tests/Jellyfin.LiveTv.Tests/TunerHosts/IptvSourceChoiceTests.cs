@@ -48,6 +48,28 @@ public class IptvSourceChoiceTests
     }
 
     [Fact]
+    public void LibraryChannelSelectionKeepsProviderAndChannelAndAddsOpaqueSource()
+    {
+        var tuner = Tuner();
+        var source = new MediaSourceInfo
+        {
+            Id = "source-a",
+            Path = "https://primary.example/private/stream.ts",
+            OpenToken = "provider_m3u_channel-a",
+            RequiresOpening = true,
+            IsInfiniteStream = true
+        };
+        var selectedId = IptvSourceChoice.Id(tuner, source.Id, "https://backup.example");
+        var selected = IptvSourceSelector.SelectSource(tuner, source.Id, [source], selectedId, "m3u_channel-a");
+        Assert.NotNull(selected);
+        Assert.Equal("provider_m3u_channel-a|" + selectedId, selected.OpenToken);
+        Assert.Equal(selectedId, selected.Id);
+        Assert.Equal("provider_m3u_channel-a", source.OpenToken);
+        Assert.Null(IptvSourceSelector.SelectSource(tuner, source.Id, [source], selectedId, "m3u_different-channel"));
+        Assert.Null(IptvSourceSelector.SelectSource(tuner, source.Id, [source], "https://unconfigured.example", "m3u_channel-a"));
+    }
+
+    [Fact]
     public void RemovedSourceInvalidatesPreviouslyIssuedSelection()
     {
         var tuner = Tuner();

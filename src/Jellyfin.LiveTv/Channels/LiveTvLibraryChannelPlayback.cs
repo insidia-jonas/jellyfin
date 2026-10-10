@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.LiveTv.TunerHosts;
 using MediaBrowser.Common.Extensions;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.LiveTv;
@@ -51,7 +52,7 @@ internal static class LiveTvLibraryChannelPlayback
     /// Opens a tuner live stream for a Live TV library-channel item.
     /// </summary>
     /// <param name="hosts">Registered tuner hosts.</param>
-    /// <param name="channelId">The tuner channel id (also used as the stream share key).</param>
+    /// <param name="channelId">The tuner channel id, optionally followed by an opaque source selection.</param>
     /// <param name="currentLiveStreams">Already-open live streams.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The opened live stream.</returns>
@@ -64,13 +65,28 @@ internal static class LiveTvLibraryChannelPlayback
         ArgumentNullException.ThrowIfNull(hosts);
         ArgumentException.ThrowIfNullOrEmpty(channelId);
 
+        var shareKey = channelId;
+        var streamId = channelId;
+        var separator = channelId.IndexOf('|', StringComparison.Ordinal);
+        if (separator >= 0)
+        {
+            streamId = channelId[(separator + 1)..];
+            channelId = channelId[..separator];
+            if (!channelId.StartsWith("m3u_", StringComparison.OrdinalIgnoreCase)
+                || !streamId.Contains(IptvSourceChoice.Marker, StringComparison.Ordinal)
+                || streamId.Contains('|', StringComparison.Ordinal))
+            {
+                throw new FileNotFoundException();
+            }
+        }
+
         if (!IsTunerChannelId(channelId))
         {
             throw new FileNotFoundException();
         }
 
         var shared = currentLiveStreams?.FirstOrDefault(stream =>
-            string.Equals(stream.OriginalStreamId, channelId, StringComparison.OrdinalIgnoreCase)
+            string.Equals(stream.OriginalStreamId, shareKey, StringComparison.OrdinalIgnoreCase)
             && stream.EnableStreamSharing);
         if (shared is not null)
         {
@@ -83,10 +99,10 @@ internal static class LiveTvLibraryChannelPlayback
             try
             {
                 var liveStream = await host
-                    .GetChannelStream(channelId, channelId, currentLiveStreams ?? [], cancellationToken)
+                    .GetChannelStream(channelId, streamId, currentLiveStreams ?? [], cancellationToken)
                     .ConfigureAwait(false);
-                liveStream.OriginalStreamId = channelId;
-                EnsureLiveStreamId(liveStream, channelId);
+                liveStream.OriginalStreamId = shareKey;
+                EnsureLiveStreamId(liveStream);
                 return liveStream;
             }
             catch (FileNotFoundException)
@@ -123,8 +139,7 @@ internal static class LiveTvLibraryChannelPlayback
     /// (the official Live TV provider does), so IChannel playback must assign one.
     /// </summary>
     /// <param name="liveStream">The opened tuner stream.</param>
-    /// <param name="channelId">Fallback id when the media source has none.</param>
-    internal static void EnsureLiveStreamId(ILiveStream liveStream, string channelId)
+    internal static void EnsureLiveStreamId(ILiveStream liveStream)
     {
         ArgumentNullException.ThrowIfNull(liveStream);
         var source = liveStream.MediaSource;
@@ -135,7 +150,9 @@ internal static class LiveTvLibraryChannelPlayback
 
         if (string.IsNullOrEmpty(source.LiveStreamId))
         {
-            source.LiveStreamId = string.IsNullOrEmpty(source.Id) ? channelId : source.Id;
+            // A late stop must close only this opening, never a replacement of the
+            // same source. Shared viewers retain the handle on the same instance.
+            source.LiveStreamId = string.IsNullOrEmpty(liveStream.UniqueId) ? Guid.NewGuid().ToString("N") : liveStream.UniqueId;
         }
     }
 
