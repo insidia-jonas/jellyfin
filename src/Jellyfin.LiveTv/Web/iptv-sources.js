@@ -14,8 +14,9 @@
         if (built) { return { kind: 'builtin', item: built.item || { Id: built.itemId, Name: '', Type: 'TvChannel' }, mediaId: built.selectedMediaSourceId || built.mediaSourceId, liveId: built.liveStreamId, handle: built }; }
         var pm = overview && overview.resolvePlaybackManager();
         try {
-            var item = pm && pm.currentItem();
-            var source = pm && pm.currentMediaSource();
+            var player = pm && pm.getCurrentPlayer();
+            var item = player && pm.currentItem(player);
+            var source = player && pm.currentMediaSource(player);
             if (item && (item.Type === 'TvChannel' || source && source.IsInfiniteStream)) {
                 return { kind: 'manager', item: item, mediaId: source && source.Id, liveId: source && source.LiveStreamId, handle: pm };
             }
