@@ -26,8 +26,9 @@ public static class ChannelArtwork
     /// </summary>
     /// <param name="key">Stable file key (folder id).</param>
     /// <param name="label">Text drawn on the poster.</param>
+    /// <param name="directory">Optional isolated artwork directory for tools and tests.</param>
     /// <returns>The PNG path, or null when generation fails.</returns>
-    public static string? GetPosterPath(string key, string label)
+    public static string? GetPosterPath(string key, string label, string? directory = null)
     {
         if (string.IsNullOrWhiteSpace(key))
         {
@@ -36,10 +37,13 @@ public static class ChannelArtwork
 
         lock (Lock)
         {
-            var dir = Path.Combine(Path.GetTempPath(), "treasuremaps", "posters-v3");
+            // Channel items retain this path in the database across reboots. Never
+            // return /tmp paths, which disappear while their database references live on.
+            var dir = directory ?? Plugin.Instance?.ArtworkDirectory ?? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "jellyfin-evolution", "artwork-v4");
             Directory.CreateDirectory(dir);
             var file = Path.Combine(dir, Sanitize(key) + ".png");
-            if (File.Exists(file) && new FileInfo(file).Length > 200)
+            if (IsCompletePng(file))
             {
                 return file;
             }
@@ -57,21 +61,54 @@ public static class ChannelArtwork
             };
             using var artwork = typeof(ChannelArtwork).Assembly.GetManifestResourceStream(
                 "Jellyfin.Plugin.TreasureMaps.Channels.Artwork." + artworkKey + ".png");
-            if (artwork is not null)
+            var temporary = Path.Combine(dir, Sanitize(key) + "." + Guid.NewGuid().ToString("N") + ".png");
+            try
             {
-                using var target = File.Create(file);
-                artwork.CopyTo(target);
+                if (artwork is not null)
+                {
+                    using var target = File.Create(temporary);
+                    artwork.CopyTo(target);
+                    target.Flush(flushToDisk: true);
+                }
+                else
+                {
+                    var font = FontCandidates.FirstOrDefault(File.Exists);
+                    if (font is null || !TryDraw(temporary, label, font))
+                    {
+                        return null;
+                    }
+                }
+
+                if (!IsCompletePng(temporary))
+                {
+                    return null;
+                }
+
+                File.Move(temporary, file, overwrite: true);
                 return file;
             }
-
-            var font = FontCandidates.FirstOrDefault(File.Exists);
-            if (font is null || !TryDraw(file, label, font))
+            finally
             {
-                return File.Exists(file) ? file : null;
+                File.Delete(temporary);
             }
-
-            return file;
         }
+    }
+
+    private static bool IsCompletePng(string file)
+    {
+        if (!File.Exists(file) || new FileInfo(file).Length < 32)
+        {
+            return false;
+        }
+
+        using var stream = File.OpenRead(file);
+        Span<byte> header = stackalloc byte[8];
+        stream.ReadExactly(header);
+        stream.Seek(-12, SeekOrigin.End);
+        Span<byte> end = stackalloc byte[12];
+        stream.ReadExactly(end);
+        return header.SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 })
+            && end.SequenceEqual(new byte[] { 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130 });
     }
 
     private static bool TryDraw(string file, string label, string font)
