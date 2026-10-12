@@ -28,6 +28,13 @@ under `jellyfin12/backups/stack-*`. A repeated deployment with matching checksum
 not restart the server. This installer targets the `jellyfin12` service; it does not
 replace an unrelated distribution installation or import its data automatically.
 
+Before staging, the installer checks that the new bundle and state backup fit while
+leaving **2 GiB free** for normal database and cache writes. Local builds also check
+this reserve before starting. After a successful upgrade from verified installed
+files, automatic retention keeps the **three newest completed rollback backups**.
+Interrupted, failed, unmarked legacy backups and unrelated directories are preserved
+for manual review; they are never deleted merely to force an installation to fit.
+
 For a build on another machine:
 
 ```sh
