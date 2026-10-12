@@ -13,6 +13,61 @@ spec.loader.exec_module(stack)
 
 
 class BundleTests(unittest.TestCase):
+    def test_space_reserves_room_for_staging_backup_and_normal_operation(self):
+        from types import SimpleNamespace
+        with patch.object(stack.shutil, 'disk_usage', return_value=SimpleNamespace(free=stack.MIN_FREE_BYTES + 99)):
+            with self.assertRaisesRegex(RuntimeError, 'Insufficient free space'):
+                stack.require_deployment_space(Path.cwd(), 100)
+            stack.require_deployment_space(Path.cwd(), 99)
+
+    def test_retention_only_removes_completed_owned_backups_and_keeps_three(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for day in range(1, 7):
+                backup = root / 'backups' / f'stack-202610{day:02}-120000'
+                backup.mkdir(parents=True)
+                (backup / 'completed.json').write_text(json.dumps({
+                    'schema': 1, 'installation': str(root.resolve()), 'previousVerified': True}))
+            legacy = root / 'backups/stack-20260901-120000'
+            legacy.mkdir()
+            invalid = root / 'backups/stack-20260902-120000'
+            invalid.mkdir()
+            (invalid / 'completed.json').write_text('{interrupted')
+            foreign = root / 'backups/stack-20260903-120000'
+            foreign.mkdir()
+            (foreign / 'completed.json').write_text(json.dumps({
+                'schema': 1, 'installation': '/another/install', 'previousVerified': True}))
+            failed = root / 'backups/stack-20260904-120000'
+            failed.mkdir()
+            (failed / 'completed.json').write_text(json.dumps({
+                'schema': 1, 'installation': str(root.resolve()), 'previousVerified': False}))
+            self.assertEqual(['stack-20261003-120000', 'stack-20261002-120000', 'stack-20261001-120000'], stack.prune_deployment_backups(root))
+            for path in [legacy, invalid, foreign, failed, root / 'backups/stack-20261004-120000']:
+                self.assertTrue(path.exists())
+            self.assertEqual([], stack.prune_deployment_backups(root))
+
+    def test_retention_rejects_unsafe_keep_count(self):
+        with self.assertRaises(ValueError):
+            stack.prune_deployment_backups(Path.cwd(), keep=0)
+
+    def test_retention_does_not_follow_backup_directory_symlink(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'install'
+            root.mkdir()
+            outside = Path(tmp) / 'outside'
+            outside.mkdir()
+            try:
+                (root / 'backups').symlink_to(outside, target_is_directory=True)
+            except OSError:
+                self.skipTest('Directory symlinks unavailable')
+            for day in range(1, 6):
+                backup = outside / f'stack-202610{day:02}-120000'
+                backup.mkdir()
+                (backup / 'completed.json').write_text(json.dumps({
+                    'schema': 1, 'installation': str(root.resolve()), 'previousVerified': True}))
+            self.assertEqual([], stack.prune_deployment_backups(root))
+            self.assertEqual(5, len(list(outside.iterdir())))
+
     def test_playing_and_paused_sessions_defer_installation_by_default(self):
         for paused in (False, True):
             with self.subTest(paused=paused), patch.object(stack, 'request', return_value=[{'NowPlayingItem': {'Id': 'episode'}, 'PlayState': {'IsPaused': paused}}]):

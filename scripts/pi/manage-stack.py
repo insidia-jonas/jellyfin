@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import platform
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -29,6 +30,7 @@ import stack_automation
 
 PLUGIN_ID = 'e2c9a6f4-8b1d-4f3a-9c2e-7a5b6d4c3e21'
 SERVICE = 'jellyfin12'
+MIN_FREE_BYTES = 2 * 1024 ** 3
 
 
 def run(*args, capture=False):
@@ -140,6 +142,47 @@ def installed_matches(root, manifest):
     return True
 
 
+def require_deployment_space(root, additional_bytes=0):
+    """Leave room for normal database/cache writes, including during staging."""
+    probe = root.resolve()
+    while not probe.exists():
+        probe = probe.parent
+    required = MIN_FREE_BYTES + additional_bytes
+    free = shutil.disk_usage(probe).free
+    if free < required:
+        raise RuntimeError(f'Insufficient free space: {free / 1024 ** 3:.1f} GiB available; '
+                           f'{required / 1024 ** 3:.1f} GiB required. Clean old installation artifacts first.')
+
+
+def prune_deployment_backups(root, keep=3):
+    """Only remove old, explicitly completed backups owned by this installation."""
+    if keep < 2:
+        raise ValueError('Keep at least two completed rollback backups')
+    base = root / 'backups'
+    if not base.is_dir() or base.is_symlink():
+        return []
+    candidates = []
+    for path in base.iterdir():
+        if path.is_symlink() or not path.is_dir() or not re.fullmatch(r'stack-\d{8}-\d{6}', path.name):
+            continue
+        marker = path / 'completed.json'
+        try:
+            if marker.is_symlink():
+                continue
+            state = json.loads(marker.read_text())
+            if state.get('schema') == 1 and state.get('installation') == str(root.resolve()) and state.get('previousVerified') is True:
+                candidates.append(path)
+        except (OSError, ValueError, AttributeError):
+            continue
+    removed = []
+    for path in sorted(candidates, reverse=True)[keep:]:
+        if path.is_symlink() or path.resolve().parent != base.resolve():
+            raise RuntimeError('Backup path changed during cleanup')
+        shutil.rmtree(path)
+        removed.append(path.name)
+    return removed
+
+
 def wait_health(base):
     for _ in range(90):
         try:
@@ -188,6 +231,11 @@ def check_playback_before_deploy(url, token, interrupt_playback=False):
 def deploy(args, account, bundle):
     root = args.out
     root.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(bundle) as archive:
+        staged_bytes = sum(entry.file_size for entry in archive.infolist())
+    state_bytes = sum(p.stat().st_size for rel in ('data/data', 'data/config', 'data/plugins')
+                      for p in (root / rel).rglob('*') if p.is_file() and not p.is_symlink())
+    require_deployment_space(root, staged_bytes + state_bytes)
     with tempfile.TemporaryDirectory(prefix='.release-', dir=root) as temporary:
         stage = Path(temporary)
         manifest = verify_bundle(bundle, stage)
@@ -199,6 +247,11 @@ def deploy(args, account, bundle):
             return manifest
         token = admin_token(args.url, root / 'data')
         check_playback_before_deploy(args.url, token, args.interrupt_playback)
+        previous_verified = False
+        try:
+            previous_verified = installed_matches(root, json.loads((root / 'deployment.json').read_text()))
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
         backup = root / 'backups' / ('stack-' + time.strftime('%Y%m%d-%H%M%S'))
         backup.mkdir(parents=True, mode=0o700)
         plugin = root / 'data/plugins/Treasure-Maps'
@@ -276,6 +329,17 @@ def deploy(args, account, bundle):
             if had_server:
                 run('systemctl', 'start', SERVICE)
             raise
+        # Cleanup must never trigger rollback of a healthy installation. Failed or
+        # legacy unmarked backups stay available for explicit review.
+        if previous_verified:
+            try:
+                (backup / 'completed.json').write_text(json.dumps({
+                    'schema': 1, 'installation': str(root.resolve()), 'previousVerified': True}))
+                removed = prune_deployment_backups(root)
+                if removed:
+                    print('Removed old completed backups: ' + ', '.join(removed))
+            except OSError as error:
+                print('Installation healthy; backup cleanup deferred (' + type(error).__name__ + ').')
     return manifest
 
 
@@ -493,6 +557,7 @@ def main(argv=None):
             install_subtitle_sync()
         if not args.configure_only:
             if not args.bundle:
+                require_deployment_space(args.out)
                 if run('git', '-C', args.repo, 'status', '--porcelain', capture=True).strip():
                     raise RuntimeError('Checkout has local changes; commit or provide a release bundle')
                 run('runuser', '-u', account.pw_name, '--', 'git', '-C', args.repo, 'fetch', 'origin', args.branch)
