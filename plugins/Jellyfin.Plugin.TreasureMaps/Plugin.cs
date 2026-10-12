@@ -22,8 +22,11 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     public Plugin(IApplicationPaths applicationPaths, IXmlSerializer xmlSerializer)
         : base(applicationPaths, xmlSerializer)
     {
+        ArtworkDirectory = System.IO.Path.Combine(applicationPaths.DataPath, "evolution", "artwork-v4");
         Instance = this;
     }
+
+    internal string ArtworkDirectory { get; }
 
     /// <summary>
     /// Gets the singleton instance of the plugin.

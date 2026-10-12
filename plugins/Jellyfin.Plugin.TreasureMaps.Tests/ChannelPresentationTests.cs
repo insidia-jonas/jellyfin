@@ -7,6 +7,29 @@ namespace Jellyfin.Plugin.TreasureMaps.Tests;
 
 public class ChannelPresentationTests
 {
+    [Fact]
+    public void Artwork_ReusesDurableFileAndReplacesTruncatedWrites()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "artwork-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var path = ChannelArtwork.GetPosterPath("movies", "Movies", directory);
+            Assert.Equal(Path.Combine(directory, "movies.png"), path);
+            var expected = File.ReadAllBytes(path!);
+            var modified = File.GetLastWriteTimeUtc(path!);
+            Assert.Equal(path, ChannelArtwork.GetPosterPath("movies", "Movies", directory));
+            Assert.Equal(modified, File.GetLastWriteTimeUtc(path!));
+            File.WriteAllBytes(path!, expected.AsSpan(0, 300).ToArray());
+            Assert.Equal(path, ChannelArtwork.GetPosterPath("movies", "Movies", directory));
+            Assert.Equal(expected, File.ReadAllBytes(path!));
+            Assert.Single(Directory.GetFiles(directory));
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("movies")]
     [InlineData("tv")]

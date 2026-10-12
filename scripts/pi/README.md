@@ -35,6 +35,12 @@ files, automatic retention keeps the **three newest completed rollback backups**
 Interrupted, failed, unmarked legacy backups and unrelated directories are preserved
 for manual review; they are never deleted merely to force an installation to fit.
 
+Evolution 1.4.1 keeps generated category artwork below the persistent data directory
+(`evolution/artwork-v4`), publishes files atomically and regenerates truncated PNGs.
+The channel cache version changes with this migration so old `/tmp` image references
+are replaced when categories are loaded. Clearing the operating system's temporary
+directory no longer removes the artwork referenced by those channel items.
+
 For a build on another machine:
 
 ```sh
