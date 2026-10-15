@@ -8,6 +8,33 @@ package org.jellyfin.firetv.core
  * nativeshell.js [exoPlayerProfile].
  */
 object DeviceProfile {
+    // Used only after an audio decoder/output failure. Video may still be copied;
+    // never request another passthrough codec from the failed HDMI audio path.
+    val AUDIO_COMPATIBILITY_JSON: String = """
+        {
+          "Name":"Jellyfin Fire TV compatible audio",
+          "MaxStreamingBitrate":120000000,
+          "DirectPlayProfiles":[],
+          "TranscodingProfiles":[
+            {"Container":"ts","Type":"Video","VideoCodec":"h264,hevc","AudioCodec":"aac","Protocol":"hls","Context":"Streaming","MaxAudioChannels":"2","MinSegments":"1","BreakOnNonKeyFrames":true},
+            {"Container":"mp3","Type":"Audio","AudioCodec":"mp3","Protocol":"http","Context":"Streaming","MaxAudioChannels":"2"}
+          ],
+          "SubtitleProfiles":[
+            {"Format":"vtt","Method":"External"},
+            {"Format":"srt","Method":"External"},
+            {"Format":"subrip","Method":"External"},
+            {"Format":"ttml","Method":"External"},
+            {"Format":"ass","Method":"External"},
+            {"Format":"vobsub","Method":"External"},
+            {"Format":"dvdsub","Method":"External"},
+            {"Format":"ssa","Method":"Encode"},
+            {"Format":"pgssub","Method":"Encode"},
+            {"Format":"vobsub","Method":"Encode"},
+            {"Format":"dvdsub","Method":"Encode"}
+          ]
+        }
+    """.trimIndent()
+
     val JSON: String = """
         {
           "Name": "Jellyfin Fire TV ExoPlayer",

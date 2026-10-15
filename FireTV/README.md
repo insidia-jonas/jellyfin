@@ -295,3 +295,20 @@ Upgrades verwenden das reguläre Paket
 `org.jellyfin.firetvweb` (ohne `-PfiretvPreview=true`).
 
 Play oder eine Fassung startet **ExoPlayer** (Direct Stream mit API-Token, sonst HLS). Amazon-WebView spielt keine MKV-Dateien. Downloads erscheinen in der System-Downloadliste und im Ordner `Downloads/Jellyfin`.
+
+Version 2.5.12 versucht bei einem Audio-Decoder- oder Audioausgabefehler einer
+Bibliothekswiedergabe einmal kompatiblen Stereo-Ton vom Server anzufordern. Filme
+und Folgen erhalten AAC; unterstütztes Video wird kopiert. Position, Fassung,
+Tonspur, Untertitelauswahl und Pause bleiben erhalten. Trackwechsel behalten den
+Kompatibilitätsmodus bis zum nächsten Titel. Netzwerk- und Videofehler lösen
+diesen Wechsel nicht aus; Live-TV behält seine eigene begrenzte Wiederherstellung.
+Der Server muss Audiotranscodierung erlauben. Beschädigte Quelldateien können
+auch mit umgewandeltem Ton weiterhin scheitern.
+
+Der optionale Gerätetest `:app:assembleDebugAndroidTest` verwendet den Runner
+`org.jellyfin.firetv.player.AudioRecoveryInstrumentation`. Er liest einen privaten
+NativePlayer-Payload aus `files/audio-recovery-test.json` im App-Verzeichnis und
+entfernt ihn vor dem Test. Nach einem gezielt ausgelösten Decoderfehler prüft er
+echte AAC-Wiedergabe und die erhaltene Position auf dem Gerät. Nur auf einem
+freien Testgerät ausführen; den Wiedergabestatus des Testtitels vorher sichern
+und anschließend wiederherstellen. Zugangsdaten gehören nicht ins Repository.

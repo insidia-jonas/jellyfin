@@ -1,5 +1,17 @@
 # AGENTS.md
 
+### Finite audio recovery (2026-10-15)
+
+- Fire TV 2.5.12/code42 retries a finite audio renderer/sink failure once with
+  server-converted stereo AAC (MP3 for audio-only). Keep selected source, tracks,
+  pause and position; never prefer a direct/raw URL on this retry. Audio conversion
+  remains enabled across track reloads, resets for a new title, and does not consume
+  or bypass Live TV's retry policy. Transcoded audio selection requires a server reload.
+- `AudioRecoveryTest` checks the retry budget and real PlaybackInfo request contract.
+  The opt-in `AudioRecoveryInstrumentation` injects an audio error on a free device,
+  then verifies actual AAC playback at the retained position. Supply private payload
+  via app files, back up/restore test-title user data, and uninstall the test APK.
+
 ## Cursor Cloud specific instructions
 
 This repository is the **Jellyfin Server** backend — a .NET 10 (`net10.0`) ASP.NET Core

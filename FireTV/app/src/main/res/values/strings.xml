@@ -125,4 +125,5 @@
     <string name="player_episode">EPISODE</string>
     <string name="player_playing">PLAYING</string>
     <string name="live_switch_failed">This server is not delivering video. Choose another server or reconnect.</string>
+    <string name="playback_audio_recovery">Adjusting audio for this device…</string>
 </resources>

@@ -37,6 +37,7 @@ object StreamResolver {
         audioStreamIndex: Int? = null,
         subtitleStreamIndex: Int? = null,
         cancellation: HttpCancellation? = null,
+        audioCompatibility: Boolean = false,
     ): ResolvedPlayback {
         val requestedId = PlaybackPayload.itemId(payload) ?: error("No items to play")
         val tunerId = LivePlayback.tunerChannelId(payload)
@@ -60,7 +61,7 @@ object StreamResolver {
         val subtitleIndex = subtitleStreamIndex ?: jsonLongField(payload, "subtitleStreamIndex")?.toInt()
         val liveHint = LivePlayback.isLivePayload(payload)
 
-        val body = buildPlaybackInfoBody(userId, startTicks, mediaSourceId, audioIndex, subtitleIndex)
+        val body = buildPlaybackInfoBody(userId, startTicks, mediaSourceId, audioIndex, subtitleIndex, audioCompatibility)
         var itemId = requestedId
         var response = playbackInfo(server, itemId, userId, body, token, ignoreSslErrors, deviceId, deviceName, appName, appVersion, liveHint, cancellation)
         if (response.code !in 200..299 && !tunerId.isNullOrBlank() && tunerId != itemId) {
@@ -94,6 +95,7 @@ object StreamResolver {
                 playSessionId = playSessionId,
                 openToken = openToken,
                 cancellation = cancellation,
+                audioCompatibility = audioCompatibility,
             )?.let { opened ->
                 source = opened
             }
@@ -109,13 +111,17 @@ object StreamResolver {
         } else {
             null
         }
-        val playUrl = if (live) {
+        val playUrl = if (audioCompatibility) {
+            urls.transcodingUrl?.takeIf { it.isNotBlank() }?.let { PlayUrl.bindToServer(server, it) }
+                ?: error("Server did not provide compatible audio")
+        } else if (live) {
             PlayUrl.resolveLive(server, urls) ?: error("No playable live URL from the Jellyfin proxy")
         } else {
             PlayUrl.resolve(server, urls) ?: fileUrl ?: error("No playable URL for this release")
         }
         val authed = StreamAuth.withAccessToken(playUrl, token)
         val playMethod = when {
+            audioCompatibility -> "Transcode"
             fileUrl != null && playUrl == fileUrl -> "DirectPlay"
             urls.supportsDirectPlay && playUrl == urls.path -> "DirectPlay"
             !urls.transcodingUrl.isNullOrBlank() && playUrl.contains(urls.transcodingUrl!!) -> "Transcode"
@@ -192,14 +198,15 @@ object StreamResolver {
         playSessionId: String?,
         openToken: String?,
         cancellation: HttpCancellation?,
+        audioCompatibility: Boolean,
     ): String? {
         val body = buildString {
             append('{')
             append("\"ItemId\":").append(jsonEscape(itemId)).append(',')
             append("\"UserId\":").append(jsonEscape(userId)).append(',')
             append("\"MaxStreamingBitrate\":120000000,")
-            append("\"EnableDirectPlay\":true,")
-            append("\"EnableDirectStream\":true,")
+            append("\"EnableDirectPlay\":").append(!audioCompatibility).append(',')
+            append("\"EnableDirectStream\":").append(!audioCompatibility).append(',')
             if (!mediaSourceId.isNullOrBlank()) {
                 append("\"MediaSourceId\":").append(jsonEscape(mediaSourceId)).append(',')
             }
@@ -209,7 +216,7 @@ object StreamResolver {
             if (!openToken.isNullOrBlank()) {
                 append("\"OpenToken\":").append(jsonEscape(openToken)).append(',')
             }
-            append("\"DeviceProfile\":").append(DeviceProfile.JSON)
+            append("\"DeviceProfile\":").append(if (audioCompatibility) DeviceProfile.AUDIO_COMPATIBILITY_JSON else DeviceProfile.JSON)
             append('}')
         }
         val response = JellyfinHttp.post(
@@ -299,6 +306,7 @@ object StreamResolver {
         mediaSourceId: String?,
         audioStreamIndex: Int?,
         subtitleStreamIndex: Int?,
+        audioCompatibility: Boolean,
     ): String {
         return buildString {
             append('{')
@@ -306,9 +314,12 @@ object StreamResolver {
             append("\"MaxStreamingBitrate\":120000000,")
             append("\"StartTimeTicks\":").append(startTicks).append(',')
             append("\"AutoOpenLiveStream\":true,")
-            append("\"EnableDirectPlay\":true,")
-            append("\"EnableDirectStream\":true,")
+            append("\"EnableDirectPlay\":").append(!audioCompatibility).append(',')
+            append("\"EnableDirectStream\":").append(!audioCompatibility).append(',')
             append("\"EnableTranscoding\":true,")
+            if (audioCompatibility) {
+                append("\"AllowVideoStreamCopy\":true,\"AllowAudioStreamCopy\":false,\"MaxAudioChannels\":2,")
+            }
             audioStreamIndex?.let {
                 append("\"AudioStreamIndex\":").append(it).append(',')
             }
@@ -318,7 +329,7 @@ object StreamResolver {
             if (!mediaSourceId.isNullOrBlank()) {
                 append("\"MediaSourceId\":").append(jsonEscape(mediaSourceId)).append(',')
             }
-            append("\"DeviceProfile\":").append(DeviceProfile.JSON)
+            append("\"DeviceProfile\":").append(if (audioCompatibility) DeviceProfile.AUDIO_COMPATIBILITY_JSON else DeviceProfile.JSON)
             append('}')
         }
     }

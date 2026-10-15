@@ -125,4 +125,5 @@
     <string name="player_episode">SERIENFOLGE</string>
     <string name="player_playing">WIEDERGABE</string>
     <string name="live_switch_failed">Dieser Server liefert derzeit kein Bild. Wähle einen anderen Server oder verbinde erneut.</string>
+    <string name="playback_audio_recovery">Ton wird für dieses Gerät angepasst…</string>
 </resources>

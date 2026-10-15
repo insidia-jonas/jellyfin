@@ -36,6 +36,8 @@ import androidx.media3.common.text.CueGroup
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -55,6 +57,7 @@ import kotlinx.coroutines.withTimeout
 import org.jellyfin.firetv.R
 import org.jellyfin.firetv.BuildConfig
 import org.jellyfin.firetv.core.HttpCancellation
+import org.jellyfin.firetv.core.AudioRecovery
 import org.jellyfin.firetv.core.IptvSources
 import org.jellyfin.firetv.core.IptvSourceSnapshot
 import org.jellyfin.firetv.core.LiveTuneState
@@ -106,6 +109,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private var resolveDeadline: Runnable? = null
     private var cleanupFuture: Future<*>? = null
     private val tune = LiveTuneState()
+    private val audioRecovery = AudioRecovery()
     private var playerListener: Player.Listener? = null
     private var playerIsLive = false
     private var subtitleOffsetMs = 0L
@@ -260,6 +264,8 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             return
         }
         val confirmedLive = playback?.takeIf { it.itemId == PlaybackPayload.itemId(payload) }?.isLive == true
+        audioRecovery.select(PlaybackPayload.itemId(payload), resetQueue)
+        val compatibleAudio = audioRecovery.enabled
         cancelPendingTune()
         if (resetRetries || PlaybackPayload.itemId(payload) != originalPayload?.let(PlaybackPayload::itemId)) cancelServerChoices()
         val effectivePayload = if (confirmedLive) org.json.JSONObject(payload).put("IsLiveStream", true).toString() else payload
@@ -309,7 +315,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                         }
                     }
                     cancellation.checkActive()
-                    StreamResolver.resolve(effectivePayload, ssl, audioStreamIndex, subtitleStreamIndex, cancellation)
+                    StreamResolver.resolve(effectivePayload, ssl, audioStreamIndex, subtitleStreamIndex, cancellation, compatibleAudio)
                 }
                 mainHandler.post {
                     mainHandler.removeCallbacks(deadline)
@@ -429,7 +435,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             // playback session and position instead of resolving the whole film again.
             mediaSourceFactory.setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(5))
         }
-        val exo = player ?: ExoPlayer.Builder(this)
+        val exo = player ?: ExoPlayer.Builder(this, DefaultRenderersFactory(this).setEnableDecoderFallback(true))
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
             .build()
@@ -524,7 +530,24 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
 
             override fun onPlayerError(error: PlaybackException) {
                 if (!tune.accepts(requestGeneration) || playback == null) return
-                Log.i("FireTvPlayback", "error request=$requestGeneration code=${error.errorCode}")
+                val renderer = error as? ExoPlaybackException
+                val mime = renderer?.rendererFormat?.sampleMimeType
+                val audioRenderer = renderer?.type == ExoPlaybackException.TYPE_RENDERER && mime?.startsWith("audio/") == true
+                Log.i("FireTvPlayback", "error request=$requestGeneration code=${error.errorCode} audio=$audioRenderer mime=$mime cause=${error.cause?.javaClass?.simpleName}")
+                val active = playback ?: return
+                if (originalPayload != null && audioRecovery.recover(error.errorCode, audioRenderer, active.isLive)) {
+                    val position = exo.currentPosition.coerceAtLeast(0)
+                    val payload = org.json.JSONObject(originalPayload!!)
+                        .put("startPositionTicks", position * 10_000L)
+                        .put("mediaSourceId", active.mediaSourceId)
+                        .toString()
+                    Log.i("FireTvPlayback", "audio_recovery request=$requestGeneration position_ms=$position")
+                    Toast.makeText(this@PlayerActivity, R.string.playback_audio_recovery, Toast.LENGTH_LONG).show()
+                    beginResolve(payload, resetQueue = false, resetRetries = false,
+                        audioStreamIndex = active.selectedAudioIndex, subtitleStreamIndex = active.selectedSubtitleIndex,
+                        resumePositionMs = position, playWhenReady = exo.playWhenReady)
+                    return
+                }
                 if (resolved.isLive) {
                     retryLive()
                     return
@@ -1047,7 +1070,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         val current = playback ?: return
         playback = current.copy(selectedAudioIndex = track.index)
         val exo = player
-        if (exo != null && !track.language.isNullOrBlank()) {
+        if (exo != null && current.playMethod != "Transcode" && !track.language.isNullOrBlank()) {
             applyPreferredTracks(exo, playback!!)
             renderTrackPanel()
             updateOsd()
@@ -1083,7 +1106,9 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private fun reloadTracks(audioIndex: Int?, subtitleIndex: Int?) {
         val payload = originalPayload ?: return
         val position = player?.currentPosition ?: playback?.startPositionMs ?: 0L
-        beginResolve(payload, resetQueue = false, audioStreamIndex = audioIndex,
+        val resumedPayload = org.json.JSONObject(payload).put("startPositionTicks", position * 10_000L)
+            .put("mediaSourceId", playback?.mediaSourceId).toString()
+        beginResolve(resumedPayload, resetQueue = false, audioStreamIndex = audioIndex,
             subtitleStreamIndex = subtitleIndex, resumePositionMs = position, playWhenReady = player?.playWhenReady ?: true)
     }
 
