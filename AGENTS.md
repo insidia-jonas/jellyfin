@@ -14,6 +14,10 @@
   change AC3/AAC, interlacing and frame rates; stale data breaks HLS and can double
   progressive 50 fps to 100 fps. Keep fresh track indexes/languages; shared viewers
   reuse the opened source. Deferred proxy readers need no sleep before probing.
+- Shared non-looping HTTP input is already paced; never throttle it again with -re.
+  Live HLS keeps at least three initial segments (two for >=10-second segments).
+  pagehide cleanup runs before player teardown and carries the complete client,
+  version and device identity, or it updates a different Jellyfin session.
 
 ## Cursor Cloud specific instructions
 

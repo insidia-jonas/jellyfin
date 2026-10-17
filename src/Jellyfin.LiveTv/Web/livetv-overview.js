@@ -1046,7 +1046,7 @@
     function stopLiveOnPageHide() {
         if (nativeOwnsPlayback() || typeof window.fetch !== 'function') { return; }
         var client = window.ApiClient, state = playState, report;
-        if (!client || !client.accessToken || !client.deviceId) { return; }
+        if (!client || !client.accessToken || !client.deviceId || !client.appName || !client.appVersion || !client.deviceName) { return; }
         try {
             if (state && state.startReport) {
                 report = { ItemId: state.itemId, MediaSourceId: state.mediaSourceId, PlaySessionId: state.playSessionId, LiveStreamId: state.liveStreamId };
@@ -1062,7 +1062,9 @@
             // not end playback. No broad ActiveEncodings deletion is permitted.
             window.fetch(client.getUrl('Sessions/Playing/Stopped'), {
                 method: 'POST', keepalive: true,
-                headers: { 'Content-Type': 'application/json', Authorization: 'MediaBrowser Token=' + JSON.stringify(client.accessToken()) + ', DeviceId=' + JSON.stringify(client.deviceId()) },
+                headers: { 'Content-Type': 'application/json', Authorization: 'MediaBrowser Token=' + JSON.stringify(client.accessToken())
+                    + ', Client=' + JSON.stringify(client.appName()) + ', Version=' + JSON.stringify(client.appVersion())
+                    + ', Device=' + JSON.stringify(client.deviceName()) + ', DeviceId=' + JSON.stringify(client.deviceId()) },
                 body: JSON.stringify(report)
             }).catch(function () { /* server idle timeout remains the fallback */ });
         } catch (ignore) { /* page teardown must not throw */ }
@@ -1163,16 +1165,16 @@
         var deadline = Date.now() + TEARDOWN_TIMEOUT_MS;
         function attempt() {
             return stopManager().then(function () {
-            if (isVideoHash(location.hash) && listHash) {
-                location.hash = listHash;
-            }
-            if (!managerPlayerOnScreen()) {
-                return Promise.resolve();
-            }
-            if (hideOrphanPlayerView() || Date.now() >= deadline) {
-                return Promise.resolve();
-            }
-            return delay(600).then(attempt);
+                if (isVideoHash(location.hash) && listHash) {
+                    location.hash = listHash;
+                }
+                if (!managerPlayerOnScreen()) {
+                    return Promise.resolve();
+                }
+                if (hideOrphanPlayerView() || Date.now() >= deadline) {
+                    return Promise.resolve();
+                }
+                return delay(600).then(attempt);
             });
         }
         return attempt();
@@ -2047,7 +2049,7 @@
             lastKey = '';
             sync();
         });
-        window.addEventListener('pagehide', stopLiveOnPageHide);
+        window.addEventListener('pagehide', stopLiveOnPageHide, true);
         var observer = new MutationObserver(function () {
             if (routeKey !== currentRouteKey()) {
                 sync();

@@ -112,12 +112,17 @@ public class StreamState : EncodingJobInfo, IDisposable
     {
         get
         {
+            var minimum = SegmentLength >= 10 ? 2 : 3;
             if (Request.MinSegments.HasValue)
             {
-                return Request.MinSegments.Value;
+                // An infinite playlist with one segment starts clients at the
+                // live edge, then repeatedly empties before the next segment.
+                return MediaSource.IsInfiniteStream
+                    ? Math.Max(minimum, Request.MinSegments.Value)
+                    : Request.MinSegments.Value;
             }
 
-            return SegmentLength >= 10 ? 2 : 3;
+            return minimum;
         }
     }
 

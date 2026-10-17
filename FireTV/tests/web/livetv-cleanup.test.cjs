@@ -14,9 +14,11 @@ function setup(t) {
     w.ApiClient = {
         getCurrentUserId: () => 'user', getUrl: route => 'http://jellyfin.test/' + route,
         accessToken: () => 'private-test', deviceId: () => 'browser',
+        appName: () => 'Jellyfin%20Web', appVersion: () => '13.0.0', deviceName: () => 'Browser',
         reportPlaybackStopped: info => { requests.push(['stop', info]); return stopped; }
     };
     const original = w.ApiClient.reportPlaybackStopped;
+    w.addEventListener('pagehide', () => { if (w.clearPlayerOnExit) current = null; });
     w.fetch = (url, options) => { requests.push(['fetch', url, options]); return Promise.resolve(); };
     w.playbackManager = {
         play: () => Promise.resolve(),
@@ -51,6 +53,8 @@ test('page close reports only the exact local live session with keepalive', asyn
     assert.ok(request);
     assert.equal(request[1], 'http://jellyfin.test/Sessions/Playing/Stopped');
     assert.equal(request[2].keepalive, true);
+    assert.match(request[2].headers.Authorization, /Client="Jellyfin%20Web"/);
+    assert.match(request[2].headers.Authorization, /DeviceId="browser"/);
     assert.deepEqual(JSON.parse(request[2].body), { ItemId: 'old', MediaSourceId: 'source', PlaySessionId: 'old-session', LiveStreamId: 'live' });
     e.requests.length = 0;
     e.w.dispatchEvent(new e.w.Event('visibilitychange'));
@@ -62,6 +66,13 @@ test('page close reports only the exact local live session with keepalive', asyn
     e.w.NativePlayer = { loadPlayer: () => {} };
     e.w.dispatchEvent(new e.w.Event('pagehide'));
     assert.equal(e.requests.length, 0);
+});
+
+test('page close captures the session before the web player teardown clears it', async t => {
+    const e = setup(t); await e.clock.tickAsync(1);
+    e.w.clearPlayerOnExit = true;
+    e.w.dispatchEvent(new e.w.Event('pagehide'));
+    assert.equal(e.requests.filter(r => r[0] === 'fetch').length, 1);
 });
 
 test('unconfirmed stop prevents a second channel and restores the report handler', async t => {
