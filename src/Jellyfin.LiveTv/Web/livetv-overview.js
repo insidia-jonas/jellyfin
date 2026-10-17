@@ -1014,11 +1014,58 @@
 
     function stopManager() {
         var manager = window.playbackManager;
-        if (manager && typeof manager.stop === 'function') {
-            try {
-                manager.stop();
-            } catch (e) { /* already stopped */ }
+        if (!manager || typeof manager.stop !== 'function') { return Promise.resolve(); }
+        var client = window.ApiClient, session;
+        try {
+            var player = manager.getCurrentPlayer && manager.getCurrentPlayer();
+            session = player && manager.playSessionId && manager.playSessionId(player);
+        } catch (ignore) { /* no established playback */ }
+        if (!session || !client || typeof client.reportPlaybackStopped !== 'function') {
+            try { return Promise.resolve(manager.stop()); } catch (e) { return Promise.resolve(); }
         }
+        // stop() resolves before Jellyfin has released the tuner and encoder.
+        // Wait for the exact report, never close a second consumer or a new session.
+        var original = client.reportPlaybackStopped, wrapper, timeout;
+        return new Promise(function (resolve, reject) {
+            function finish(error) {
+                window.clearTimeout(timeout);
+                if (client.reportPlaybackStopped === wrapper) { client.reportPlaybackStopped = original; }
+                error ? reject(error) : resolve();
+            }
+            wrapper = function (info) {
+                var result = original.apply(this, arguments);
+                if (info.PlaySessionId === session) { Promise.resolve(result).then(function () { finish(); }, finish); }
+                return result;
+            };
+            client.reportPlaybackStopped = wrapper;
+            timeout = window.setTimeout(function () { finish(new Error('Stop confirmation timeout')); }, 12000);
+            try { Promise.resolve(manager.stop()).catch(finish); } catch (error) { finish(error); }
+        });
+    }
+
+    function stopLiveOnPageHide() {
+        if (nativeOwnsPlayback() || typeof window.fetch !== 'function') { return; }
+        var client = window.ApiClient, state = playState, report;
+        if (!client || !client.accessToken || !client.deviceId) { return; }
+        try {
+            if (state && state.startReport) {
+                report = { ItemId: state.itemId, MediaSourceId: state.mediaSourceId, PlaySessionId: state.playSessionId, LiveStreamId: state.liveStreamId };
+            } else {
+                var manager = resolvePlaybackManager(), player = manager && manager.getCurrentPlayer();
+                if (!player || !player.isLocalPlayer) { return; }
+                var item = manager.currentItem(player), source = manager.currentMediaSource(player);
+                if (!item || !source || !(item.Type === 'TvChannel' || source.IsInfiniteStream)) { return; }
+                report = { ItemId: item.Id, MediaSourceId: source.Id, PlaySessionId: manager.playSessionId(player), LiveStreamId: source.LiveStreamId };
+            }
+            if (!report.PlaySessionId || !report.LiveStreamId) { return; }
+            // keepalive survives closing/reloading the tab; visibility changes do
+            // not end playback. No broad ActiveEncodings deletion is permitted.
+            window.fetch(client.getUrl('Sessions/Playing/Stopped'), {
+                method: 'POST', keepalive: true,
+                headers: { 'Content-Type': 'application/json', Authorization: 'MediaBrowser Token=' + JSON.stringify(client.accessToken()) + ', DeviceId=' + JSON.stringify(client.deviceId()) },
+                body: JSON.stringify(report)
+            }).catch(function () { /* server idle timeout remains the fallback */ });
+        } catch (ignore) { /* page teardown must not throw */ }
     }
 
     function isVideoHash(value) {
@@ -1115,7 +1162,7 @@
     function leavePlayerView() {
         var deadline = Date.now() + TEARDOWN_TIMEOUT_MS;
         function attempt() {
-            stopManager();
+            return stopManager().then(function () {
             if (isVideoHash(location.hash) && listHash) {
                 location.hash = listHash;
             }
@@ -1126,6 +1173,7 @@
                 return Promise.resolve();
             }
             return delay(600).then(attempt);
+            });
         }
         return attempt();
     }
@@ -1999,6 +2047,7 @@
             lastKey = '';
             sync();
         });
+        window.addEventListener('pagehide', stopLiveOnPageHide);
         var observer = new MutationObserver(function () {
             if (routeKey !== currentRouteKey()) {
                 sync();

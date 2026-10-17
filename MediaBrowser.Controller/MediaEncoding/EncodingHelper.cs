@@ -2172,7 +2172,12 @@ namespace MediaBrowser.Controller.MediaEncoding
             }
 
             var isLibX265 = string.Equals(videoEncoder, "libx265", StringComparison.OrdinalIgnoreCase);
-            var encodingPreset = encodingOptions.EncoderPreset;
+            // Live output cannot catch up after falling behind real time. Keep file
+            // encoding and hardware presets independent of this latency budget.
+            var encodingPreset = state.MediaSource.IsInfiniteStream
+                && string.Equals(videoEncoder, "libx264", StringComparison.OrdinalIgnoreCase)
+                    ? encodingOptions.LiveTvEncoderPreset
+                    : encodingOptions.EncoderPreset;
 
             param += GetEncoderParam(encodingPreset, defaultPreset, encodingOptions, videoEncoder, isLibX265);
             param += GetVideoBitrateParam(state, videoEncoder);
@@ -2370,7 +2375,9 @@ namespace MediaBrowser.Controller.MediaEncoding
 
             if (string.Equals(videoEncoder, "libx264", StringComparison.OrdinalIgnoreCase))
             {
-                param += " -x264opts:0 subme=0:me_range=16:rc_lookahead=10:me=hex:open_gop=0";
+                param += encodingPreset == EncoderPreset.ultrafast
+                    ? " -x264opts:0 open_gop=0"
+                    : " -x264opts:0 subme=0:me_range=16:rc_lookahead=10:me=hex:open_gop=0";
             }
 
             if (string.Equals(videoEncoder, "libx265", StringComparison.OrdinalIgnoreCase))
@@ -3632,12 +3639,16 @@ namespace MediaBrowser.Controller.MediaEncoding
 
         public static string GetSwDeinterlaceFilter(EncodingJobInfo state, EncodingOptions options)
         {
-            var doubleRateDeint = options.DeinterlaceDoubleRate && state.VideoStream?.ReferenceFrameRate <= 30;
+            var live = state.MediaSource.IsInfiniteStream;
+            var doubleRateDeint = (live ? options.LiveTvDeinterlaceDoubleRate : options.DeinterlaceDoubleRate)
+                && state.VideoStream?.ReferenceFrameRate is > 0 and <= 30;
+            var method = live ? options.LiveTvDeinterlaceMethod : options.DeinterlaceMethod;
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "{0}={1}:-1:0",
-                options.DeinterlaceMethod.ToString().ToLowerInvariant(),
-                doubleRateDeint ? "1" : "0");
+                "{0}={1}:-1:{2}",
+                method.ToString().ToLowerInvariant(),
+                doubleRateDeint ? "1" : "0",
+                live ? "1" : "0");
         }
 
         public string GetHwDeinterlaceFilter(EncodingJobInfo state, EncodingOptions options, string hwDeintSuffix)

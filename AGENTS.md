@@ -41,6 +41,21 @@
   then verifies actual AAC playback at the retained position. Supply private payload
   via app files, back up/restore test-title user data, and uninstall the test APK.
 
+### Live playback throughput (2026-10-17)
+
+- Infinite software H.264 streams use the independent LiveTvEncoderPreset (ultrafast).
+  LiveTvDeinterlaceMethod (bwdif) and LiveTvDeinterlaceDoubleRate preserve both fields
+  in software live filters; finite media and hardware presets retain their settings.
+- Browser handoff waits for the exact PlaySessionId stop report, which releases the
+  encoder before a replacement opens. pagehide uses a scoped keepalive stop report
+  only for local Live TV, never for the native player, remote playback or hidden tabs.
+- Validate actual decoded frames and sustained encode speed. Surface presentation
+  cadence alone does not prove successful interlaced decoding on Amlogic devices.
+- New infinite streams bypass the persistent per-channel codec cache. Providers
+  change AC3/AAC, interlacing and frame rates; stale data breaks HLS and can double
+  progressive 50 fps to 100 fps. Keep fresh track indexes/languages; shared viewers
+  reuse the opened source. Deferred proxy readers need no sleep before probing.
+
 ## Cursor Cloud specific instructions
 
 This repository is the **Jellyfin Server** backend — a .NET 10 (`net10.0`) ASP.NET Core
