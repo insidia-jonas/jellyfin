@@ -8,6 +8,18 @@ import org.junit.jupiter.api.Test
 
 class MediaTracksTest {
     @Test
+    fun `titles cannot change the subtitle parser and bitmap files are not text sidecars`() {
+        val source = """{"MediaStreams":[
+          {"Index":3,"Type":"Subtitle","Codec":"subrip","DisplayTitle":"Assassins English"},
+          {"Index":4,"Type":"Subtitle","Codec":"dvdsub","DeliveryMethod":"External","DeliveryUrl":"/Stream.sub"},
+          {"Index":5,"Type":"Subtitle","Codec":"pgssub","DeliveryMethod":"Encode","DeliveryUrl":"/video"}]}"""
+        val tracks = MediaTracks.fromMediaSource(source)
+        assertEquals("application/x-subrip", MediaTracks.mimeType(tracks[0]))
+        assertNull(MediaTracks.selectedSidecar(tracks, 4))
+        assertNull(MediaTracks.selectedSidecar(tracks, 5))
+    }
+
+    @Test
     fun `merged media source prefixes preserve exact subtitle identity`() {
         assertTrue(MediaTracks.matchesSubtitleId("jellyfin-subtitle-4", 4))
         assertTrue(MediaTracks.matchesSubtitleId("1:jellyfin-subtitle-4", 4))
@@ -28,7 +40,7 @@ class MediaTracksTest {
                 {"Index":0,"Type":"Video","Codec":"hevc"},
                 {"Index":1,"Type":"Audio","Language":"eng","DisplayTitle":"English AAC","IsDefault":true,"Codec":"aac"},
                 {"Index":2,"Type":"Audio","Language":"ger","DisplayTitle":"Deutsch AC3","Codec":"ac3"},
-                {"Index":3,"Type":"Subtitle","Language":"ger","DisplayTitle":"German","IsExternal":true,"DeliveryMethod":"External","DeliveryUrl":"/Videos/1/s/Subtitles/3/Stream.vtt"}
+                {"Index":3,"Type":"Subtitle","Codec":"subrip","Language":"ger","DisplayTitle":"German","IsExternal":true,"DeliveryMethod":"External","DeliveryUrl":"/Videos/1/s/Subtitles/3/Stream.vtt"}
               ]
             }
         """.trimIndent()

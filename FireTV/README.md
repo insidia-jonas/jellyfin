@@ -305,6 +305,26 @@ diesen Wechsel nicht aus; Live-TV behält seine eigene begrenzte Wiederherstellu
 Der Server muss Audiotranscodierung erlauben. Beschädigte Quelldateien können
 auch mit umgewandeltem Ton weiterhin scheitern.
 
+Version 2.5.13 wählt Tonspuren anhand ihrer tatsächlichen Spur im Container,
+auch bei mehreren Spuren derselben Sprache. Ein Untertitelwechsel lädt die
+ausgewählte Textspur mit eindeutiger Kennung; bildbasierte Untertitel werden
+über den Server eingebrannt. Das Abschalten eingebrannter Untertitel lädt die
+Videowiedergabe ebenfalls neu. Position und Pause bleiben dabei erhalten.
+
+Bei Filmen und Folgen liegt der Fokus beim Öffnen der Leiste direkt auf dem
+Spulregler: **Links/Rechts** verschiebt den Punkt, längeres Halten beschleunigt,
+**OK** übernimmt die Position und **Zurück** verwirft die Vorschau. **Runter**
+führt zu den Aktionen, **Hoch** zurück zum Regler. Die bisherige Wiedergabe läuft
+bis zur Bestätigung weiter oder bleibt pausiert. Live-TV hat keinen solchen
+Regler für einen beliebigen Sprung in die Sendung.
+
+Der native Player passt die HDMI-Bildfrequenz an die bekannte Bildrate an, wenn
+der Fernseher einen passenden Modus bei derselben Auflösung unterstützt.
+25/50 Bilder pro Sekunde nutzen bevorzugt 50 Hz. Unbekannte Bildraten behalten
+den vorhandenen Modus. Beim Wechsel kann der Fernseher kurz schwarz werden;
+die Einstellung gilt nur für die Player-Aktivität. Das behebt ungleichmäßige
+Bildabstände, jedoch keine Ausfälle oder Pufferprobleme des IPTV-Anbieters.
+
 Der optionale Gerätetest `:app:assembleDebugAndroidTest` verwendet den Runner
 `org.jellyfin.firetv.player.AudioRecoveryInstrumentation`. Er liest einen privaten
 NativePlayer-Payload aus `files/audio-recovery-test.json` im App-Verzeichnis und
@@ -312,3 +332,10 @@ entfernt ihn vor dem Test. Nach einem gezielt ausgelösten Decoderfehler prüft 
 echte AAC-Wiedergabe und die erhaltene Position auf dem Gerät. Nur auf einem
 freien Testgerät ausführen; den Wiedergabestatus des Testtitels vorher sichern
 und anschließend wiederherstellen. Zugangsdaten gehören nicht ins Repository.
+
+Mit `-e suite controls` prüft derselbe Runner stattdessen beide Tonspuren,
+deutsche/englische Untertitel einschließlich tatsächlich dekodierter Texte,
+Untertitel-Aus und den Spulregler mit Fernbedienungseingaben. Die Testdatei
+muss dazu zwei Tonspuren und vollständige deutsche/englische Textuntertitel
+enthalten. Auch für diesen Test den ursprünglichen Wiedergabestatus sichern
+und wiederherstellen sowie die Test-APK anschließend deinstallieren.

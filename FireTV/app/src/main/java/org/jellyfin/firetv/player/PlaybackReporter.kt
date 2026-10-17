@@ -9,6 +9,11 @@ class PlaybackReporter(
     private val playback: ResolvedPlayback,
     private val ignoreSslErrors: Boolean,
 ) {
+    @Volatile private var audioIndex = playback.selectedAudioIndex
+    @Volatile private var subtitleIndex = playback.selectedSubtitleIndex
+
+    fun tracks(audio: Int?, subtitle: Int?) { audioIndex = audio; subtitleIndex = subtitle }
+
     private val queue = PlaybackReportQueue(deliver = { suffix, position, paused, failed ->
         val body = snapshot(paused, position).put("Failed", failed)
         // One bounded retry for the final clock; all reports remain in session order.
@@ -35,6 +40,8 @@ class PlaybackReporter(
             .put("PositionTicks", positionMs * 10_000L)
             .put("PlayMethod", playback.playMethod)
             .put("VolumeLevel", 100)
+            .put("AudioStreamIndex", audioIndex)
+            .put("SubtitleStreamIndex", subtitleIndex)
             .apply {
                 playback.liveStreamId?.takeIf { it.isNotBlank() }?.let { put("LiveStreamId", it) }
             }

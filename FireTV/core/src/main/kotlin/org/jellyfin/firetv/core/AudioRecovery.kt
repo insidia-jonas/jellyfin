@@ -11,6 +11,8 @@ class AudioRecovery {
         itemId = id
     }
 
+    fun requireCompatibleAudio() { enabled = true }
+
     fun recover(errorCode: Int, audioRenderer: Boolean, live: Boolean): Boolean {
         val audioFailure = errorCode in 5001..5004 || (audioRenderer && errorCode in 4001..4005)
         if (live || enabled || !audioFailure) return false

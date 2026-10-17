@@ -45,7 +45,7 @@
     <string name="webview_error">The web interface could not be loaded. Check that the server is running and that this Fire TV can reach it.</string>
     <string name="press_back_again">Press Back again to exit</string>
     <string name="connected_as">Connected to %1$s</string>
-    <string name="player_hints">← → Actions · OK Select · Menu Options · Back Hide</string>
+    <string name="player_hints">← → Position · OK Seek · ↓ Actions · Back Cancel</string>
     <string name="player_hints_live">← → Actions · OK Select · Menu Options · Back Hide</string>
     <string name="player_hints_audio">← → Actions · OK Select · Menu Options · Back Hide</string>
     <string name="player_live">LIVE</string>
@@ -126,4 +126,5 @@
     <string name="player_playing">PLAYING</string>
     <string name="live_switch_failed">This server is not delivering video. Choose another server or reconnect.</string>
     <string name="playback_audio_recovery">Adjusting audio for this device…</string>
+    <string name="player_seek_position">Position %1$s of %2$s</string>
 </resources>

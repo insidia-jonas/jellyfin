@@ -117,8 +117,8 @@
         <SeekBar
             android:id="@+id/osdSeek"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
+            android:layout_height="40dp"
+            android:layout_marginTop="10dp"
             android:maxHeight="8dp"
             android:minHeight="8dp"
             android:progressDrawable="@drawable/bg_seek"

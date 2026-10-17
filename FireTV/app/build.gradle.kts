@@ -22,8 +22,8 @@ android {
         applicationId = if (previewBuild) "org.jellyfin.firetvweb.preview" else "org.jellyfin.firetvweb"
         minSdk = 25
         targetSdk = 34
-        versionCode = 42
-        versionName = "2.5.12"
+        versionCode = 43
+        versionName = "2.5.13"
         testInstrumentationRunner = "org.jellyfin.firetv.player.AudioRecoveryInstrumentation"
     }
 

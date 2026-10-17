@@ -26,7 +26,8 @@ data class MediaTrack(
                 return false
             }
             val method = deliveryMethod?.lowercase()
-            if (method == "embed" || method == "encode" || method == "drop") {
+            if (method == "encode" || method == "drop") return false
+            if (method == "embed") {
                 return !deliveryUrl.isNullOrBlank()
             }
             return true
@@ -48,6 +49,7 @@ object MediaTracks {
     /** Give a selected embedded text track its own identity, including same-language variants. */
     fun selectedSidecar(tracks: List<MediaTrack>, index: Int?): MediaTrack? {
         val track = tracks.firstOrNull { it.type == MediaTrack.Kind.SUBTITLE && it.index == index } ?: return null
+        if (track.codec?.lowercase() in setOf("pgssub", "hdmv_pgs_subtitle", "vobsub", "dvdsub", "dvd_subtitle", "dvb_subtitle")) return null
         if (track.isTextSidecar) return track
         if (track.deliveryMethod.equals("Encode", true) || track.deliveryMethod.equals("Drop", true)) return null
         return if (track.codec?.lowercase() in setOf("subrip", "srt", "ass", "ssa", "webvtt", "vtt", "mov_text", "text")) {
@@ -73,13 +75,16 @@ object MediaTracks {
     }
 
     fun mimeType(track: MediaTrack): String {
-        val hint = listOfNotNull(track.codec, track.deliveryUrl, track.displayTitle)
-            .joinToString(" ")
-            .lowercase()
-        return when {
-            hint.contains("vtt") || hint.contains("webvtt") -> "text/vtt"
-            hint.contains("ass") || hint.contains("ssa") -> "text/x-ssa"
-            hint.contains("ttml") -> "application/ttml+xml"
+        // A descriptive title (e.g. "Assassins") is not a subtitle format.
+        // Jellyfin may convert an embedded codec when serving its external URL.
+        val deliveredFormat = track.deliveryUrl?.substringBefore('?')?.substringBefore('#')
+            ?.substringAfterLast('/')?.substringAfterLast('.')?.lowercase()
+            ?.takeIf { it in setOf("srt", "subrip", "ass", "ssa", "vtt", "webvtt", "ttml") }
+        val format = deliveredFormat ?: track.codec?.lowercase()
+        return when (format) {
+            "vtt", "webvtt" -> "text/vtt"
+            "ass", "ssa" -> "text/x-ssa"
+            "ttml" -> "application/ttml+xml"
             else -> "application/x-subrip"
         }
     }

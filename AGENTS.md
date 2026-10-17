@@ -1,5 +1,22 @@
 # AGENTS.md
 
+### Playback controls and display cadence (2026-10-17)
+
+- Fire TV 2.5.13/code43 selects the exact container audio track with a Media3 override;
+  language alone cannot distinguish two same-language tracks. Unavailable finite audio
+  selections use the existing compatible-audio reload while retaining position and pause.
+- Changed text subtitles reload the selected, identified sidecar. Never infer a subtitle
+  MIME type from its display title or advertise bitmap subtitles as text sidecars.
+- Finite playback opens the OSD with focus on the seek bar. Left/right preview, OK seeks
+  once, Back cancels the preview, and Down/Up move between the bar and actions.
+- Match known content frame rates to supported HDMI modes at the current resolution
+  through the player's window only. Prefer exact 50/60 Hz cadence; never force 60 Hz for
+  PAL or round 23.976 to 24. Unknown frame rates retain the system mode.
+- The optional instrumentation runner's `-e suite controls` needs two audio tracks and
+  full German/English text subtitles. It verifies actual selected tracks and decoded
+  cues, subtitle-off, paused seek commit/cancel and remote focus. Restore fixture user
+  data and remove the test APK. Live cadence evidence belongs in private test artifacts.
+
 ### Finite audio recovery (2026-10-15)
 
 - Fire TV 2.5.12/code42 retries a finite audio renderer/sink failure once with

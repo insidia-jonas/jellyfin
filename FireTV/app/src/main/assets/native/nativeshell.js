@@ -251,7 +251,7 @@
             deviceId: "firetv-web",
             deviceName: "Fire TV",
             appName: "Jellyfin Fire TV",
-            appVersion: "2.5.12"
+            appVersion: "2.5.13"
         };
     }
 
@@ -347,8 +347,6 @@
             { Format: "ttml", Method: "External" },
             { Format: "subrip", Method: "External" },
             { Format: "ass", Method: "External" },
-            { Format: "vobsub", Method: "External" },
-            { Format: "dvdsub", Method: "External" },
             { Format: "ssa", Method: "Encode" },
             { Format: "pgssub", Method: "Encode" },
             { Format: "vobsub", Method: "Encode" },

@@ -45,7 +45,7 @@
     <string name="playback_failed">Diese Fassung konnte nicht abgespielt werden. Andere Version wählen oder Transcoding auf dem Server prüfen.</string>
     <string name="playback_timeout">Der Server hat zu lange gebraucht, um den Titel zu starten. Netz prüfen und erneut versuchen.</string>
     <string name="webview_recovered">Die Oberfläche wurde nach einem Grafikfehler neu geladen.</string>
-    <string name="player_hints">← → Aktionen · OK Auswählen · Menü Bild &amp; Ton · Zurück Ausblenden</string>
+    <string name="player_hints">← → Position · OK Springen · ↓ Aktionen · Zurück Verwerfen</string>
     <string name="player_hints_live">← → Aktionen · OK Auswählen · Menü Bild &amp; Ton · Zurück Ausblenden</string>
     <string name="player_hints_audio">← → Aktionen · OK Auswählen · Menü Bild &amp; Ton · Zurück Ausblenden</string>
     <string name="player_live">LIVE</string>
@@ -126,4 +126,5 @@
     <string name="player_playing">WIEDERGABE</string>
     <string name="live_switch_failed">Dieser Server liefert derzeit kein Bild. Wähle einen anderen Server oder verbinde erneut.</string>
     <string name="playback_audio_recovery">Ton wird für dieses Gerät angepasst…</string>
+    <string name="player_seek_position">Position %1$s von %2$s</string>
 </resources>

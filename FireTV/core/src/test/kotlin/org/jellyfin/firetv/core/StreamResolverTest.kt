@@ -120,7 +120,7 @@ class StreamResolverTest {
                     "TranscodingUrl": "/videos/movie-1/master.m3u8",
                     "DefaultAudioStreamIndex": 1,
                     "MediaStreams": [
-                      {"Index":0,"Type":"Video","Codec":"hevc"},
+                      {"Index":0,"Type":"Video","Codec":"hevc","AverageFrameRate":25,"RealFrameRate":50},
                       {"Index":1,"Type":"Audio","Language":"eng","DisplayTitle":"English","IsDefault":true},
                       {"Index":2,"Type":"Subtitle","Language":"ger","DisplayTitle":"German","DeliveryMethod":"External","DeliveryUrl":"/Videos/movie-1/source-1/Subtitles/2/Stream.vtt"}
                     ]
@@ -147,6 +147,7 @@ class StreamResolverTest {
             """.trimIndent()
             val resolved = StreamResolver.resolve(payload, ignoreSslErrors = false)
             assertEquals("Arrival", resolved.title)
+            assertEquals(25f, resolved.frameRate)
             assertEquals("movie-1", resolved.itemId)
             assertEquals("source-1", resolved.mediaSourceId)
             assertEquals("session-1", resolved.playSessionId)

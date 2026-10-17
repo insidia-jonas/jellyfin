@@ -4,6 +4,8 @@ import android.app.Activity
 import android.app.Instrumentation
 import android.content.Intent
 import android.os.Bundle
+import android.view.KeyEvent
+import android.widget.SeekBar
 import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
@@ -13,13 +15,18 @@ import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import org.jellyfin.firetv.core.ResolvedPlayback
 import org.jellyfin.firetv.core.MediaTrack
+import org.jellyfin.firetv.core.MediaTracks
+import org.jellyfin.firetv.R
 import java.io.File
 
 /** Opt-in device test. Supply a private playback payload; no credentials belong in the APK. */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class AudioRecoveryInstrumentation : Instrumentation() {
+    private var controls = false
+    private var stage = "startup"
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
+        controls = arguments?.getString("suite") == "controls"
         start()
     }
 
@@ -49,6 +56,9 @@ class AudioRecoveryInstrumentation : Instrumentation() {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra(PlayerActivity.EXTRA_PAYLOAD, payload)) as PlayerActivity
             activity = current
             awaitMain { (field(current, "player") as? ExoPlayer)?.isPlaying == true }
+            if (controls) {
+                testControls(current, result)
+            } else {
             var before = 0L
             runOnMainSync {
                 before = (field(current, "player") as ExoPlayer).currentPosition
@@ -101,16 +111,78 @@ class AudioRecoveryInstrumentation : Instrumentation() {
                 player.play()
             }
             awaitMain { (field(current, "player") as? ExoPlayer)?.currentPosition?.let { it > pausedAt + 2500 } == true }
+            }
             success = true
-            result.putString("stream", "Audio decoder recovery resumed using AAC on the device.\n")
+            result.putString("stream", if (controls) "Playback controls verified on the device.\n" else "Audio decoder recovery resumed using AAC on the device.\n")
         } catch (error: Throwable) {
             // Don't expose URLs or payloads in instrumentation output.
-            result.putString("stream", "Audio recovery test failed: ${error.javaClass.simpleName}\n")
+            result.putString("stream", "Playback test failed at $stage: ${error.javaClass.simpleName}\n")
         } finally {
             activity?.let { runOnMainSync { it.finish() } }
             // Let the ordered stop report drain before instrumentation ends the process.
             Thread.sleep(2000)
             finish(if (success) Activity.RESULT_OK else Activity.RESULT_CANCELED, result)
         }
+    }
+
+    private fun testControls(current: PlayerActivity, result: Bundle) {
+        fun exo() = field(current, "player") as ExoPlayer
+        fun key(code: Int) = sendKeyDownUpSync(code)
+        val audios = (field(current, "playback") as ResolvedPlayback).audioTracks
+        for (track in audios.reversed()) {
+            stage = "audio-${track.index}"
+            runOnMainSync { current.setAudioStreamIndex(track.index) }
+            awaitMain {
+                val override = exo().trackSelectionParameters.overrides.values.firstOrNull { it.type == C.TRACK_TYPE_AUDIO }
+                override != null && exo().currentTracks.groups.any { group ->
+                    group.mediaTrackGroup == override.mediaTrackGroup && override.trackIndices.all { group.isTrackSelected(it) }
+                } && exo().audioFormat?.language?.take(2) == track.language?.take(2)
+            }
+        }
+        result.putBoolean("exactAudioSelection", true)
+        val subtitles = (field(current, "playback") as ResolvedPlayback).subtitleTracks
+            .filter { !it.isForced && it.language in listOf("deu", "ger", "eng") }.take(2)
+        check(subtitles.size == 2)
+        for (track in subtitles) {
+            stage = "subtitle-${track.index}"
+            runOnMainSync { current.setSubtitleStreamIndex(track.index) }
+            awaitMain {
+                val currentPlayer = field(current, "player") as? ExoPlayer
+                currentPlayer != null && currentPlayer.currentTracks.groups.any { group ->
+                    group.type == C.TRACK_TYPE_TEXT && (0 until group.length).any {
+                        group.isTrackSelected(it) && MediaTracks.matchesSubtitleId(group.getTrackFormat(it).id, track.index)
+                    }
+                } && currentPlayer.currentCues.cues.isNotEmpty()
+            }
+        }
+        result.putBoolean("subtitleSelectionAndCues", true)
+        stage = "subtitles-off"
+        runOnMainSync { current.setSubtitleStreamIndex(-1) }
+        awaitMain { exo().currentCues.cues.isEmpty() && exo().currentTracks.groups.none { it.type == C.TRACK_TYPE_TEXT && it.isSelected } }
+        result.putBoolean("subtitlesDisabled", true)
+        stage = "seek-preview"
+        var position = 0L
+        runOnMainSync {
+            current.pause()
+            position = exo().currentPosition
+            check(current.findViewById<SeekBar>(R.id.osdSeek).hasFocus()) { "Pause must focus the seek bar without manual focus injection" }
+        }
+        repeat(3) { key(KeyEvent.KEYCODE_DPAD_RIGHT) }
+        runOnMainSync { check(kotlin.math.abs(exo().currentPosition - position) < 1000) }
+        key(KeyEvent.KEYCODE_DPAD_CENTER)
+        awaitMain { kotlin.math.abs(exo().currentPosition - position - 30_000) < 1000 && !exo().playWhenReady }
+        result.putBoolean("seekCommittedPaused", true)
+        stage = "seek-cancel"
+        key(KeyEvent.KEYCODE_DPAD_LEFT)
+        key(KeyEvent.KEYCODE_BACK)
+        runOnMainSync {
+            check(kotlin.math.abs(exo().currentPosition - position - 30_000) < 1000)
+            check(!current.isFinishing)
+        }
+        key(KeyEvent.KEYCODE_DPAD_DOWN)
+        runOnMainSync { check(!current.findViewById<SeekBar>(R.id.osdSeek).hasFocus()) }
+        key(KeyEvent.KEYCODE_DPAD_UP)
+        runOnMainSync { check(current.findViewById<SeekBar>(R.id.osdSeek).hasFocus()) }
+        result.putBoolean("seekCanceledAndFocus", true)
     }
 }

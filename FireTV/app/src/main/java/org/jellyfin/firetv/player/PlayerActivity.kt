@@ -18,6 +18,7 @@ import android.widget.TextView
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.Toast
+import android.widget.SeekBar
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.core.view.WindowCompat
@@ -58,6 +59,10 @@ import org.jellyfin.firetv.R
 import org.jellyfin.firetv.BuildConfig
 import org.jellyfin.firetv.core.HttpCancellation
 import org.jellyfin.firetv.core.AudioRecovery
+import org.jellyfin.firetv.core.AudioTrackSelection
+import org.jellyfin.firetv.core.PlayerAudioTrack
+import org.jellyfin.firetv.core.PlaybackSeek
+import org.jellyfin.firetv.core.PlaybackDisplayMode
 import org.jellyfin.firetv.core.IptvSources
 import org.jellyfin.firetv.core.IptvSourceSnapshot
 import org.jellyfin.firetv.core.LiveTuneState
@@ -110,6 +115,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private var cleanupFuture: Future<*>? = null
     private val tune = LiveTuneState()
     private val audioRecovery = AudioRecovery()
+    private val seekPreview = PlaybackSeek()
     private var playerListener: Player.Listener? = null
     private var playerIsLive = false
     private var subtitleOffsetMs = 0L
@@ -202,8 +208,22 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        binding.osdSeek.isFocusable = false
-        binding.osdSeek.isFocusableInTouchMode = false
+        binding.osdSeek.isFocusable = true
+        binding.osdSeek.setOnFocusChangeListener { view, focused ->
+            view.scaleY = if (focused) 1.3f else 1f
+            scheduleOsdHide()
+        }
+        binding.osdSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
+                val exo = player ?: return
+                if (fromUser && exo.duration > 0) {
+                    seekPreview.preview(exo.currentPosition, exo.duration, exo.duration * progress / 1000)
+                    updateOsd()
+                }
+            }
+            override fun onStartTrackingTouch(bar: SeekBar) { mainHandler.removeCallbacks(hideOsd) }
+            override fun onStopTrackingTouch(bar: SeekBar) { commitSeek() }
+        })
         styleSubtitles()
         trackDrawer = PlaybackTrackPanel(this, binding.trackPanel,
             audioPicked = ::onAudioPicked, subtitlePicked = ::onSubtitlePicked,
@@ -263,6 +283,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             if (playback == null) finish()
             return
         }
+        seekPreview.cancel()
         val confirmedLive = playback?.takeIf { it.itemId == PlaybackPayload.itemId(payload) }?.isLive == true
         audioRecovery.select(PlaybackPayload.itemId(payload), resetQueue)
         val compatibleAudio = audioRecovery.enabled
@@ -379,6 +400,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         val keepPosition = resumePositionMs ?: resolved.startPositionMs
         if (playback != null) retirePlayback(keepPlayer = resolved.isLive && playerIsLive)
         playback = resolved
+        resolved.frameRate?.let(::matchDisplayFrameRate)
         if (resolved.isLive) {
             // Generic Video channel tiles may only acquire their live identity from
             // PlaybackInfo. Keep that evidence for retries after retiring the player.
@@ -566,6 +588,13 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         if (!reused) {
             exo.addAnalyticsListener(object : AnalyticsListener {
                 private var lastBandwidthAt = 0L
+                override fun onVideoInputFormatChanged(eventTime: AnalyticsListener.EventTime, format: androidx.media3.common.Format, decoderReuseEvaluation: androidx.media3.exoplayer.DecoderReuseEvaluation?) {
+                    matchDisplayFrameRate(format.frameRate)
+                    Log.i("FireTvPlayback", "video_format mime=${format.sampleMimeType} width=${format.width} height=${format.height} fps=${format.frameRate}")
+                }
+                override fun onVideoDecoderInitialized(eventTime: AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
+                    Log.i("FireTvPlayback", "video_decoder name=$decoderName init_ms=$initializationDurationMs")
+                }
                 override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
                     Log.i("FireTvPlayback", "dropped_frames count=$droppedFrames elapsed_ms=$elapsedMs")
                 }
@@ -719,30 +748,58 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         return true
     }
 
+    private fun audioOverride(exo: ExoPlayer, resolved: ResolvedPlayback): TrackSelectionOverride? {
+        val candidates = exo.currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+            .flatMap { group -> (0 until group.length).map { group to it } }
+        val index = resolved.selectedAudioIndex ?: return null
+        val position = if (resolved.playMethod == "Transcode" && candidates.size == 1) 0 else
+            AudioTrackSelection.position(resolved.audioTracks, index, candidates.map { (group, i) ->
+                val format = group.getTrackFormat(i)
+                PlayerAudioTrack(format.language, format.channelCount.takeIf { it > 0 })
+            }) ?: return null
+        val (group, track) = candidates.getOrNull(position) ?: return null
+        if (!group.isTrackSupported(track)) return null
+        return TrackSelectionOverride(group.mediaTrackGroup, track)
+    }
+
     private fun applyPreferredTracks(exo: ExoPlayer, resolved: ResolvedPlayback) {
         val builder = exo.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
         resolved.audioTracks.firstOrNull { it.index == resolved.selectedAudioIndex }?.language?.let {
             builder.setPreferredAudioLanguage(it)
         }
+        audioOverride(exo, resolved)?.let(builder::setOverrideForType)
         val selectedSub = resolved.selectedSubtitleIndex
         val subtitle = resolved.subtitleTracks.firstOrNull { it.index == selectedSub }
-        builder.clearOverridesOfType(C.TRACK_TYPE_TEXT)
-        if (subtitle == null || selectedSub == null || selectedSub < 0) {
-            builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-        } else {
-            builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+        builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, subtitle == null || selectedSub == null || selectedSub < 0)
+        if (subtitle != null && selectedSub != null && selectedSub >= 0) {
             subtitle.language?.let { builder.setPreferredTextLanguage(it) }
-            // Language alone can choose a forced track instead of the requested full subtitles.
+            // Only the requested extracted track can satisfy this selection.
             for (group in exo.currentTracks.groups) {
                 if (group.type != C.TRACK_TYPE_TEXT) continue
                 val index = (0 until group.length).firstOrNull {
-                    MediaTracks.matchesSubtitleId(group.getTrackFormat(it).id, selectedSub)
+                    group.isTrackSupported(it) && MediaTracks.matchesSubtitleId(group.getTrackFormat(it).id, selectedSub)
                 } ?: continue
                 builder.setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, index))
                 break
             }
         }
-        exo.trackSelectionParameters = builder.build()
+        val parameters = builder.build()
+        if (exo.trackSelectionParameters != parameters) exo.trackSelectionParameters = parameters
+        reporter?.tracks(resolved.selectedAudioIndex, resolved.selectedSubtitleIndex)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun matchDisplayFrameRate(fps: Float) {
+        val display = windowManager.defaultDisplay
+        fun mode(value: android.view.Display.Mode) =
+            PlaybackDisplayMode(value.modeId, value.physicalWidth, value.physicalHeight, value.refreshRate)
+        val selected = PlaybackDisplayMode.choose(fps, mode(display.mode), display.supportedModes.map(::mode)) ?: return
+        if (window.attributes.preferredDisplayModeId == selected.id) return
+        window.attributes = window.attributes.apply { preferredDisplayModeId = selected.id }
+        Log.i("FireTvPlayback", "display_rate content_fps=$fps requested_hz=${selected.hz} mode=${selected.id}")
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -772,11 +829,23 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         if (navigation) {
             if (!down) return true
             if (!binding.osd.isVisible) { showOsd(); return true }
+            if (binding.osdSeek.hasFocus() && playback?.isLive != true) {
+                val exo = player ?: return true
+                when (code) {
+                    KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT ->
+                        seekPreview.move(exo.currentPosition, exo.duration, code == KeyEvent.KEYCODE_DPAD_RIGHT, event.repeatCount)
+                    KeyEvent.KEYCODE_DPAD_DOWN -> { seekPreview.cancel(); osdActions.firstOrNull()?.requestFocus() }
+                    KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> if (event.repeatCount == 0) commitSeek()
+                }
+                updateOsd(); scheduleOsdHide()
+                return true
+            }
             val index = osdActions.indexOf(binding.osd.findFocus()).coerceAtLeast(0)
             when (code) {
                 KeyEvent.KEYCODE_DPAD_LEFT -> osdActions.getOrNull((index - 1).coerceAtLeast(0))?.requestFocus()
                 KeyEvent.KEYCODE_DPAD_RIGHT -> osdActions.getOrNull((index + 1).coerceAtMost(osdActions.lastIndex))?.requestFocus()
-                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> osdActions.getOrNull(index)?.requestFocus()
+                KeyEvent.KEYCODE_DPAD_UP -> if (binding.osdSeek.isVisible && binding.osdSeek.isEnabled) binding.osdSeek.requestFocus()
+                KeyEvent.KEYCODE_DPAD_DOWN -> osdActions.getOrNull(index)?.requestFocus()
                 else -> if (event.repeatCount == 0) osdActions.getOrNull(index)?.performClick()
             }
             scheduleOsdHide()
@@ -792,7 +861,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         when (code) {
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> if (event.repeatCount == 0) togglePause()
             KeyEvent.KEYCODE_MEDIA_PLAY -> { desiredPlayWhenReady = true; exo?.play(); showOsd() }
-            KeyEvent.KEYCODE_MEDIA_PAUSE -> { desiredPlayWhenReady = false; exo?.pause(); showOsd() }
+            KeyEvent.KEYCODE_MEDIA_PAUSE -> { desiredPlayWhenReady = false; exo?.pause(); showOsd(preferSeek = true) }
             KeyEvent.KEYCODE_MEDIA_FAST_FORWARD, KeyEvent.KEYCODE_MEDIA_REWIND -> {
                 if (exo != null && playback?.isLive == false) exo.seekTo(seekTarget(exo, if (code == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD) 30_000 else -10_000))
                 showOsd()
@@ -815,7 +884,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         val exo = player ?: return
         desiredPlayWhenReady = !exo.playWhenReady
         exo.playWhenReady = desiredPlayWhenReady
-        showOsd()
+        showOsd(preferSeek = !exo.playWhenReady)
     }
 
     private fun buildOsdActions() {
@@ -862,7 +931,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         return if (duration > 0) next.coerceIn(0, duration) else next.coerceAtLeast(0)
     }
 
-    private fun showOsd() {
+    private fun showOsd(preferSeek: Boolean = false) {
         if (binding.trackPanel.isVisible || binding.searchPanel.isVisible) return
         val wasHidden = !binding.osd.isVisible
         binding.osd.isVisible = true
@@ -870,14 +939,24 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         if (wasHidden) {
             binding.osd.alpha = 0f
             binding.osd.animate().alpha(1f).setDuration(140).start()
-            osdActions.firstOrNull()?.requestFocus()
+        }
+        if (wasHidden || preferSeek) {
+            if (binding.osdSeek.isVisible && binding.osdSeek.isEnabled) binding.osdSeek.requestFocus()
+            else osdActions.firstOrNull()?.requestFocus()
         }
         mainHandler.removeCallbacks(osdTick)
         mainHandler.post(osdTick)
         scheduleOsdHide()
     }
 
+    private fun commitSeek() {
+        seekPreview.take()?.let { player?.seekTo(it) }
+        updateOsd()
+        scheduleOsdHide()
+    }
+
     private fun dismissOsd() {
+        seekPreview.cancel()
         mainHandler.removeCallbacks(hideOsd)
         mainHandler.removeCallbacks(osdTick)
         binding.osd.animate().cancel()
@@ -889,6 +968,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         when {
             binding.searchPanel.isVisible -> hideSearchPanel()
             binding.trackPanel.isVisible -> hideTrackPanel()
+            seekPreview.previewMs != null -> { seekPreview.cancel(); updateOsd(); scheduleOsdHide() }
             binding.osd.isVisible -> dismissOsd()
             else -> stopAndClose()
         }
@@ -899,7 +979,8 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         val keepOpen = binding.trackPanel.isVisible ||
             binding.searchPanel.isVisible ||
             player?.isPlaying == false ||
-            playback?.isAudio == true
+            playback?.isAudio == true ||
+            seekPreview.previewMs != null
         if (binding.osd.isVisible && !keepOpen) {
             mainHandler.postDelayed(hideOsd, 4_500)
         }
@@ -909,9 +990,12 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
         if (!binding.osd.isVisible) return
         val exo = player ?: return
         val duration = exo.duration
-        val position = exo.currentPosition.coerceAtLeast(0)
+        val position = seekPreview.previewMs ?: exo.currentPosition.coerceAtLeast(0)
+        binding.osdSeek.isEnabled = duration > 0 && exo.isCurrentMediaItemSeekable && playback?.isLive != true
         binding.osdSeek.max = 1000
         binding.osdSeek.progress = if (duration > 0) ((position * 1000) / duration).toInt() else 0
+        binding.osdSeek.secondaryProgress = if (duration > 0) ((exo.bufferedPosition * 1000) / duration).toInt() else 0
+        binding.osdSeek.contentDescription = getString(R.string.player_seek_position, formatTime(position), formatTime(duration))
         binding.osdPlayState.updateText(if (exo.playWhenReady) "▶" else "Ⅱ")
         val pauseLabel = getString(if (exo.playWhenReady) R.string.player_pause else R.string.player_continue)
         osdActions.firstOrNull { it.tag == "pause" }?.let { it.updateText(pauseLabel); if (it.contentDescription != pauseLabel) it.contentDescription = pauseLabel }
@@ -1068,39 +1152,34 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
 
     private fun onAudioPicked(track: MediaTrack) {
         val current = playback ?: return
-        playback = current.copy(selectedAudioIndex = track.index)
+        val selected = current.copy(selectedAudioIndex = track.index)
         val exo = player
-        if (exo != null && current.playMethod != "Transcode" && !track.language.isNullOrBlank()) {
-            applyPreferredTracks(exo, playback!!)
+        if (exo != null && current.playMethod != "Transcode" && audioOverride(exo, selected) != null) {
+            playback = selected
+            applyPreferredTracks(exo, selected)
             renderTrackPanel()
             updateOsd()
             return
         }
+        if (!current.isLive) audioRecovery.requireCompatibleAudio()
         reloadTracks(track.index, current.selectedSubtitleIndex)
     }
 
     private fun onSubtitlePicked(track: MediaTrack?) {
         val current = playback ?: return
         val index = track?.index ?: -1
-        playback = current.copy(selectedSubtitleIndex = index)
-        subtitleOffsetMs = subtitleTimingKey(playback!!)?.let { getSharedPreferences("subtitle-timing", MODE_PRIVATE).getLong(it, 0) } ?: 0
-        mediaSourceFactory?.setSubtitleParserFactory(OffsetSubtitleParserFactory(SubtitleTiming.clamp(subtitleOffsetMs)))
-        val exo = player
-        if (track != null && index != current.selectedSubtitleIndex && MediaTracks.selectedSidecar(current.subtitleTracks, index) != null) {
+        val previous = current.subtitleTracks.firstOrNull { it.index == current.selectedSubtitleIndex }
+        // Burned-in subtitles are part of the video: disabling them needs a new source.
+        if (index != current.selectedSubtitleIndex && (track != null || previous?.deliveryMethod.equals("Encode", true))) {
             reloadTracks(current.selectedAudioIndex, index)
             return
         }
-        if (exo != null && (track == null || track.isTextSidecar || hasTextTracks(exo))) {
-            applyPreferredTracks(exo, playback!!)
-            renderTrackPanel()
-            updateOsd()
-            return
-        }
-        reloadTracks(current.selectedAudioIndex, index)
-    }
-
-    private fun hasTextTracks(exo: ExoPlayer): Boolean {
-        return exo.currentTracks.groups.any { it.type == C.TRACK_TYPE_TEXT && it.length > 0 }
+        playback = current.copy(selectedSubtitleIndex = index)
+        subtitleOffsetMs = subtitleTimingKey(playback!!)?.let { getSharedPreferences("subtitle-timing", MODE_PRIVATE).getLong(it, 0) } ?: 0
+        mediaSourceFactory?.setSubtitleParserFactory(OffsetSubtitleParserFactory(SubtitleTiming.clamp(subtitleOffsetMs)))
+        player?.let { applyPreferredTracks(it, playback!!) }
+        renderTrackPanel()
+        updateOsd()
     }
 
     private fun reloadTracks(audioIndex: Int?, subtitleIndex: Int?) {
@@ -1343,7 +1422,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     override fun pause() {
         desiredPlayWhenReady = false
         player?.pause()
-        showOsd()
+        showOsd(preferSeek = true)
     }
 
     override fun resume() {

@@ -24,6 +24,7 @@ data class ResolvedPlayback(
     val container: String? = null,
     val isAudio: Boolean = false,
     val metadata: PlaybackMetadata = PlaybackMetadata(name = title),
+    val frameRate: Float? = null,
 )
 
 /**
@@ -158,6 +159,9 @@ object StreamResolver {
             container = jsonStringField(source, "Container"),
             isAudio = PlaybackPayload.isAudio(payload),
             metadata = metadata,
+            frameRate = jsonArrayObjects(source, "MediaStreams").firstOrNull { jsonStringField(it, "Type") == "Video" }?.let {
+                (jsonDoubleField(it, "AverageFrameRate") ?: jsonDoubleField(it, "RealFrameRate"))?.toFloat()
+            },
         )
     }
 
