@@ -44,6 +44,9 @@ public class EncodingOptions
         H264Crf = 23;
         H265Crf = 28;
         EncoderPreset = EncoderPreset.auto;
+        LiveTvEncoderPreset = EncoderPreset.ultrafast;
+        LiveTvDeinterlaceDoubleRate = true;
+        LiveTvDeinterlaceMethod = DeinterlaceMethod.bwdif;
         DeinterlaceDoubleRate = false;
         DeinterlaceMethod = DeinterlaceMethod.yadif;
         EnableDecodingColorDepth10Hevc = true;
@@ -219,6 +222,21 @@ public class EncodingOptions
     /// Gets or sets the encoder preset.
     /// </summary>
     public EncoderPreset EncoderPreset { get; set; }
+
+    /// <summary>
+    /// Gets or sets the software H.264 preset for infinite live streams.
+    /// </summary>
+    public EncoderPreset LiveTvEncoderPreset { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether software live deinterlacing preserves both fields.
+    /// </summary>
+    public bool LiveTvDeinterlaceDoubleRate { get; set; }
+
+    /// <summary>
+    /// Gets or sets the software deinterlace method for infinite live streams.
+    /// </summary>
+    public DeinterlaceMethod LiveTvDeinterlaceMethod { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether the framerate is doubled when deinterlacing.

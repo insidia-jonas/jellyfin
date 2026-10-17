@@ -21,6 +21,42 @@ namespace Jellyfin.Controller.Tests.MediaEncoding;
 
 public class EncodingHelperTests
 {
+    [Theory]
+    [InlineData(true, "ultrafast")]
+    [InlineData(false, "slow")]
+    public void LiveSoftwarePreset_DoesNotChangeFiniteEncoding(bool live, string preset)
+    {
+        var state = BuildState(null, null);
+        state.MediaSource.IsInfiniteStream = live;
+        var options = new EncodingOptions { EncoderPreset = EncoderPreset.slow };
+        var args = CreateHelper().GetVideoQualityParam(state, "libx264", options, EncoderPreset.veryfast);
+        Assert.Contains(" -preset " + preset, args, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LiveSoftwarePreset_RespectsConfiguredOverride()
+    {
+        var state = BuildState(null, null);
+        state.MediaSource.IsInfiniteStream = true;
+        var options = new EncodingOptions { LiveTvEncoderPreset = EncoderPreset.superfast };
+        var args = CreateHelper().GetVideoQualityParam(state, "libx264", options, EncoderPreset.veryfast);
+        Assert.Contains(" -preset superfast", args, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(true, 25, "bwdif=1:-1:0")]
+    [InlineData(true, 29.97f, "bwdif=1:-1:0")]
+    [InlineData(true, 50, "bwdif=0:-1:0")]
+    [InlineData(true, 0, "bwdif=0:-1:0")]
+    [InlineData(false, 25, "yadif=0:-1:0")]
+    public void SoftwareDeinterlace_PreservesLiveFieldsOnly(bool live, float frameRate, string expected)
+    {
+        var state = BuildState(null, null);
+        state.MediaSource.IsInfiniteStream = live;
+        state.VideoStream.AverageFrameRate = frameRate;
+        Assert.Equal(expected, EncodingHelper.GetSwDeinterlaceFilter(state, new EncodingOptions()));
+    }
+
     [Fact]
     public void GetMapArgs_NoSubtitle_ExcludesAllSubs()
     {

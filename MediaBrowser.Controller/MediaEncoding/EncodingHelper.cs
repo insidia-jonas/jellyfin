@@ -2172,7 +2172,12 @@ namespace MediaBrowser.Controller.MediaEncoding
             }
 
             var isLibX265 = string.Equals(videoEncoder, "libx265", StringComparison.OrdinalIgnoreCase);
-            var encodingPreset = encodingOptions.EncoderPreset;
+            // Live output cannot catch up after falling behind real time. Keep file
+            // encoding and hardware presets independent of this latency budget.
+            var encodingPreset = state.MediaSource.IsInfiniteStream
+                && string.Equals(videoEncoder, "libx264", StringComparison.OrdinalIgnoreCase)
+                    ? encodingOptions.LiveTvEncoderPreset
+                    : encodingOptions.EncoderPreset;
 
             param += GetEncoderParam(encodingPreset, defaultPreset, encodingOptions, videoEncoder, isLibX265);
             param += GetVideoBitrateParam(state, videoEncoder);
@@ -3632,11 +3637,14 @@ namespace MediaBrowser.Controller.MediaEncoding
 
         public static string GetSwDeinterlaceFilter(EncodingJobInfo state, EncodingOptions options)
         {
-            var doubleRateDeint = options.DeinterlaceDoubleRate && state.VideoStream?.ReferenceFrameRate <= 30;
+            var live = state.MediaSource.IsInfiniteStream;
+            var doubleRateDeint = (live ? options.LiveTvDeinterlaceDoubleRate : options.DeinterlaceDoubleRate)
+                && state.VideoStream?.ReferenceFrameRate is > 0 and <= 30;
+            var method = live ? options.LiveTvDeinterlaceMethod : options.DeinterlaceMethod;
             return string.Format(
                 CultureInfo.InvariantCulture,
                 "{0}={1}:-1:0",
-                options.DeinterlaceMethod.ToString().ToLowerInvariant(),
+                method.ToString().ToLowerInvariant(),
                 doubleRateDeint ? "1" : "0");
         }
 

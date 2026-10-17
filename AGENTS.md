@@ -1,5 +1,16 @@
 # AGENTS.md
 
+### Live playback throughput (2026-10-17)
+
+- Infinite software H.264 streams use the independent LiveTvEncoderPreset (ultrafast).
+  LiveTvDeinterlaceMethod (bwdif) and LiveTvDeinterlaceDoubleRate preserve both fields
+  in software live filters; finite media and hardware presets retain their settings.
+- Browser handoff waits for the exact PlaySessionId stop report, which releases the
+  encoder before a replacement opens. pagehide uses a scoped keepalive stop report
+  only for local Live TV, never for the native player, remote playback or hidden tabs.
+- Validate actual decoded frames and sustained encode speed. Surface presentation
+  cadence alone does not prove successful interlaced decoding on Amlogic devices.
+
 ## Cursor Cloud specific instructions
 
 This repository is the **Jellyfin Server** backend — a .NET 10 (`net10.0`) ASP.NET Core
