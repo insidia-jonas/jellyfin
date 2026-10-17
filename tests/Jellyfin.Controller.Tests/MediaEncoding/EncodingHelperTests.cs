@@ -22,6 +22,21 @@ namespace Jellyfin.Controller.Tests.MediaEncoding;
 public class EncodingHelperTests
 {
     [Theory]
+    [InlineData(true, 3, 1, 3)]
+    [InlineData(true, 3, 5, 5)]
+    [InlineData(true, 10, 1, 2)]
+    [InlineData(false, 3, 1, 1)]
+    public void LivePlaylistKeepsAStartupReserve(bool live, int length, int requested, int expected)
+    {
+        using var state = new StreamState(Mock.Of<IMediaSourceManager>(), TranscodingJobType.Hls, Mock.Of<ITranscodeManager>())
+        {
+            MediaSource = new MediaSourceInfo { IsInfiniteStream = live },
+            Request = new VideoRequestDto { SegmentLength = length, MinSegments = requested }
+        };
+        Assert.Equal(expected, state.MinSegments);
+    }
+
+    [Theory]
     [InlineData(true, "ultrafast")]
     [InlineData(false, "slow")]
     public void LiveSoftwarePreset_DoesNotChangeFiniteEncoding(bool live, string preset)

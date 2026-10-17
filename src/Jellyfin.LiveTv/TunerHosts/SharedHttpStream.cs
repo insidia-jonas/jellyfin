@@ -83,6 +83,13 @@ namespace Jellyfin.LiveTv.TunerHosts
             // shared authenticated proxy. The subsequent codec probe/profile check
             // still selects transcoding for formats the client cannot decode.
             MediaSource.SupportsDirectPlay = !MediaSource.RequiresLooping;
+            // The provider already paces this shared live input. Applying -re a
+            // second time prevents FFmpeg catching up after a delayed read.
+            if (!MediaSource.RequiresLooping)
+            {
+                MediaSource.ReadAtNativeFramerate = false;
+            }
+
             DateOpened = DateTime.UtcNow;
 
             Logger.LogInformation(
