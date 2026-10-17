@@ -310,6 +310,9 @@ Live-TV eine serverseitige Umwandlung in Vollbilder an. Progressive Sender bleib
 direkt abspielbar. Der Server benötigt dafür die aktualisierte Live-TV-Umrechnung
 und muss die aktuellen Senderformate beim Öffnen erkennen; alte Codec-Caches
 können nach Anbieterwechseln falsche Tonspuren und Bildraten melden.
+Umgerechnete Live-Sender starten mit mehreren gepufferten Videosegmenten, damit
+nach dem ersten Bild keine regelmäßigen Pufferpausen entstehen. Das benötigt
+mehr Vorlauf als die direkte Wiedergabe.
 
 Version 2.5.13 wählt Tonspuren anhand ihrer tatsächlichen Spur im Container,
 auch bei mehreren Spuren derselben Sprache. Ein Untertitelwechsel lädt die

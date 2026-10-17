@@ -11,6 +11,9 @@
   otherwise compatible progressive channels through software encoding.
 - Requires the server live throughput and fresh-probe fixes. Verify fresh codecs,
   50-fps output, actual decoder drops and rebuffering; HDMI cadence alone is insufficient.
+- Converted live HLS requests three initial segments and buffers six seconds.
+  Direct TS keeps the quick start. Recreate the player when the buffer policy
+  changes; reusing the previous player's LoadControl silently retains its thresholds.
 
 ### Playback controls and display cadence (2026-10-17)
 

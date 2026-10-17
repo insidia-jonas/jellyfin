@@ -41,6 +41,7 @@ class LiveVideoCompatibilityTest {
                 val profile = jsonObjectField(request, "DeviceProfile")!!
                 assertTrue(profile.contains("IsInterlaced"))
                 assertTrue(jsonArrayObjects(profile, "TranscodingProfiles").all { jsonStringField(it, "Protocol") == "hls" })
+                assertTrue(jsonArrayObjects(profile, "TranscodingProfiles").all { jsonStringField(it, "MinSegments") == "3" })
                 assertEquals(120000000L, jsonLongField(request, "MaxStreamingBitrate"))
             }
             interlaced = false

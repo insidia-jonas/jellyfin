@@ -10,6 +10,17 @@ import org.junit.jupiter.api.Test
 
 class PlaybackLifecycleTest {
     @Test
+    fun `segmented live playback buffers two complete segments before starting`() {
+        val hls = PlaybackBuffers.forPlayback(true, true)
+        assertTrue(hls.startMs >= 2 * 3_000)
+        assertTrue(hls.rebufferMs >= hls.startMs)
+        assertTrue(hls.minMs >= hls.startMs)
+        assertTrue(hls.targetBytes <= 64 * 1024 * 1024)
+        assertTrue(PlaybackBuffers.forPlayback(true).startMs <= 1_500)
+        assertEquals(PlaybackBuffers.forPlayback(false), PlaybackBuffers.forPlayback(false, true))
+    }
+
+    @Test
     fun `live and movie buffer thresholds satisfy Media3 constraints`() {
         listOf(true, false).forEach { live ->
             val policy = PlaybackBuffers.forPlayback(live)

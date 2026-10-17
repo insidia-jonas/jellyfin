@@ -119,6 +119,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     private val seekPreview = PlaybackSeek()
     private var playerListener: Player.Listener? = null
     private var playerIsLive = false
+    private var playerBuffers: PlaybackBuffers? = null
     private var subtitleOffsetMs = 0L
     private var mediaSourceFactory: DefaultMediaSourceFactory? = null
     private var pendingSubtitleOffset: Runnable? = null
@@ -435,9 +436,9 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             .setReadTimeoutMs(if (resolved.isLive) 30_000 else 12_000)
             .setAllowCrossProtocolRedirects(true)
             .setDefaultRequestProperties(headers)
-        val reused = player != null && playerIsLive == resolved.isLive
+        val buffers = PlaybackBuffers.forPlayback(resolved.isLive, Uri.parse(resolved.url).path?.endsWith(".m3u8", ignoreCase = true) == true)
+        val reused = player != null && playerIsLive == resolved.isLive && playerBuffers == buffers
         if (player != null && !reused) releasePlayer(clearPlayback = false)
-        val buffers = PlaybackBuffers.forPlayback(resolved.isLive)
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
                 buffers.minMs, buffers.maxMs, buffers.startMs, buffers.rebufferMs,
@@ -465,6 +466,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
             .build()
             .also { player = it }
         playerIsLive = resolved.isLive
+        playerBuffers = buffers
         playerListener?.let { exo.removeListener(it) }
         binding.playerView.player = exo
         Log.i("FireTvPlayback", "player reused=$reused request=${tune.generation}")

@@ -91,7 +91,7 @@ object DeviceProfile {
           "Name":"Jellyfin Fire TV progressive live video",
           "MaxStreamingBitrate":120000000,
           "DirectPlayProfiles":[${jsonArrayObjects(JSON, "DirectPlayProfiles").joinToString(",")}],
-          "TranscodingProfiles":[${jsonArrayObjects(JSON, "TranscodingProfiles").filter { jsonStringField(it, "Protocol") == "hls" }.joinToString(",")}],
+          "TranscodingProfiles":[${jsonArrayObjects(JSON, "TranscodingProfiles").filter { jsonStringField(it, "Protocol") == "hls" }.joinToString(",") { it.replace("\"MinSegments\":\"1\"", "\"MinSegments\":\"3\"") }}],
           "CodecProfiles":[{"Type":"Video","Conditions":[{"Condition":"Equals","Property":"IsInterlaced","Value":"false","IsRequired":false}]},${jsonArrayObjects(JSON, "CodecProfiles").joinToString(",")}],
           "SubtitleProfiles":[${jsonArrayObjects(JSON, "SubtitleProfiles").joinToString(",")}]
         }""".trimIndent()
