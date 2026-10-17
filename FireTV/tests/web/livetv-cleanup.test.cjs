@@ -75,6 +75,15 @@ test('page close captures the session before the web player teardown clears it',
     assert.equal(e.requests.filter(r => r[0] === 'fetch').length, 1);
 });
 
+test('SPA pagehide keeps playback and native exit sends only one stop', async t => {
+    const e = setup(t); await e.clock.tickAsync(1);
+    e.w.document.body.dispatchEvent(new e.w.Event('pagehide', { bubbles: true }));
+    assert.equal(e.requests.length, 0);
+    e.w.dispatchEvent(new e.w.Event('beforeunload'));
+    e.w.dispatchEvent(new e.w.Event('pagehide'));
+    assert.equal(e.requests.filter(r => r[0] === 'fetch').length, 1);
+});
+
 test('unconfirmed stop prevents a second channel and restores the report handler', async t => {
     const e = setup(t);
     let plays = 0;

@@ -1043,7 +1043,10 @@
         });
     }
 
-    function stopLiveOnPageHide() {
+    var exitingPlaySession = '';
+    function stopLiveOnPageHide(event) {
+        // Jellyfin also bubbles a custom pagehide when changing SPA views.
+        if (event && event.target !== window) { return; }
         if (nativeOwnsPlayback() || typeof window.fetch !== 'function') { return; }
         var client = window.ApiClient, state = playState, report;
         if (!client || !client.accessToken || !client.deviceId || !client.appName || !client.appVersion || !client.deviceName) { return; }
@@ -1058,6 +1061,8 @@
                 report = { ItemId: item.Id, MediaSourceId: source.Id, PlaySessionId: manager.playSessionId(player), LiveStreamId: source.LiveStreamId };
             }
             if (!report.PlaySessionId || !report.LiveStreamId) { return; }
+            if (exitingPlaySession === report.PlaySessionId) { return; }
+            exitingPlaySession = report.PlaySessionId;
             // keepalive survives closing/reloading the tab; visibility changes do
             // not end playback. No broad ActiveEncodings deletion is permitted.
             window.fetch(client.getUrl('Sessions/Playing/Stopped'), {
@@ -2050,6 +2055,7 @@
             sync();
         });
         window.addEventListener('pagehide', stopLiveOnPageHide, true);
+        window.addEventListener('beforeunload', stopLiveOnPageHide, true);
         var observer = new MutationObserver(function () {
             if (routeKey !== currentRouteKey()) {
                 sync();
