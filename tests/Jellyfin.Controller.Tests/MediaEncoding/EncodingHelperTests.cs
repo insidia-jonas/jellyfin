@@ -31,6 +31,10 @@ public class EncodingHelperTests
         var options = new EncodingOptions { EncoderPreset = EncoderPreset.slow };
         var args = CreateHelper().GetVideoQualityParam(state, "libx264", options, EncoderPreset.veryfast);
         Assert.Contains(" -preset " + preset, args, StringComparison.Ordinal);
+        if (live)
+        {
+            Assert.DoesNotContain("rc_lookahead=10", args, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
@@ -44,10 +48,10 @@ public class EncodingHelperTests
     }
 
     [Theory]
-    [InlineData(true, 25, "bwdif=1:-1:0")]
-    [InlineData(true, 29.97f, "bwdif=1:-1:0")]
-    [InlineData(true, 50, "bwdif=0:-1:0")]
-    [InlineData(true, 0, "bwdif=0:-1:0")]
+    [InlineData(true, 25, "bwdif=1:-1:1")]
+    [InlineData(true, 29.97f, "bwdif=1:-1:1")]
+    [InlineData(true, 50, "bwdif=0:-1:1")]
+    [InlineData(true, 0, "bwdif=0:-1:1")]
     [InlineData(false, 25, "yadif=0:-1:0")]
     public void SoftwareDeinterlace_PreservesLiveFieldsOnly(bool live, float frameRate, string expected)
     {

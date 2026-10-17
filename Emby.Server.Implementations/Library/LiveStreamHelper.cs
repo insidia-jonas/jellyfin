@@ -42,6 +42,14 @@ namespace Emby.Server.Implementations.Library
             var now = DateTime.UtcNow;
 
             MediaInfo? mediaInfo = null;
+            // A channel may change codecs, interlacing and frame rate when its
+            // programme or provider origin changes. Probe the new shared stream;
+            // its populated MediaStreams are reused by concurrent consumers.
+            if (mediaSource.IsInfiniteStream)
+            {
+                cacheKey = null;
+            }
+
             var cacheFilePath = string.IsNullOrEmpty(cacheKey) ? null : Path.Combine(_appPaths.CachePath, "mediainfo", cacheKey.GetMD5().ToString("N", CultureInfo.InvariantCulture) + ".json");
 
             if (cacheFilePath is not null)

@@ -55,8 +55,6 @@ The bundle contains no API keys. Development bundles require explicit `--allow-d
 Committed releases are the default. Keep installation backups private: configurations
 contain credentials. Do not put them in source control.
 
-## Connections and service discovery
-
 Live TV software H.264 encoding uses `LiveTvEncoderPreset=ultrafast` by default,
 independently of file playback and hardware encoding. Software live deinterlacing
 uses `LiveTvDeinterlaceMethod=bwdif` and `LiveTvDeinterlaceDoubleRate=true` to preserve
@@ -64,6 +62,8 @@ both fields of 25/29.97 fps broadcasts. These encoding configuration defaults al
 apply when upgrading an older configuration; existing explicit values are retained.
 Measure sustained FFmpeg speed above 1x on the target server. Multiple concurrent
 software conversions can still exceed a small server's capacity.
+
+## Connections and service discovery
 
 ```sh
 sudo python3 scripts/pi/manage-stack.py --user jonas --apply --configure-only
