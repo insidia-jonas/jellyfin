@@ -39,6 +39,7 @@ object StreamResolver {
         subtitleStreamIndex: Int? = null,
         cancellation: HttpCancellation? = null,
         audioCompatibility: Boolean = false,
+        progressiveLiveVideo: Boolean = false,
     ): ResolvedPlayback {
         val requestedId = PlaybackPayload.itemId(payload) ?: error("No items to play")
         val tunerId = LivePlayback.tunerChannelId(payload)
@@ -61,8 +62,14 @@ object StreamResolver {
         val audioIndex = audioStreamIndex ?: jsonLongField(payload, "audioStreamIndex")?.toInt()
         val subtitleIndex = subtitleStreamIndex ?: jsonLongField(payload, "subtitleStreamIndex")?.toInt()
         val liveHint = LivePlayback.isLivePayload(payload)
+        val progressiveLive = liveHint && progressiveLiveVideo
+        val profile = when {
+            audioCompatibility -> DeviceProfile.AUDIO_COMPATIBILITY_JSON
+            progressiveLive -> DeviceProfile.PROGRESSIVE_LIVE_JSON
+            else -> DeviceProfile.JSON
+        }
 
-        val body = buildPlaybackInfoBody(userId, startTicks, mediaSourceId, audioIndex, subtitleIndex, audioCompatibility)
+        val body = buildPlaybackInfoBody(userId, startTicks, mediaSourceId, audioIndex, subtitleIndex, audioCompatibility, profile)
         var itemId = requestedId
         var response = playbackInfo(server, itemId, userId, body, token, ignoreSslErrors, deviceId, deviceName, appName, appVersion, liveHint, cancellation)
         if (response.code !in 200..299 && !tunerId.isNullOrBlank() && tunerId != itemId) {
@@ -97,11 +104,15 @@ object StreamResolver {
                 openToken = openToken,
                 cancellation = cancellation,
                 audioCompatibility = audioCompatibility,
+                profile = profile,
             )?.let { opened ->
                 source = opened
             }
         }
         val urls = urlsOf(source)
+        val needsDeinterlacing = progressiveLive && jsonArrayObjects(source, "MediaStreams").any {
+            jsonStringField(it, "Type") == "Video" && jsonBooleanField(it, "IsInterlaced") == true
+        }
         // Local files often advertise DirectPlay without a DirectStreamUrl. The
         // native client must use Jellyfin's authenticated static-file endpoint.
         val fileUrl = if (!live && urls.supportsDirectPlay && jsonStringField(source, "Protocol") == "File") {
@@ -112,9 +123,9 @@ object StreamResolver {
         } else {
             null
         }
-        val playUrl = if (audioCompatibility) {
+        val playUrl = if (audioCompatibility || needsDeinterlacing) {
             urls.transcodingUrl?.takeIf { it.isNotBlank() }?.let { PlayUrl.bindToServer(server, it) }
-                ?: error("Server did not provide compatible audio")
+                ?: error("Server did not provide compatible playback")
         } else if (live) {
             PlayUrl.resolveLive(server, urls) ?: error("No playable live URL from the Jellyfin proxy")
         } else {
@@ -122,7 +133,7 @@ object StreamResolver {
         }
         val authed = StreamAuth.withAccessToken(playUrl, token)
         val playMethod = when {
-            audioCompatibility -> "Transcode"
+            audioCompatibility || needsDeinterlacing -> "Transcode"
             fileUrl != null && playUrl == fileUrl -> "DirectPlay"
             urls.supportsDirectPlay && playUrl == urls.path -> "DirectPlay"
             !urls.transcodingUrl.isNullOrBlank() && playUrl.contains(urls.transcodingUrl!!) -> "Transcode"
@@ -203,6 +214,7 @@ object StreamResolver {
         openToken: String?,
         cancellation: HttpCancellation?,
         audioCompatibility: Boolean,
+        profile: String,
     ): String? {
         val body = buildString {
             append('{')
@@ -220,7 +232,7 @@ object StreamResolver {
             if (!openToken.isNullOrBlank()) {
                 append("\"OpenToken\":").append(jsonEscape(openToken)).append(',')
             }
-            append("\"DeviceProfile\":").append(if (audioCompatibility) DeviceProfile.AUDIO_COMPATIBILITY_JSON else DeviceProfile.JSON)
+            append("\"DeviceProfile\":").append(profile)
             append('}')
         }
         val response = JellyfinHttp.post(
@@ -311,6 +323,7 @@ object StreamResolver {
         audioStreamIndex: Int?,
         subtitleStreamIndex: Int?,
         audioCompatibility: Boolean,
+        profile: String,
     ): String {
         return buildString {
             append('{')
@@ -333,7 +346,7 @@ object StreamResolver {
             if (!mediaSourceId.isNullOrBlank()) {
                 append("\"MediaSourceId\":").append(jsonEscape(mediaSourceId)).append(',')
             }
-            append("\"DeviceProfile\":").append(if (audioCompatibility) DeviceProfile.AUDIO_COMPATIBILITY_JSON else DeviceProfile.JSON)
+            append("\"DeviceProfile\":").append(profile)
             append('}')
         }
     }

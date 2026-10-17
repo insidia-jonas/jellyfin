@@ -8,6 +8,8 @@ package org.jellyfin.firetv.core
  * nativeshell.js [exoPlayerProfile].
  */
 object DeviceProfile {
+    fun requiresProgressiveLiveVideo(model: String, sdk: Int): Boolean = model == "AFTR" && sdk <= 28
+
     // Used only after an audio decoder/output failure. Video may still be copied;
     // never request another passthrough codec from the failed HDMI audio path.
     val AUDIO_COMPATIBILITY_JSON: String = """
@@ -80,4 +82,18 @@ object DeviceProfile {
           "ResponseProfiles": []
         }
     """.trimIndent()
+
+    // The second-generation Cube drops alternate fields with its AVC decoder.
+    // Keep progressive channels direct; request server deinterlacing only when
+    // the opened source is actually interlaced. HLS bounds live buffering.
+    val PROGRESSIVE_LIVE_JSON: String by lazy {
+        """{
+          "Name":"Jellyfin Fire TV progressive live video",
+          "MaxStreamingBitrate":120000000,
+          "DirectPlayProfiles":[${jsonArrayObjects(JSON, "DirectPlayProfiles").joinToString(",")}],
+          "TranscodingProfiles":[${jsonArrayObjects(JSON, "TranscodingProfiles").filter { jsonStringField(it, "Protocol") == "hls" }.joinToString(",")}],
+          "CodecProfiles":[{"Type":"Video","Conditions":[{"Condition":"Equals","Property":"IsInterlaced","Value":"false","IsRequired":false}]},${jsonArrayObjects(JSON, "CodecProfiles").joinToString(",")}],
+          "SubtitleProfiles":[${jsonArrayObjects(JSON, "SubtitleProfiles").joinToString(",")}]
+        }""".trimIndent()
+    }
 }

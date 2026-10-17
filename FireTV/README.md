@@ -305,6 +305,12 @@ diesen Wechsel nicht aus; Live-TV behält seine eigene begrenzte Wiederherstellu
 Der Server muss Audiotranscodierung erlauben. Beschädigte Quelldateien können
 auch mit umgewandeltem Ton weiterhin scheitern.
 
+Version 2.5.14 fordert auf dem Fire TV Cube der zweiten Generation bei interlaced
+Live-TV eine serverseitige Umwandlung in Vollbilder an. Progressive Sender bleiben
+direkt abspielbar. Der Server benötigt dafür die aktualisierte Live-TV-Umrechnung
+und muss die aktuellen Senderformate beim Öffnen erkennen; alte Codec-Caches
+können nach Anbieterwechseln falsche Tonspuren und Bildraten melden.
+
 Version 2.5.13 wählt Tonspuren anhand ihrer tatsächlichen Spur im Container,
 auch bei mehreren Spuren derselben Sprache. Ein Untertitelwechsel lädt die
 ausgewählte Textspur mit eindeutiger Kennung; bildbasierte Untertitel werden

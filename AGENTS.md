@@ -1,5 +1,17 @@
 # AGENTS.md
 
+### Cube interlaced video compatibility (2026-10-17)
+
+- Fire TV 2.5.14/code44 declares progressive-only live video for AFTR/API <=28.
+  The second-generation Cube's AVC decoder loses alternate interlaced fields.
+  Progressive channels remain direct; interlaced sources require the server's
+  HLS conversion. Finite playback and other device models keep their profiles.
+- Both PlaybackInfo and LiveStreams/Open must send the same capability profile.
+  Preserve the existing bitrate allowance: estimated TS bitrates must not force
+  otherwise compatible progressive channels through software encoding.
+- Requires the server live throughput and fresh-probe fixes. Verify fresh codecs,
+  50-fps output, actual decoder drops and rebuffering; HDMI cadence alone is insufficient.
+
 ### Playback controls and display cadence (2026-10-17)
 
 - Fire TV 2.5.13/code43 selects the exact container audio track with a Media3 override;

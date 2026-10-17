@@ -58,6 +58,7 @@ import kotlinx.coroutines.withTimeout
 import org.jellyfin.firetv.R
 import org.jellyfin.firetv.BuildConfig
 import org.jellyfin.firetv.core.HttpCancellation
+import org.jellyfin.firetv.core.DeviceProfile
 import org.jellyfin.firetv.core.AudioRecovery
 import org.jellyfin.firetv.core.AudioTrackSelection
 import org.jellyfin.firetv.core.PlayerAudioTrack
@@ -336,7 +337,8 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
                         }
                     }
                     cancellation.checkActive()
-                    StreamResolver.resolve(effectivePayload, ssl, audioStreamIndex, subtitleStreamIndex, cancellation, compatibleAudio)
+                    StreamResolver.resolve(effectivePayload, ssl, audioStreamIndex, subtitleStreamIndex, cancellation, compatibleAudio,
+                        progressiveLiveVideo = DeviceProfile.requiresProgressiveLiveVideo(android.os.Build.MODEL, android.os.Build.VERSION.SDK_INT))
                 }
                 mainHandler.post {
                     mainHandler.removeCallbacks(deadline)
