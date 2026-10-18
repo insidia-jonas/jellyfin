@@ -18,8 +18,13 @@ function setup(t) {
         reportPlaybackStopped: info => { requests.push(['stop', info]); return stopped; }
     };
     const original = w.ApiClient.reportPlaybackStopped;
+    const exitHandlers = {}, addListener = w.addEventListener.bind(w);
+    w.addEventListener = (type, handler, options) => {
+        if (type === 'pagehide' || type === 'beforeunload') (exitHandlers[type] ||= []).push({ handler, capture: options === true });
+        addListener(type, handler, options);
+    };
     w.addEventListener('pagehide', () => { if (w.clearPlayerOnExit) current = null; });
-    w.fetch = (url, options) => { requests.push(['fetch', url, options]); return Promise.resolve(); };
+    w.fetch = (url, options) => { requests.push(['fetch', url, options]); return Promise.resolve({ ok: true }); };
     w.playbackManager = {
         play: () => Promise.resolve(),
         getCurrentPlayer: () => current, currentItem: () => ({ Id: 'old', Type: 'TvChannel' }),
@@ -29,11 +34,15 @@ function setup(t) {
     };
     w.eval(fs.readFileSync(path.resolve(__dirname, '../../../src/Jellyfin.LiveTv/Web/livetv-overview.js'), 'utf8'));
     t.after(() => { clock.uninstall(); w.close(); });
-    return { w, clock, requests, player, finishStop, original };
+    const exit = type => exitHandlers[type].slice().sort((a, b) => Number(b.capture) - Number(a.capture))
+        .forEach(({ handler }) => handler({ type, target: w.document, isTrusted: true }));
+    return { w, clock, requests, player, finishStop, original, exit };
 }
 
 test('channel handoff waits for the previous server stop, including after the local player disappears', async t => {
     const e = setup(t);
+    await e.clock.tickAsync(1);
+    const original = e.w.ApiClient.reportPlaybackStopped;
     e.w.FireTvLive = { play: () => e.requests.push(['play']) };
     e.w.NativePlayer = { loadPlayer: () => {} };
     const next = e.w.JellyfinLiveTvOverview.play({ Id: 'new', Type: 'TvChannel' });
@@ -43,12 +52,12 @@ test('channel handoff waits for the previous server stop, including after the lo
     e.finishStop();
     await next;
     assert.equal(e.requests.filter(r => r[0] === 'play').length, 1);
-    assert.equal(e.w.ApiClient.reportPlaybackStopped, e.original);
+    assert.equal(e.w.ApiClient.reportPlaybackStopped, original);
 });
 
 test('page close reports only the exact local live session with keepalive', async t => {
     const e = setup(t); await e.clock.tickAsync(1);
-    e.w.dispatchEvent(new e.w.Event('pagehide'));
+    e.exit('pagehide');
     const request = e.requests.find(r => r[0] === 'fetch');
     assert.ok(request);
     assert.equal(request[1], 'http://jellyfin.test/Sessions/Playing/Stopped');
@@ -59,38 +68,52 @@ test('page close reports only the exact local live session with keepalive', asyn
     e.requests.length = 0;
     e.w.dispatchEvent(new e.w.Event('visibilitychange'));
     assert.equal(e.requests.length, 0);
-    e.player.isLocalPlayer = false;
-    e.w.dispatchEvent(new e.w.Event('pagehide'));
-    assert.equal(e.requests.length, 0);
-    e.player.isLocalPlayer = true;
-    e.w.NativePlayer = { loadPlayer: () => {} };
-    e.w.dispatchEvent(new e.w.Event('pagehide'));
+});
+
+for (const owner of ['remote', 'native']) test('document exit preserves ' + owner + ' playback', async t => {
+    const e = setup(t); await e.clock.tickAsync(1);
+    if (owner === 'remote') e.player.isLocalPlayer = false;
+    else e.w.NativePlayer = { loadPlayer: () => {} };
+    e.exit('beforeunload'); e.exit('pagehide');
     assert.equal(e.requests.length, 0);
 });
 
 test('page close captures the session before the web player teardown clears it', async t => {
     const e = setup(t); await e.clock.tickAsync(1);
     e.w.clearPlayerOnExit = true;
-    e.w.dispatchEvent(new e.w.Event('pagehide'));
+    e.exit('pagehide');
     assert.equal(e.requests.filter(r => r[0] === 'fetch').length, 1);
 });
 
 test('SPA pagehide keeps playback and native exit sends only one stop', async t => {
     const e = setup(t); await e.clock.tickAsync(1);
     e.w.document.body.dispatchEvent(new e.w.Event('pagehide', { bubbles: true }));
+    e.w.document.dispatchEvent(new e.w.Event('pagehide', { bubbles: true }));
     assert.equal(e.requests.length, 0);
-    e.w.dispatchEvent(new e.w.Event('beforeunload'));
-    e.w.dispatchEvent(new e.w.Event('pagehide'));
+    // Chromium targets the Document even though the listener is on Window.
+    e.exit('beforeunload');
+    e.exit('pagehide');
     assert.equal(e.requests.filter(r => r[0] === 'fetch').length, 1);
 });
 
 test('unconfirmed stop prevents a second channel and restores the report handler', async t => {
     const e = setup(t);
+    await e.clock.tickAsync(1);
+    const original = e.w.ApiClient.reportPlaybackStopped;
     let plays = 0;
     e.w.FireTvLive = { play: () => plays++ }; e.w.NativePlayer = { loadPlayer: () => {} };
     const next = e.w.JellyfinLiveTvOverview.play({ Id: 'new', Type: 'TvChannel' });
     await e.clock.tickAsync(13000);
     assert.equal(await next, 'error');
     assert.equal(plays, 0);
-    assert.equal(e.w.ApiClient.reportPlaybackStopped, e.original);
+    assert.equal(e.w.ApiClient.reportPlaybackStopped, original);
+});
+
+test('SDK teardown preserves its exact live stop report after the player disappears', async t => {
+    const e = setup(t); await e.clock.tickAsync(1);
+    await e.w.ApiClient.reportPlaybackStopped({ ItemId: 'old', PlaySessionId: 'old-session', LiveStreamId: 'live', PositionTicks: 123 });
+    e.exit('beforeunload');
+    const sends = e.requests.filter(r => r[0] === 'fetch');
+    assert.equal(sends.length, 1);
+    assert.equal(JSON.parse(sends[0][2].body).PositionTicks, 123);
 });

@@ -18,6 +18,10 @@
   Live HLS keeps at least three initial segments (two for >=10-second segments).
   pagehide cleanup runs before player teardown and carries the complete client,
   version and device identity, or it updates a different Jellyfin session.
+- Preserve SDK live stop reports with fetch keepalive: its own earlier unload
+  handler can clear the player before later event listeners run. Deduplicate by
+  PlaySessionId/LiveStreamId and ignore synthetic SPA pagehide events. Test a real
+  tab close as well as stop-before-open ordering; HTTP 204 must precede handoff.
 
 ## Cursor Cloud specific instructions
 
