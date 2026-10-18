@@ -1,6 +1,7 @@
 package org.jellyfin.firetv.player
 
 import android.os.SystemClock
+import android.util.Log
 import android.webkit.JavascriptInterface
 import org.jellyfin.firetv.shell.NativeInterface
 
@@ -42,11 +43,13 @@ class NativePlayerBridge(
 
     @JavascriptInterface
     fun stopPlayer() {
+        Log.i("FireTvPlayback", "web_stop")
         host.runOnHost { PlayerCommands.stop() }
     }
 
     @JavascriptInterface
     fun destroyPlayer() {
+        Log.i("FireTvPlayback", "web_destroy")
         host.runOnHost { PlayerCommands.destroy() }
     }
 

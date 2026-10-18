@@ -1525,6 +1525,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
     }
 
     private fun stopAndClose() {
+        Log.i("FireTvPlayback", "closing caller=${Throwable().stackTrace.getOrNull(1)?.methodName} position_ms=${player?.currentPosition}")
         tune.invalidate()
         cancelPendingTune()
         emitSync("playbackstop")
@@ -1589,6 +1590,7 @@ class PlayerActivity : AppCompatActivity(), PlayerCommands.Listener {
 
     override fun onStop() {
         super.onStop()
+        Log.i("FireTvPlayback", "activity_stop finishing=$isFinishing position_ms=${player?.currentPosition}")
         if (isFinishing) {
             retirePlayback(keepPlayer = false)
         } else if (player?.isPlaying == true) {
