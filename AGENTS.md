@@ -27,6 +27,12 @@
   up to 96% I/O wait. Use a dedicated SSD TranscodingTempPath and preserve it on
   upgrades. Change paths only without active transcoding/Live TV; validate sustained
   playback beyond the observed two-minute writeback cycle.
+- `scripts/pi/stack_storage.py` selects a dedicated SSD cache only for unset encoding
+  paths. Existing paths win; SD/eMMC and unverified storage never qualify. Preserve
+  other encoding options, back up before API writes, defer during any playing/paused
+  session and keep the systemd mount guard if API rollback cannot be verified.
+  The installer uses the actual service user for write checks, never recursively
+  chowns media, deletes buffers or restarts merely to configure the cache.
 
 ## Cursor Cloud specific instructions
 

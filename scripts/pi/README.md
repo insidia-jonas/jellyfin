@@ -63,14 +63,35 @@ apply when upgrading an older configuration; existing explicit values are retain
 Measure sustained FFmpeg speed above 1x on the target server. Multiple concurrent
 software conversions can still exceed a small server's capacity.
 
-For sustained Live TV, set encoding `TranscodingTempPath` to a dedicated directory
-on the mounted SSD (for example `<ssd-mount>/.jellyfin-transcodes`), writable by the
-Jellyfin service account. Leave media libraries and download folders separate.
+For new setups with an unset encoding `TranscodingTempPath`, the installer selects
+`<mediaRoot>/.jellyfin-transcodes` when `mediaRoot` is on a verified mounted local
+SSD/NVMe. Detection uses the mounted filesystem and its physical block devices;
+SD/eMMC, rotating disks, network mounts and unresolved storage are not selected.
+Without a suitable SSD, the script reports that the default cache is retained.
+An optional `"transcodePath": "/mnt/ssd/.jellyfin-transcodes"` in the private setup
+JSON selects a different SSD location; its parent must already exist and be mounted.
+An explicit location on unverified storage fails instead of falling back to the SD card.
+The final directory must be named `.jellyfin-transcodes`, empty or already marked
+as a Jellyfin transcode directory. Media libraries and download folders stay separate.
+
+The installer verifies write access as the actual Jellyfin service user and at least
+2 GiB free. It writes a separate systemd drop-in with `RequiresMountsFor` and
+`AssertPathIsMountPoint` so a missing SSD cannot silently turn into an SD-card cache
+at the next service start. These dependencies follow [systemd unit semantics](https://www.freedesktop.org/software/systemd/man/257/systemd.unit.html).
+No service restart is needed to save the setting. Existing explicit cache paths always
+win, even over a new setup-file value. Other encoding options and service drop-ins
+are preserved. Before saving, the previous encoding configuration and managed drop-in
+are backed up privately under `jellyfin12/config-backups`; a failed save restores them.
+The installer never moves or deletes old buffer files.
+
 The default cache path may be on the system SD card: its delayed writeback can
 block both the shared IPTV input and HLS files, even while provider data is waiting
-in the network receive queue. Stop active transcoding/Live TV before changing this
-path; do not move or delete an active buffer. The installer preserves the selected
-path and includes its encoding configuration in rollback backups. Verify both the
+in the network receive queue. Any active or paused playback defers a cache-path
+change, including with `--interrupt-playback`; rerun `--apply --configure-only` with
+the same setup file when idle. Fresh servers require the initial administrator login
+before API configuration. `--plan` previews the choice without changing files.
+The installer preserves the selected path and includes its encoding configuration
+in deployment rollback backups. Verify both the
 shared input and HLS segments use the SSD, then test past several writeback cycles;
 a short startup test or a larger player buffer cannot establish storage stability.
 
@@ -138,7 +159,8 @@ sudo python3 scripts/pi/manage-stack.py --user jonas --apply --install-missing \
 The installer starts missing services, waits for their APIs, creates movie/series roots
 and separate incomplete/completed download folders, sets up the Usenet account and
 SABnzbd categories/sorting, selects the named existing quality profile, enables completed
-download handling and RSS, and configures the indexer/API links in both directions.
+download handling and RSS, configures the indexer/API links in both directions,
+and selects a dedicated SSD playback cache when the conditions above are met.
 It never creates fictitious provider credentials. Finish Jellyfin's administrator wizard
 once, then repeat with `--configure-only` and the same setup file to complete its links.
 Review language/custom-format preferences in Arr when starting from factory profiles.
