@@ -129,6 +129,7 @@
     }
 
     function api() {
+        installLiveStopTransport(window.ApiClient);
         return window.ApiClient;
     }
 
@@ -1043,10 +1044,44 @@
         });
     }
 
-    var exitingPlaySession = '';
+    function liveStopHeaders(client) {
+        if (!client || !client.accessToken || !client.deviceId || !client.appName || !client.appVersion || !client.deviceName) { return null; }
+        return { 'Content-Type': 'application/json', Authorization: 'MediaBrowser Token=' + JSON.stringify(client.accessToken())
+            + ', Client=' + JSON.stringify(client.appName()) + ', Version=' + JSON.stringify(client.appVersion())
+            + ', Device=' + JSON.stringify(client.deviceName()) + ', DeviceId=' + JSON.stringify(client.deviceId()) };
+    }
+
+    function sendLiveStop(client, report) {
+        var key = report.PlaySessionId + '|' + report.LiveStreamId;
+        if (client._jfLastLiveStop && client._jfLastLiveStop.key === key) { return client._jfLastLiveStop.request; }
+        var request = window.fetch(client.getUrl('Sessions/Playing/Stopped'), {
+            method: 'POST', keepalive: true, headers: liveStopHeaders(client), body: JSON.stringify(report)
+        }).then(function (response) {
+            if (!response.ok) { throw new Error('Live stop HTTP ' + response.status); }
+        });
+        client._jfLastLiveStop = { key: key, request: request };
+        request.catch(function () { if (client._jfLastLiveStop && client._jfLastLiveStop.key === key) { client._jfLastLiveStop = null; } });
+        return request;
+    }
+
+    function installLiveStopTransport(client) {
+        if (!client || client._jfLiveStopTransport || nativeOwnsPlayback() || typeof window.fetch !== 'function'
+            || typeof client.reportPlaybackStopped !== 'function' || !liveStopHeaders(client)) { return; }
+        var original = client.reportPlaybackStopped;
+        // Jellyfin's earlier beforeunload listener tears down the player before
+        // later listeners can read its session. Preserve its exact stop report,
+        // using a transport that survives unloading instead of the SDK's XHR.
+        client.reportPlaybackStopped = function (info) {
+            if (info && info.LiveStreamId && info.PlaySessionId) { return sendLiveStop(client, info); }
+            return original.apply(this, arguments);
+        };
+        client._jfLiveStopTransport = true;
+    }
+
     function stopLiveOnPageHide(event) {
-        // Jellyfin also bubbles a custom pagehide when changing SPA views.
-        if (event && event.target !== window) { return; }
+        // Jellyfin dispatches synthetic pagehide events during SPA navigation.
+        // Only a browser-generated document exit may end the live session.
+        if (!event || !event.isTrusted) { return; }
         if (nativeOwnsPlayback() || typeof window.fetch !== 'function') { return; }
         var client = window.ApiClient, state = playState, report;
         if (!client || !client.accessToken || !client.deviceId || !client.appName || !client.appVersion || !client.deviceName) { return; }
@@ -1061,17 +1096,9 @@
                 report = { ItemId: item.Id, MediaSourceId: source.Id, PlaySessionId: manager.playSessionId(player), LiveStreamId: source.LiveStreamId };
             }
             if (!report.PlaySessionId || !report.LiveStreamId) { return; }
-            if (exitingPlaySession === report.PlaySessionId) { return; }
-            exitingPlaySession = report.PlaySessionId;
             // keepalive survives closing/reloading the tab; visibility changes do
             // not end playback. No broad ActiveEncodings deletion is permitted.
-            window.fetch(client.getUrl('Sessions/Playing/Stopped'), {
-                method: 'POST', keepalive: true,
-                headers: { 'Content-Type': 'application/json', Authorization: 'MediaBrowser Token=' + JSON.stringify(client.accessToken())
-                    + ', Client=' + JSON.stringify(client.appName()) + ', Version=' + JSON.stringify(client.appVersion())
-                    + ', Device=' + JSON.stringify(client.deviceName()) + ', DeviceId=' + JSON.stringify(client.deviceId()) },
-                body: JSON.stringify(report)
-            }).catch(function () { /* server idle timeout remains the fallback */ });
+            sendLiveStop(client, report).catch(function () { /* server idle timeout remains the fallback */ });
         } catch (ignore) { /* page teardown must not throw */ }
     }
 
