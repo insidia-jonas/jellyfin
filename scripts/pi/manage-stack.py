@@ -27,6 +27,7 @@ import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import stack_automation
+import stack_storage
 
 PLUGIN_ID = 'e2c9a6f4-8b1d-4f3a-9c2e-7a5b6d4c3e21'
 SERVICE = 'jellyfin12'
@@ -505,6 +506,15 @@ def install_subtitle_sync():
     print('Local subtitle synchronization ready (ffsubsync 0.4.29).')
 
 
+def configure_storage(args, setup):
+    token = admin_token(args.url, args.out / 'data')
+    if not token:
+        print('Playback cache pending: finish Jellyfin administrator setup/login, then rerun --configure-only with the same setup file.')
+        return False
+    return stack_storage.configure(lambda route, method='GET', body=None:
+        request(args.url, route, token, method, body), setup, args.out, SERVICE)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--user', default=os.environ.get('SUDO_USER') or os.environ.get('USER'))
@@ -539,8 +549,13 @@ def main(argv=None):
         try:
             token = admin_token(args.url, args.out / 'data')
             if token:
+                print('Playback cache plan: ' + json.dumps(stack_storage.plan(setup,
+                    request(args.url, 'System/Configuration/encoding', token)), ensure_ascii=False))
                 links = request(args.url, 'TreasureMaps/Management/Connections', token)['links']
                 print(json.dumps(links, ensure_ascii=False, indent=2))
+            else:
+                print('Playback cache candidate (existing encoding settings require administrator login): '
+                      + json.dumps(stack_storage.plan(setup, {}), ensure_ascii=False))
         except (RuntimeError, urllib.error.URLError):
             print('Management capability will be checked after the plugin update.')
         return 0
@@ -569,10 +584,10 @@ def main(argv=None):
                     run('apt-get', 'install', '-y', 'curl', 'ca-certificates', 'libfontconfig1', 'ffmpeg')
                     with tempfile.TemporaryDirectory() as tmp:
                         os.chmod(tmp, 0o755)
-                        setup = Path(tmp) / 'dotnet-install.sh'
-                        urllib.request.urlretrieve('https://dot.net/v1/dotnet-install.sh', setup)
-                        os.chmod(setup, 0o755)
-                        run('runuser', '-u', account.pw_name, '--', 'bash', setup, '--channel', '10.0', '--install-dir', home / '.dotnet')
+                        dotnet_setup_script = Path(tmp) / 'dotnet-install.sh'
+                        urllib.request.urlretrieve('https://dot.net/v1/dotnet-install.sh', dotnet_setup_script)
+                        os.chmod(dotnet_setup_script, 0o755)
+                        run('runuser', '-u', account.pw_name, '--', 'bash', dotnet_setup_script, '--channel', '10.0', '--install-dir', home / '.dotnet')
                 build = home / '.cache/jellyfin-stack-build'
                 build.mkdir(parents=True, exist_ok=True)
                 chown_tree(build, account)
@@ -582,10 +597,11 @@ def main(argv=None):
                 args.bundle = build / 'release.zip'
                 run(*prefix, 'python3', args.repo / 'scripts/pi/package-release.py', '--repo', args.repo, '--server', build / 'server', '--output', args.bundle)
             deploy(args, account, args.bundle)
+        storage_okay = configure_storage(args, setup)
         choices = stack_automation.configure(discover(args, home), setup, account)
         okay = reconcile(args, home, choices, setup)
         print('Medienzentrale: ' + args.url.rstrip('/') + '/web/#/configurationpage?name=TreasureMapsManagement')
-        return 0 if okay else 2
+        return 0 if okay and storage_okay else 2
 
 
 if __name__ == '__main__':
