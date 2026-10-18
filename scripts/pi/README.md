@@ -63,6 +63,17 @@ apply when upgrading an older configuration; existing explicit values are retain
 Measure sustained FFmpeg speed above 1x on the target server. Multiple concurrent
 software conversions can still exceed a small server's capacity.
 
+For sustained Live TV, set encoding `TranscodingTempPath` to a dedicated directory
+on the mounted SSD (for example `<ssd-mount>/.jellyfin-transcodes`), writable by the
+Jellyfin service account. Leave media libraries and download folders separate.
+The default cache path may be on the system SD card: its delayed writeback can
+block both the shared IPTV input and HLS files, even while provider data is waiting
+in the network receive queue. Stop active transcoding/Live TV before changing this
+path; do not move or delete an active buffer. The installer preserves the selected
+path and includes its encoding configuration in rollback backups. Verify both the
+shared input and HLS segments use the SSD, then test past several writeback cycles;
+a short startup test or a larger player buffer cannot establish storage stability.
+
 ## Connections and service discovery
 
 ```sh

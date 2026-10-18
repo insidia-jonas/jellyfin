@@ -22,6 +22,11 @@
   handler can clear the player before later event listeners run. Deduplicate by
   PlaySessionId/LiveStreamId and ignore synthetic SPA pagehide events. Test a real
   tab close as well as stop-before-open ordering; HTTP 204 must precede handoff.
+- Diagnose disk stalls before blaming the provider: the Pi's SD-card transcode
+  cache blocked shared input while >5 MB waited in the TCP receive queue, with
+  up to 96% I/O wait. Use a dedicated SSD TranscodingTempPath and preserve it on
+  upgrades. Change paths only without active transcoding/Live TV; validate sustained
+  playback beyond the observed two-minute writeback cycle.
 
 ## Cursor Cloud specific instructions
 
