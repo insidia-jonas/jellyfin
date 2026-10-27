@@ -588,7 +588,7 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
 
 ### Indexer identity, loading and artwork (2026-10-27)
 
-- Evolution 1.4.2 / client script v24 / DataVersion 45 / category generation c7 replaces
+- Evolution 1.4.2 / client script v25 / DataVersion 45 / category generation c7 replaces
   legacy category image references under `/tmp/treasuremaps/posters-v2` with persistent
   artwork. Old c5/c6 folder links are still accepted. Verify nested Trending category
   images via HTTP, not merely the presence of `ImageTags` in DTOs.
