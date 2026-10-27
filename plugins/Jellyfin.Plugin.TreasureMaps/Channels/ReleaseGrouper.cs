@@ -79,7 +79,7 @@ public static class ReleaseGrouper
     /// <returns>The ordered list of groups.</returns>
     public static IReadOnlyList<ReleaseGroup> Group(IEnumerable<Release> releases)
     {
-        var rows = releases.Where(r => r is not null).ToList();
+        var rows = releases.Where(ReleaseIdentity.HasConsistentMetadata).ToList();
         // Resolve identity bridges before folding; provider arrival/order must not create two posters.
         var aliases = rows.Where(r => !string.IsNullOrWhiteSpace(r.Ids?.Imdb ?? r.Tv?.Imdb) && !string.IsNullOrWhiteSpace(r.Ids?.Tmdb ?? r.Tv?.Tmdb))
             .GroupBy(r => KindOf(r) + ":imdb:" + (r.Ids?.Imdb ?? r.Tv?.Imdb), StringComparer.OrdinalIgnoreCase)
@@ -118,6 +118,15 @@ public static class ReleaseGrouper
                 byKey[key] = group;
             }
 
+            var candidateImdb = release.Ids?.Imdb ?? release.Tv?.Imdb;
+            var candidateYear = kind == "movie" ? ParseYear(release.Movie?.Year) ?? ReleaseIdentity.SceneYear(release.Title) : null;
+            if (!string.IsNullOrWhiteSpace(group.Imdb) && !string.IsNullOrWhiteSpace(candidateImdb)
+                && ReleaseIdentity.NormalizeId("imdb", group.Imdb) != ReleaseIdentity.NormalizeId("imdb", candidateImdb)
+                || group.Year.HasValue && candidateYear.HasValue && Math.Abs(group.Year.Value - candidateYear.Value) > 1)
+            {
+                // A shared TMDb id cannot override a contradictory IMDb id or remake year.
+                continue;
+            }
             group.Releases.Add(release);
 
             // Fill in poster/metadata from whichever release in the group carries it.
@@ -166,6 +175,11 @@ public static class ReleaseGrouper
     /// <returns><c>movie</c> or <c>tv</c>.</returns>
     public static string KindOf(Release release)
     {
+        if (release.Category?.Id is >= 5000 and < 6000
+            || !string.IsNullOrEmpty(release.Title) && (EpisodeMarker.IsMatch(release.Title) || SeasonMarker.IsMatch(release.Title)))
+        {
+            return "tv";
+        }
         if (release.Movie is not null)
         {
             return "movie";

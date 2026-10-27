@@ -140,7 +140,9 @@ test('subtitle tools are collapsed below metadata and load a JSON Grok quote onl
     assert.equal(panel.closest('.infoWrapper'), null); assert.ok(panel.closest('.detailSection'));
     assert.equal(calls.length, 0);
     panel.open = true; panel.dispatchEvent(new e.w.Event('toggle')); await e.clock.tickAsync(1);
-    assert.equal(calls.length, 1); assert.match(panel.querySelector('.tmSubHint').textContent, /Grok 0.16 USD/);
+    assert.equal(calls.filter(c => /Subtitles\/Search/.test(c.url)).length, 1);
+    assert.equal(calls.filter(c => /Subtitles\/Sync/.test(c.url)).length, 1);
+    assert.match(panel.querySelector('.tmSubHint').textContent, /Grok 0.16 USD/);
     assert.equal(panel.querySelector('.tmSubGen').disabled, false);
 });
 
@@ -172,4 +174,58 @@ test('confirmed generation hands an accepted job to the persistent observer inst
     assert.equal(accepted,job);assert.match(calls.at(-1).url,/confirmed=true/);assert.match(calls.at(-1).url,/maxEstimatedUsd=0.16/);
     assert.equal(panel.querySelector('.tmSubGen').disabled,true);assert.match(panel.querySelector('.tmSubHint').textContent,/Film verlassen/);
     assert.doesNotMatch(panel.textContent,/Fenster offen lassen/);
+});
+
+test('category loading is visible, times out, retries and ignores a late response', async t => {
+    const e = setup(t); let finish;
+    e.w.history.replaceState({}, '', '#/list?parentId=' + id);
+    e.w.document.querySelector('.page').innerHTML = '<div class="itemsContainer"></div>';
+    e.api.getItem = () => Promise.resolve({ Id: id, Name: 'Trending', ChannelId: 'channel' });
+    e.api.getItems = () => new Promise(r => { finish = r; });
+    e.w.ApiClient = e.api; e.load(); await e.clock.tickAsync(1200);
+    assert.equal(e.w.document.querySelector('.tmLoadMessage').getAttribute('aria-busy'), 'true');
+    await e.clock.tickAsync(17000);
+    assert.match(e.w.document.querySelector('.tmLoadMessage').textContent, /nicht rechtzeitig/);
+    const old = finish;
+    e.api.getItems = () => Promise.resolve({ Items: [{ ProviderIds: { TreasureMapsCategory: 'movies' } }] });
+    e.w.document.querySelector('.tmRetry').click(); await e.clock.tickAsync(1);
+    assert.equal(e.w.document.querySelector('.tmLoadMessage'), null);
+    old({ Items: [] }); await e.clock.tickAsync(1);
+    assert.equal(e.w.document.querySelector('.tmLoadMessage'), null);
+});
+
+test('Play on an unavailable indexer title focuses the release chooser without playback or a download', async t => {
+    const e = setup(t); let played = 0; const calls = [];
+    e.w.document.querySelector('.page').insertAdjacentHTML('afterbegin', '<div class="mainDetailButtons"><button class="btnPlay">Play</button></div>');
+    e.w.HTMLElement.prototype.scrollIntoView = function () {};
+    e.w.playbackManager = { play: () => { played++; } };
+    e.api.fetch = options => { calls.push(options); return Promise.resolve(options.url.startsWith('TreasureMaps/Playback') ? { available: false } : { items: [] }); };
+    e.w.ApiClient = e.api; e.load(); await e.clock.tickAsync(1200);
+    e.w.document.querySelector('#tmIndexerAction').click(); await e.clock.tickAsync(1);
+    assert.match(e.w.document.querySelector('.tmPlaybackStatus').textContent, /Version.*Download/);
+    assert.equal(e.w.document.activeElement.tagName, 'SUMMARY');
+    assert.equal(played, 0); assert.equal(calls.some(c => c.type === 'POST'), false);
+});
+
+test('Play uses only the verified local movie and preserves resume position', async t => {
+    const e = setup(t); let played;
+    e.w.document.querySelector('.page').insertAdjacentHTML('afterbegin', '<div class="mainDetailButtons"></div>');
+    const original = e.api.getItem;
+    e.api.getItem = (user, itemId) => itemId === 'local' ? Promise.resolve({ Id: 'local', Type: 'Movie', UserData: { PlaybackPositionTicks: 1230000 } }) : original();
+    e.api.fetch = options => Promise.resolve(options.url.startsWith('TreasureMaps/Playback') ? { available: true, itemId: 'local' } : { items: [] });
+    e.w.playbackManager = { play: request => { played = request; } };
+    e.w.ApiClient = e.api; e.load(); await e.clock.tickAsync(1200);
+    e.w.document.querySelector('#tmIndexerAction').click(); await e.clock.tickAsync(1);
+    assert.equal(played.items[0].Id, 'local'); assert.equal(played.startPositionTicks, 1230000);
+});
+
+test('release rows expose the real filename and submit the selected item identity', async t => {
+    const e = setup(t); let posted;
+    e.api.getItems = () => Promise.resolve({ Items: [{ Id: 'release', Name: '1080p', ProviderIds: { TreasureMaps: 'guid', EvolutionReleaseName: 'The.Other.Mother.2017.1080p.WEB-DL' } }] });
+    e.api.getUrl = (p, params) => p + (params ? '?' + new URLSearchParams(params) : '');
+    e.api.fetch = options => { if (options.type === 'POST') posted = options; return Promise.resolve({ ok: true, items: [] }); };
+    e.w.ApiClient = e.api; e.load(); await e.clock.tickAsync(1200);
+    assert.match(e.w.document.querySelector('.tmSceneName').textContent, /Other.Mother.2017/);
+    e.w.document.querySelector('#tmReleases .tmDl').click(); await e.clock.tickAsync(1);
+    assert.match(posted.url, /itemId=release/);
 });

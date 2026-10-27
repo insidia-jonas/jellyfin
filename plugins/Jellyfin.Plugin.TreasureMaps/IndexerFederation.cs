@@ -38,7 +38,7 @@ public sealed partial class TreasureMapsApiClient
         if (sources.Count == 0) { throw new InvalidOperationException("Kein Indexer eingerichtet oder aktiviert."); }
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         // Leave time for relevance ranking/materialization inside the six-second search budget.
-        if (sources.Count > 1) { deadline.CancelAfter(TimeSpan.FromMilliseconds(4500)); }
+        deadline.CancelAfter(TimeSpan.FromMilliseconds(sources.Count > 1 ? 4500 : 8000));
         var tasks = sources.Select(async source =>
         {
             try
@@ -58,6 +58,7 @@ public sealed partial class TreasureMapsApiClient
         {
             var lists = values.Cast<ReleaseListResponse>().ToArray();
             var items = lists.SelectMany(l => l.Items).DistinctBy(r => r.Guid).ToArray();
+            RememberReleases(items);
             var pageSize = int.TryParse(parameters?.GetValueOrDefault("limit"), out var requested) ? requested : 100;
             var offset = int.TryParse(parameters?.GetValueOrDefault("offset"), out var start) ? start : 0;
             return new ReleaseListResponse { Items = items, NextOffset = offset + pageSize,

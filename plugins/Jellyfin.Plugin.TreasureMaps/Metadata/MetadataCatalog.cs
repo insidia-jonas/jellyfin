@@ -208,6 +208,7 @@ public sealed class MetadataCatalog
         foreach (var hit in candidates)
         {
             var name = hit.Title ?? string.Empty;
+            if (!ReleaseGrouper.SameTitle(name, title) || year.HasValue && hit.Year.HasValue && Math.Abs(year.Value - hit.Year.Value) > 1) continue;
             var score = TreasureMapsSearch.ScoreTitle(name, title, hit.Year);
             if (year is int y && hit.Year == y)
             {
@@ -266,6 +267,8 @@ public sealed class MetadataCatalog
 
     private static void ApplyPicbit(ReleaseGroup group)
     {
+        // TV posters use provider-specific IDs, not movie IMDb paths.
+        if (group.Kind == "tv") return;
         if (!string.IsNullOrWhiteSpace(group.Cover) || string.IsNullOrWhiteSpace(group.Imdb))
         {
             return;

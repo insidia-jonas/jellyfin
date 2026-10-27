@@ -430,7 +430,7 @@ public static class SeriesBrowse
     /// <returns><c>true</c> when it is the same show.</returns>
     public static bool SameShow(Release release, string key, string title)
     {
-        if (release is null)
+        if (release is null || !ReleaseIdentity.HasConsistentMetadata(release))
         {
             return false;
         }
@@ -448,11 +448,22 @@ public static class SeriesBrowse
         if (identity.Length == 3 && identity[1] is "imdb" or "tmdb")
         {
             var value = identity[1] == "imdb" ? release.Ids?.Imdb ?? release.Tv?.Imdb : release.Ids?.Tmdb ?? release.Tv?.Tmdb;
-            if (!string.IsNullOrWhiteSpace(value)) { return string.Equals(value, identity[2], StringComparison.OrdinalIgnoreCase); }
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                var actual = ReleaseIdentity.NormalizeId(identity[1], value);
+                var expected = ReleaseIdentity.NormalizeId(identity[1], identity[2]);
+                return actual.Length > 0 && actual == expected;
+            }
+        }
+        if (kind == "movie" && identity.Length == 4 && identity[1] == "t"
+            && int.TryParse(identity[3], out var expectedYear))
+        {
+            var actualYear = int.TryParse(release.Movie?.Year, out var metadataYear) ? metadataYear : ReleaseIdentity.SceneYear(release.Title);
+            if (actualYear.HasValue && actualYear.Value != expectedYear) return false;
         }
         var resolved = ReleaseGrouper.TitleOf(release, kind);
         return ReleaseGrouper.SameTitle(resolved, title)
-               || ReleaseGrouper.SameTitle(ReleaseGrouper.ShowNameFromScene(release.Title), title);
+               || ReleaseGrouper.SameTitle(kind == "tv" ? ReleaseGrouper.ShowNameFromScene(release.Title) : ReleaseGrouper.CleanSceneTitle(release.Title), title);
     }
 
     /// <summary>

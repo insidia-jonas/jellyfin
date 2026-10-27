@@ -11,6 +11,7 @@
     var pollTimer = null;
     var lastHash = null;
     var searchRequest = null;
+    var routeGeneration = 0;
 
     var style = document.createElement('style');
     style.textContent =
@@ -33,6 +34,12 @@
         '.tmBrowsePages a{padding:.65em 1em;border:1px solid rgba(255,255,255,.3);border-radius:.5em;color:inherit;text-decoration:none}' +
         '.tmBrowsePages a:focus,.tmBrowsePages a:hover{outline:2px solid #74b9ff;background:rgba(255,255,255,.1)}' +
         '.tmLoadMessage{padding:1em 0;color:inherit;opacity:.85}' +
+        '.tmLoadMessage[aria-busy="true"]:before{content:"";display:inline-block;width:1em;height:1em;margin-right:.7em;border:2px solid rgba(255,255,255,.25);border-top-color:#74b9ff;border-radius:50%;vertical-align:middle;animation:tmSpin .8s linear infinite}' +
+        '@keyframes tmSpin{to{transform:rotate(360deg)}}' +
+        '.tmIndexerDetail .mainDetailButtons .btnPlay,.tmIndexerDetail .mainDetailButtons .btnResume,.tmIndexerDetail .mainDetailButtons .btnPlayAll,.tmIndexerDetail .mainDetailButtons .btnShuffle{display:none!important}' +
+        '#tmIndexerAction{border:1px solid rgba(255,255,255,.3);border-radius:999px;background:#0a84ff;color:#fff;padding:.8em 1.25em;font:inherit;font-weight:650;cursor:pointer}' +
+        '#tmIndexerAction:focus{outline:3px solid #fff;outline-offset:4px}' +
+        '.tmSceneName{display:block;margin-top:.4em;font-size:.85em;opacity:.75;overflow-wrap:anywhere;user-select:none;-webkit-user-select:none}' +
         '.tmRetry{margin-left:1em;padding:.6em 1em;border:1px solid currentColor;border-radius:.5em;background:transparent;color:inherit;cursor:pointer}' +
         '@media(max-width:700px){.tmCategoryPage .card{width:50%!important}}' +
         '#tmReleases{margin:1.2em 0;max-width:100%;box-sizing:border-box}' +
@@ -117,7 +124,10 @@
     document.head.appendChild(style);
 
     function releasePage() {
+        routeGeneration++;
         stopPoll();
+        document.querySelectorAll('.tmIndexerDetail').forEach(function (page) { page.classList.remove('tmIndexerDetail'); });
+        document.querySelectorAll('#tmIndexerAction,.tmPlaybackStatus').forEach(function (el) { el.remove(); });
         document.querySelectorAll('#tmArrRequest').forEach(function (el) { el.remove(); });
         document.querySelectorAll('.tmChannelPage,.tmDownloadsPage,.tmTitlePage,.tmCategoryPage').forEach(function (page) {
             page.classList.remove('tmChannelPage', 'tmDownloadsPage', 'tmTitlePage', 'tmCategoryPage');
@@ -145,6 +155,96 @@
 
     function api() { return window.ApiClient; }
 
+    // Home/search BoxSet overlays also expose Play. Resolve channel cards before the player sees them.
+    var replayingLibraryClick = false;
+    window.addEventListener('click', function (event) {
+        if (replayingLibraryClick || !api()) { return; }
+        var button = event.target.closest && event.target.closest('.cardOverlayFab-primary');
+        var card = button && button.closest('.card[data-id]');
+        if (!card || String(card.dataset.type).toLowerCase() !== 'boxset') { return; }
+        event.preventDefault(); event.stopImmediatePropagation();
+        var generation = routeGeneration;
+        bounded(api().getItem(api().getCurrentUserId(), card.dataset.id)).then(function (item) {
+            if (generation !== routeGeneration) { return; }
+            if (item.ChannelId && (item.ProviderIds || {}).TreasureMapsKind) {
+                location.hash = '#/details?id=' + item.Id + '&serverId=' + api().serverId();
+            } else {
+                replayingLibraryClick = true; try { button.click(); } finally { replayingLibraryClick = false; }
+            }
+        }).catch(function () {
+            if (generation === routeGeneration) { location.hash = '#/details?id=' + card.dataset.id + '&serverId=' + api().serverId(); }
+        });
+    }, true);
+
+    function bounded(promise) {
+        return new Promise(function (resolve, reject) {
+            var timer = setTimeout(function () { reject(new Error('Zeitüberschreitung')); }, 16000);
+            Promise.resolve(promise).then(function (result) { clearTimeout(timer); resolve(result); }, function (error) { clearTimeout(timer); reject(error); });
+        });
+    }
+
+    function loadState(page, text, busy, retry) {
+        var state = page.querySelector('.tmLoadMessage');
+        if (!state) {
+            state = document.createElement('div'); state.className = 'tmLoadMessage'; state.setAttribute('role', 'status');
+            var anchor = page.querySelector('.detailPageSecondaryContainer,.itemsContainer') || page;
+            if (anchor === page) { page.prepend(state); } else { anchor.parentNode.insertBefore(state, anchor); }
+        }
+        state.setAttribute('aria-busy', busy ? 'true' : 'false'); state.textContent = text;
+        if (retry) { var button = document.createElement('button'); button.className = 'tmRetry'; button.textContent = 'Erneut laden'; button.onclick = retry; state.appendChild(button); }
+        return state;
+    }
+
+    function indexerAction(item) {
+        var route = location.hash, generation = routeGeneration, user = api().getCurrentUserId();
+        function current() { return generation === routeGeneration && route === location.hash && user === api().getCurrentUserId(); }
+        whenReady('.mainDetailButtons', 16, function (page, buttons) {
+            if (!current() || page.querySelector('#tmIndexerAction')) { return; }
+            page.classList.add('tmIndexerDetail');
+            var button = document.createElement('button'); button.id = 'tmIndexerAction'; button.type = 'button'; button.textContent = 'Abspielen / Version wählen';
+            var navigationOnly = looksEpisodeOrSeason(item) && !(item.ProviderIds || {}).TreasureMapsKind;
+            if (navigationOnly) { button.textContent = 'Folge / Version wählen'; }
+            var status = document.createElement('div'); status.className = 'tmPlaybackStatus'; status.setAttribute('role', 'status');
+            buttons.prepend(button); buttons.appendChild(status);
+            function choose() {
+                if (!current()) { return; }
+                status.textContent = navigationOnly ? 'Bitte die gewünschte Folge oder Version auswählen.' : 'Noch nicht in deiner Bibliothek. Bitte zuerst eine passende Version zum Download auswählen.';
+                var releases = page.querySelector('#tmReleases');
+                var target = releases && releases.querySelector('details > summary,button');
+                if (!target) { target = page.querySelector('.tmDetailDl,.tmRetry'); }
+                if (target) { target.focus(); target.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+            }
+            button.onclick = function () {
+                if (!current() || button.disabled) { return; }
+                if (navigationOnly) { choose(); return; }
+                button.disabled = true; status.textContent = 'Bibliothek wird geprüft …';
+                bounded(api().fetch({ url: api().getUrl('TreasureMaps/Playback/' + item.Id), type: 'GET', dataType: 'json' })).then(function (result) {
+                    if (!current()) { return; }
+                    if (!result || !result.available || !result.itemId) { choose(); return; }
+                    if (result.isSeries) { location.hash = '#/details?id=' + result.itemId + '&serverId=' + api().serverId(); return; }
+                    return bounded(api().getItem(user, result.itemId)).then(function (local) {
+                        if (!current()) { return; }
+                        var manager = window.playbackManager;
+                        if (!manager && window.JellyfinLiveTvOverview) { manager = window.JellyfinLiveTvOverview.resolvePlaybackManager(); }
+                        if (!manager) {
+                            try {
+                                var request;
+                                if (window.webpackChunk) { window.webpackChunk.push([['evolution-playback'], {}, function (r) { request = r; }]); }
+                                if (request) { manager = request('./components/playback/playbackmanager.js').playbackManager; }
+                            } catch (_) { /* A different web build can still open the verified local details. */ }
+                        }
+                        if (manager && manager.play) {
+                            return manager.play({ items: [local], startPositionTicks: (local.UserData || {}).PlaybackPositionTicks || 0 });
+                        }
+                        location.hash = '#/details?id=' + result.itemId + '&serverId=' + api().serverId();
+                    });
+                }).catch(function () {
+                    if (current()) { status.textContent = 'Bibliothek konnte nicht geprüft werden. Erneut versuchen oder unten eine Version auswählen.'; }
+                }).then(function () { if (current()) { button.disabled = false; } });
+            };
+        }, route);
+    }
+
     function onNavigate(attempt) {
         if (!api() || !api().getCurrentUserId()) {
             if ((attempt || 0) < 40) { setTimeout(function () { onNavigate((attempt || 0) + 1); }, 250); }
@@ -163,8 +263,10 @@
                 } else if (isDownloadItem(item)) {
                     enhanceDownloadDetail(item);
                 } else if (item.ChannelId && (item.Type === 'BoxSet' || item.Type === 'Season' || looksEpisodeOrSeason(item))) {
+                    indexerAction(item);
                     enhanceTitlePage(item);
                 } else if (item.ProviderIds && item.ProviderIds.TreasureMaps) {
+                    indexerAction(item);
                     enhanceReleasePage(item);
                 }
                 if (item.Type === 'Movie' || item.Type === 'Series' || (item.ProviderIds && item.ProviderIds.TreasureMapsKind && item.Type === 'BoxSet')) { enhanceArrRequest(item); }
@@ -199,10 +301,16 @@
             return;
         }
         var route = location.hash;
-        api().getItems(api().getCurrentUserId(), { ParentId: item.Id, Limit: 60, Fields: 'ProviderIds' }).then(function (result) {
-            if (location.hash !== route) { return; }
+        var generation = routeGeneration, user = api().getCurrentUserId();
+        function current() { return route === location.hash && generation === routeGeneration && user === api().getCurrentUserId(); }
+        var active = visiblePage();
+        if (active) { loadState(active, 'Kategorie wird geladen …', true); }
+        bounded(api().getItems(user, { ParentId: item.Id, Limit: 60, Fields: 'ProviderIds' })).then(function (result) {
+            if (!current()) { return; }
             if (result && result.Items && result.Items.length) {
                 whenReady('.itemsContainer', 16, function (page, container) {
+                    if (!current()) { return; }
+                    var state = page.querySelector('.tmLoadMessage'); if (state) { state.remove(); }
                     var categories = result.Items.every(function (child) { return child.ProviderIds && child.ProviderIds.TreasureMapsCategory; });
                     page.classList.toggle('tmCategoryPage', categories);
                     page.classList.add('tmChannelPage');
@@ -218,7 +326,7 @@
                         nav.className = 'tmBrowsePages'; nav.setAttribute('aria-label', 'Weitere Seiten');
                         pages.forEach(function (child) {
                             var link = document.createElement('a');
-                            link.href = '#/list?parentId=' + child.Id;
+                            link.href = '#/list?parentId=' + child.Id + '&serverId=' + api().serverId();
                             link.textContent = child.Name.replace(/^Page /, 'Seite ');
                             nav.appendChild(link);
                         });
@@ -232,15 +340,13 @@
                 }, route);
                 return;
             }
-            window.setTimeout(function () {
-                if (location.hash !== route) { return; }
-                api().getItems(api().getCurrentUserId(), { ParentId: item.Id, Limit: 40 }).then(function (again) {
-                    if (again && again.Items && again.Items.length && location.hash === route) {
-                        location.reload();
-                    }
-                }).catch(function () { });
-            }, 2500);
-        }).catch(function () { });
+            var page = visiblePage();
+            if (page) { loadState(page, 'Aktuell keine Inhalte verfügbar.', false, function () { retryEmptyChannelFolder(item); }); }
+        }).catch(function () {
+            if (!current()) { return; }
+            var page = visiblePage();
+            if (page) { loadState(page, 'Indexer antwortet nicht rechtzeitig. Bitte erneut versuchen.', false, function () { retryEmptyChannelFolder(item); }); }
+        });
     }
 
     function visiblePage() {
@@ -645,13 +751,15 @@
 
         var route = location.hash;
         var user = api().getCurrentUserId();
-        function current() { return location.hash === route && api().getCurrentUserId() === user; }
+        var generation = routeGeneration;
+        function current() { return generation === routeGeneration && location.hash === route && api().getCurrentUserId() === user; }
         function message(text, retry) {
             whenReady('.detailPageSecondaryContainer', 16, function (page, anchor) {
                 if (!current()) { return; }
                 var state = page.querySelector('.tmLoadMessage');
                 if (!state) { state = document.createElement('div'); state.className = 'tmLoadMessage'; state.setAttribute('role', 'status'); anchor.prepend(state); }
                 state.textContent = text;
+                state.setAttribute('aria-busy', retry ? 'false' : 'true');
                 if (retry) {
                     var button = document.createElement('button');
                     button.className = 'tmRetry'; button.textContent = 'Erneut laden';
@@ -663,7 +771,7 @@
         function loadReleases(attempt) {
             if (!current()) { return; }
             message('Verfügbare Versionen werden geladen …', false);
-            api().getItems(api().getCurrentUserId(), { ParentId: item.Id, Fields: 'ProviderIds,Overview' }).then(function (result) {
+            bounded(api().getItems(user, { ParentId: item.Id, Fields: 'ProviderIds,Overview' })).then(function (result) {
                 if (!current()) { return; }
                 var releases = pickReleases(result.Items || []);
                 if (!releases.length) {
@@ -676,7 +784,7 @@
                     return;
                 }
 
-                whenReady(childrenSelectors(), 28, function (page) {
+                whenReady('.detailPageSecondaryContainer', 16, function (page) {
                     if (!current()) { return; }
                     var state = page.querySelector('.tmLoadMessage');
                     if (state) { state.remove(); }
@@ -692,7 +800,7 @@
             if (!i || i.Type === 'Person') { return false; }
             if (looksEpisodeOrSeason(i)) { return true; }
             if (i.ProviderIds && i.ProviderIds.TreasureMaps) { return true; }
-            return i.Type === 'Folder' || i.Type === 'BoxSet' || looksQuality(i.Name);
+            return looksQuality(i.Name);
         });
     }
 
@@ -932,6 +1040,8 @@
         name.addEventListener('click', function () {
             location.hash = '#/details?id=' + release.Id + '&serverId=' + api().serverId();
         });
+        var scene = (release.ProviderIds || {}).EvolutionReleaseName;
+        if (scene) { var sceneName = document.createElement('small'); sceneName.className = 'tmSceneName'; sceneName.textContent = scene; name.appendChild(sceneName); }
 
         var status = document.createElement('div');
         status.className = 'tmRelStatus';
@@ -961,7 +1071,7 @@
         var route = location.hash;
         btn.disabled = true;
         statusEl.textContent = 'Starting\u2026';
-        var params = { type: kind, name: name };
+        var params = { type: kind, name: name, itemId: itemId };
         if (movieTitle) { params.title = movieTitle; }
         if (itemId && imageTag) {
             params.poster = api().getUrl('Items/' + itemId + '/Images/Primary', { tag: imageTag });
