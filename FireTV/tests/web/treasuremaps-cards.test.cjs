@@ -249,3 +249,19 @@ test('release rows expose the real filename and submit the selected item identit
     e.w.document.querySelector('#tmReleases .tmDl').click(); await e.clock.tickAsync(1);
     assert.match(posted.url, /itemId=release/);
 });
+
+test('Fire TV Play uses its registered player manager for a verified local copy', async t => {
+    const e = setup(t); const played = [], calls = [];
+    e.w.document.querySelector('.page').insertAdjacentHTML('afterbegin', '<div class="mainDetailButtons"></div>');
+    const original = e.api.getItem;
+    e.api.getItem = (user, itemId) => itemId === 'local' ? Promise.resolve({ Id: 'local', Type: 'Movie', UserData: { PlaybackPositionTicks: 54000000 } }) : original();
+    e.api.fetch = options => { calls.push(options); return Promise.resolve(options.url.startsWith('TreasureMaps/Playback') ? { available: true, itemId: 'local' } : { items: [] }); };
+    // The Cube has neither window.playbackManager nor the desktop Live TV resolver.
+    e.w.ExoPlayer = { playbackManager: { play: request => { played.push(request); } }, play: () => assert.fail('Do not bypass Jellyfin playback management') };
+    e.w.ApiClient = e.api; e.load(); await e.clock.tickAsync(1200);
+    e.w.document.querySelector('#tmIndexerAction').click(); await e.clock.tickAsync(1);
+    assert.equal(played.length, 1); assert.equal(played[0].items[0].Id, 'local');
+    assert.equal(played[0].startPositionTicks, 54000000);
+    assert.equal(calls.some(c => c.type === 'POST'), false);
+    assert.equal(e.w.location.hash, '#/details?id=' + id);
+});
