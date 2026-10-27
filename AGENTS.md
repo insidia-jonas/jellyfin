@@ -568,3 +568,12 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
 - Regression coverage: provider's Other.2012/2026 mismatch, conflicting IDs/remakes,
   stale file identity, source changes, loading deadlines, release names/item binding,
   Play without implicit downloads, and resuming only a verified local item.
+- Evolution 1.4.3 / client script v26 resolves the Fire TV playback manager from
+  `ExoPlayer.playbackManager`; the Cube replaces the desktop Live TV script, so its
+  resolver and global playbackManager can both be absent. Do not call ExoPlayer.play
+  directly and bypass Jellyfin's active-player/session management. A backgrounded
+  WebView can retain an old client script across a plugin update; inspect the actual
+  loaded script and test after a full app reopen, not only against a desktop browser.
+- The owner's reported title is The Other Mother / Other Mommy (2026), IMDb tt36586020,
+  not The Other Mother (2017). Rejecting the observed mislabeled Other.2012 release
+  does not establish that a correct 2026 release is available from the provider.

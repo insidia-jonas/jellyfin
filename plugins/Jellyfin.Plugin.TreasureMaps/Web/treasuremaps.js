@@ -225,6 +225,10 @@
                     return bounded(api().getItem(user, result.itemId)).then(function (local) {
                         if (!current()) { return; }
                         var manager = window.playbackManager;
+                        // Fire TV replaces the desktop Live TV script and keeps Jellyfin's
+                        // registered manager on its native player plugin. Use that manager
+                        // so playback still selects the active player and reports its session.
+                        if (!manager && window.ExoPlayer) { manager = window.ExoPlayer.playbackManager; }
                         if (!manager && window.JellyfinLiveTvOverview) { manager = window.JellyfinLiveTvOverview.resolvePlaybackManager(); }
                         if (!manager) {
                             try {
