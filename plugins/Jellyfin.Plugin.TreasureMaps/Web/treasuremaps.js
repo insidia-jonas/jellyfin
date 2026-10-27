@@ -16,7 +16,7 @@
     var style = document.createElement('style');
     style.textContent =
         '.tmChannelPage .cardOverlayFab-primary{display:none!important}' +
-        '.tmChannelPage .btnPlayAll,.tmChannelPage .btnShuffle{display:none!important}' +
+        '.tmChannelPage .btnPlay,.tmChannelPage .btnPlayAll,.tmChannelPage .btnShuffle{display:none!important}' +
         '.tmCategoryPage .alphaPicker{display:none!important}' +
         '.tmCategoryPage .card{width:25%!important}' +
         '.tmCategoryPage .cardPadder{padding-bottom:60%!important}' +
