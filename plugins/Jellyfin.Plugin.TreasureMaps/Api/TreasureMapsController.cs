@@ -1092,7 +1092,7 @@ public class TreasureMapsController : ControllerBase
     [HttpPost("Releases/{guid}/Grab")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> Grab([FromRoute] string guid, [FromQuery] string? type, [FromQuery] string? name, [FromQuery] string? title, [FromQuery] string? poster, CancellationToken cancellationToken)
+    public async Task<IActionResult> Grab([FromRoute] string guid, [FromQuery] string? type, [FromQuery] string? name, [FromQuery] string? title, [FromQuery] string? poster, CancellationToken cancellationToken, [FromQuery] Guid? itemId = null)
     {
         var config = Plugin.Instance?.Configuration ?? new Configuration.PluginConfiguration();
         if (!SabnzbdClient.IsConfigured && string.IsNullOrWhiteSpace(config.NzbDropFolder))
@@ -1105,6 +1105,21 @@ public class TreasureMapsController : ControllerBase
 
         try
         {
+            string? identity = null;
+            int? year = null;
+            if (itemId.HasValue)
+            {
+                if (!Guid.TryParse(User.FindFirst("Jellyfin-UserId")?.Value, out var userId)) return Forbid();
+                var user = _userManager.GetUserById(userId);
+                var item = _libraryManager.GetItemById(itemId.Value);
+                if (user is null || item is null || !item.IsVisible(user)
+                    || item.ProviderIds.GetValueOrDefault("TreasureMaps") != guid) return NotFound();
+                title = item.ProviderIds.GetValueOrDefault("TreasureMapsTitle") ?? item.Name;
+                isTv = item.ProviderIds.GetValueOrDefault("TreasureMapsKind") == "tv";
+                identity = item.ProviderIds.GetValueOrDefault("EvolutionIdentity");
+                year = item.ProductionYear;
+                category = PickCategory(config, isTv);
+            }
             var displayTitle = title;
             if (string.IsNullOrWhiteSpace(displayTitle) && !DownloadTitle.LooksLikeQualityLabel(name))
             {
@@ -1116,13 +1131,14 @@ public class TreasureMapsController : ControllerBase
 
             if (SabnzbdClient.IsConfigured)
             {
-                var nzoIds = await _grabService.GrabAsync(guid, jobName, isTv, poster, cancellationToken, displayTitle, quality).ConfigureAwait(false);
+                var nzoIds = await _grabService.GrabAsync(guid, jobName, isTv, poster, cancellationToken, displayTitle, quality, identity, year).ConfigureAwait(false);
                 _logger.LogInformation("Grabbed {Guid} into SABnzbd category '{Category}' ({Ids})", guid, category, string.Join(",", nzoIds));
                 return Ok(new { ok = true, target = "sabnzbd", category, mediaType = isTv ? "tv" : "movie", nzoIds, bytes = 0 });
             }
 
+            var release = await _client.VerifyReleaseAsync(guid, displayTitle ?? jobName, isTv, cancellationToken, identity, year).ConfigureAwait(false);
             var payload = await _client.DownloadNzbAsync(guid, cancellationToken).ConfigureAwait(false);
-            var safeName = Sanitize(jobName);
+            var safeName = Sanitize(release.Title);
 
             Directory.CreateDirectory(config.NzbDropFolder);
             var path = Path.Combine(config.NzbDropFolder, safeName + ".nzb");

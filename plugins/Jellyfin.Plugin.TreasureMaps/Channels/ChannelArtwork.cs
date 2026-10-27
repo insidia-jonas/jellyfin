@@ -57,6 +57,7 @@ public static class ChannelArtwork
                 var value when value.StartsWith("find:", StringComparison.Ordinal) => "find",
                 var value when value.StartsWith("tmfeed:", StringComparison.Ordinal) => "trending",
                 var value when value.StartsWith("pg:", StringComparison.Ordinal) => "find",
+                var value when value.StartsWith("releases-empty-", StringComparison.Ordinal) => "indexer",
                 _ => key
             };
             using var artwork = typeof(ChannelArtwork).Assembly.GetManifestResourceStream(

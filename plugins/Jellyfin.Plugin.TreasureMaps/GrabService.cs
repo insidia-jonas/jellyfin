@@ -63,7 +63,9 @@ public class GrabService
         string? coverUrl,
         CancellationToken cancellationToken,
         string? displayTitle = null,
-        string? quality = null)
+        string? quality = null,
+        string? identity = null,
+        int? year = null)
     {
         if (!_handled.TryAdd(guid, 0))
         {
@@ -78,13 +80,15 @@ public class GrabService
                 throw new InvalidOperationException("SABnzbd is not configured.");
             }
 
+            var release = await _client.VerifyReleaseAsync(guid, displayTitle ?? name, isTv, cancellationToken, identity, year).ConfigureAwait(false);
             var payload = await _client.DownloadNzbAsync(guid, cancellationToken).ConfigureAwait(false);
             var config = Plugin.Instance!.Configuration;
             var preferred = isTv ? config.SabnzbdTvCategory : config.SabnzbdMovieCategory;
             var category = string.IsNullOrWhiteSpace(preferred) ? config.SabnzbdCategory : preferred;
 
             var title = DownloadTitle.Resolve(name, displayTitle);
-            var jobName = title == "Download" ? Sanitize(string.IsNullOrWhiteSpace(name) ? guid : name) : Sanitize(title);
+            // Keep the scene title/year for SAB/Arr import; display metadata must never rename another movie.
+            var jobName = Sanitize(release.Title);
             var ids = await _sabnzbd.AddNzbAsync(payload, jobName, category, cancellationToken).ConfigureAwait(false);
             RegisterGrab(ids, jobName, coverUrl, title, quality, guid, isTv ? "tv" : "movie");
             _logger.LogInformation("Grabbed '{Name}' into SABnzbd category '{Category}' ({Ids})", title, category, string.Join(",", ids));

@@ -143,6 +143,35 @@ public class MultiIndexerTests
         Assert.Single(ReleaseGrouper.Group(new[] { both, tmdb, imdb }));
     }
 
+    [Fact]
+    public async Task DownloadVerificationRejectsProviderMislabelAndUnknownGuidsWithoutFetchingAnyNzb()
+    {
+        var config = new PluginConfiguration { Indexers = new() { Source("legacy", "treasuremaps") } };
+        var wrong = Rest.Replace("Matrix.1999.German.1080p", "Other.2012.1080p.BluRay", StringComparison.Ordinal)
+            .Replace("Matrix", "Other Mommy", StringComparison.Ordinal).Replace("1999", "2026", StringComparison.Ordinal);
+        using var http = new Handler((r, ct) => Task.FromResult(Response(wrong)));
+        using var client = Client(http, config);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => client.VerifyReleaseAsync("same-id", "Other Mommy", false, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => client.VerifyReleaseAsync("missing", "Other Mommy", false, TestContext.Current.CancellationToken));
+        Assert.DoesNotContain(http.Calls, uri => uri.AbsolutePath.Contains("download", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task VerificationPreservesExactReleaseAndRejectsDifferentTitleKindYearAndChangedSource()
+    {
+        var config = new PluginConfiguration { Indexers = new() { Source("legacy", "treasuremaps") } };
+        using var http = new Handler((r, ct) => Task.FromResult(Response(Rest)));
+        using var client = Client(http, config);
+        var release = await client.VerifyReleaseAsync("same-id", "Matrix", false, TestContext.Current.CancellationToken, "movie:imdb:0133093", 1999);
+        Assert.Equal("Matrix.1999.German.1080p", release.Title);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => client.VerifyReleaseAsync("same-id", "Different Movie", false, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => client.VerifyReleaseAsync("same-id", "Matrix", true, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => client.VerifyReleaseAsync("same-id", "Matrix", false, TestContext.Current.CancellationToken, year: 2021));
+        config.Indexers[0].Enabled = false;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => client.VerifyReleaseAsync("same-id", "Matrix", false, TestContext.Current.CancellationToken));
+        Assert.Single(http.Calls);
+    }
+
     private static TreasureMapsApiClient Client(Handler http, PluginConfiguration config) => new(http, new TreasureMapsListingCache(identity: () => "fixture"), NullLogger<TreasureMapsApiClient>.Instance, () => config);
     private static HttpResponseMessage Response(string body, string media = "application/xml") => new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, body.StartsWith('{') ? "application/json" : media) };
     private sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> callback) : HttpMessageHandler, IHttpClientFactory

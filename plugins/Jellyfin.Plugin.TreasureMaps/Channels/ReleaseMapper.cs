@@ -38,7 +38,7 @@ public static class ReleaseMapper
     public static ChannelItemInfo? ToChannelItem(Release release, double minRating, LanguagePreferences languages, XrelRating? xrel, out int languageRank)
     {
         languageRank = 0;
-        if (release is null || string.IsNullOrWhiteSpace(release.Guid))
+        if (release is null || string.IsNullOrWhiteSpace(release.Guid) || !ReleaseIdentity.HasConsistentMetadata(release))
         {
             return null;
         }
@@ -58,7 +58,7 @@ public static class ReleaseMapper
         languageRank = languageMatch.Rank;
         var movie = release.Movie;
         var tv = release.Tv;
-        var isTv = movie is null && tv is not null;
+        var isTv = ReleaseGrouper.KindOf(release) == "tv";
 
         var rating = ParseRating(movie?.Rating);
         if (minRating > 0 && rating.HasValue && rating.Value < minRating)
@@ -66,7 +66,7 @@ public static class ReleaseMapper
             return null;
         }
 
-        var title = movie?.Title;
+        var title = isTv ? tv?.Title : movie?.Title;
         if (string.IsNullOrWhiteSpace(title))
         {
             title = tv?.Title;
@@ -120,6 +120,8 @@ public static class ReleaseMapper
         // Tag with the release id + kind so favouriting the item in the normal UI can trigger a grab.
         item.ProviderIds["TreasureMaps"] = release.Guid;
         item.ProviderIds["TreasureMapsKind"] = isTv ? "tv" : "movie";
+        item.ProviderIds["EvolutionReleaseName"] = release.Title;
+        item.ProviderIds["EvolutionIdentity"] = ReleaseGrouper.KeyOf(release);
         item.ProviderIds["TreasureMapsLanguages"] = string.Join(",", releaseLanguages.Select(LanguageMatcher.Normalize).Where(x => !string.IsNullOrEmpty(x)).Distinct());
         if (!string.IsNullOrWhiteSpace(release.IndexerName)) { item.ProviderIds["EvolutionIndexer"] = release.IndexerName; }
 

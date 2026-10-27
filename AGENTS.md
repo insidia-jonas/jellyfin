@@ -585,3 +585,30 @@ a `TreasureMaps/Test` + `TreasureMaps/Releases/{guid}/Grab` API, and unit tests.
 - Local subtitle sync uses pinned ffsubsync 0.4.29 in `/opt/jellyfin-subtitle-sync`. The installer flag `--install-subtitle-sync` is idempotent and also runs with `--install-missing`. Sync jobs share the durable, owner-scoped single-worker subtitle queue, cost zero, and keep originals. Validate speech correlation, cue count, file/track fingerprints and a 20-minute deadline before atomically saving a separate `Synchronisiert` SRT. A completed job refreshes media metadata. No billable calls or alignment jobs on browsing/polling.
 - Jellyfin public stream indexes may be renumbered after sidecars are added. External ffmpeg must map **internal stream type ordinals** (`0:a:n` / `0:s:n`), not public indexes. Sync API accepts only item/track IDs, rechecks user visibility/download permission and resolves paths server-side.
 - Fire TV 2.5.7/code37 shifts parsed text subtitle cues in 0.5-second steps, bounded ±120 seconds. Persist by server/user/item/source/track identity. Re-prepare at the current position while retaining pause/session state to invalidate decoded cues; briefly buffering is possible. Never shift audio/video time or claim support for burned-in subtitles. Async subtitle search rejects superseded language/item responses.
+
+### Indexer identity, loading and artwork (2026-10-27)
+
+- Evolution 1.4.2 / client script v24 / DataVersion 45 / category generation c7 replaces
+  legacy category image references under `/tmp/treasuremaps/posters-v2` with persistent
+  artwork. Old c5/c6 folder links are still accepted. Verify nested Trending category
+  images via HTTP, not merely the presence of `ImageTags` in DTOs.
+- A real provider error assigned Other.2012 to Other Mommy (2026), including its IMDb
+  and TMDb IDs. Reject contradictory filename/metadata years before grouping, release
+  selection and every grab. No unmatched movie, season or episode may fall back to the
+  complete unfiltered search response. Similar names and conflicting known IDs are not
+  interchangeable. SAB job names retain the original scene name; UI titles stay separate.
+- Grab verifies an exact source-scoped release from a bounded, configuration-scoped
+  cache or re-fetches its exact GUID before requesting the NZB. UI sends itemId; server
+  resolves the visible item's expected identity/year. Failed legacy play-to-download
+  callbacks must not show a successful confirmation clip.
+- Spotlight preserves the feed identity instead of searching/replacing every poster.
+  Metadata warms asynchronously. Single-provider requests are bounded to eight seconds;
+  series browsing has a ten-second budget, conditional pagination and targeted season/
+  episode queries instead of per-season fan-out. Errors must remain retryable.
+- Web and the Fire TV WebView show loading/error/retry states and explicit release
+  selection. `TreasureMaps/Playback/{id}` checks user visibility, exact IDs, years and
+  actual local files; it never treats a channel card/NZB as a stream. Existing movies
+  resume through Jellyfin's playback manager; series open the local episode selector.
+- Regression coverage: provider's Other.2012/2026 mismatch, conflicting IDs/remakes,
+  stale file identity, source changes, loading deadlines, release names/item binding,
+  Play without implicit downloads, and resuming only a verified local item.
